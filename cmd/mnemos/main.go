@@ -182,21 +182,72 @@ func handleQuery(args []string, f Flags) {
 			return NewSystemError(err, "query engine failed")
 		}
 
-		response := map[string]any{
-			"answer":         answer.AnswerText,
-			"claims":         answer.Claims,
-			"contradictions": answer.Contradictions,
-			"timeline":       answer.TimelineEventIDs,
+		if f.Human {
+			printHumanReadableAnswer(question, answer)
+		} else {
+			response := map[string]any{
+				"answer":         answer.AnswerText,
+				"claims":         answer.Claims,
+				"contradictions": answer.Contradictions,
+				"timeline":       answer.TimelineEventIDs,
+			}
+			encoded, err := json.MarshalIndent(response, "", "  ")
+			if err != nil {
+				return NewSystemError(err, "failed to encode response")
+			}
+			fmt.Println(string(encoded))
 		}
-		encoded, err := json.MarshalIndent(response, "", "  ")
-		if err != nil {
-			return NewSystemError(err, "failed to encode response")
-		}
-
-		fmt.Println(string(encoded))
 		return nil
 	})
 	exitWithMnemosError(f.Verbose, err)
+}
+
+func printHumanReadableAnswer(question string, answer domain.Answer) {
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Printf("  Question: %s\n", question)
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println("")
+
+	if answer.AnswerText != "" && answer.AnswerText != "No ingested events yet." {
+		fmt.Printf("  %s\n\n", answer.AnswerText)
+	}
+
+	if len(answer.Claims) > 0 {
+		fmt.Println("  Evidence:")
+		for i, claim := range answer.Claims {
+			typeLabel := "Fact"
+			switch claim.Type {
+			case domain.ClaimTypeDecision:
+				typeLabel = "Decision"
+			case domain.ClaimTypeHypothesis:
+				typeLabel = "Hypothesis"
+			}
+
+			status := ""
+			if claim.Status == domain.ClaimStatusContested {
+				status = " ⚠️  CONFLICT"
+			}
+
+			fmt.Printf("  %d. [%s] %s%s\n", i+1, typeLabel, claim.Text, status)
+		}
+		fmt.Println("")
+	}
+
+	if len(answer.Contradictions) > 0 {
+		fmt.Println("  ⚠️  Contradictions detected:")
+		for i, rel := range answer.Contradictions {
+			if rel.Type == domain.RelationshipTypeContradicts {
+				fmt.Printf("  %d. %s contradicts %s\n", i+1, rel.FromClaimID, rel.ToClaimID)
+			}
+		}
+		fmt.Println("")
+	}
+
+	if len(answer.Claims) == 0 && answer.AnswerText == "No ingested events yet." {
+		fmt.Println("  No knowledge found yet.")
+		fmt.Println("")
+		fmt.Println("  Tip: Run 'mnemos process --text <your text>' to add knowledge")
+	}
 }
 
 func handleExtract(args []string, f Flags) {
@@ -377,7 +428,8 @@ func handleProcess(args []string, f Flags) {
 			eventIDs = append(eventIDs, event.ID)
 		}
 
-		fmt.Printf("run_id=%s input=%s events=%d claims=%d relationships=%d event_ids=%s db=%s\n", job.ID(), input.ID, len(events), len(claims), len(rels), strings.Join(eventIDs, ","), defaultDBPath)
+		fmt.Printf("Session: %s\n", job.ID())
+		fmt.Printf("Processed: %d events → %d claims\n", len(events), len(claims))
 
 		printExtractionSummary(claims, rels)
 		if len(claims) > 0 {
@@ -477,11 +529,16 @@ func printUsage() {
 	fmt.Println("  mnemos relate [event-id ...]")
 	fmt.Println("  mnemos process <path>")
 	fmt.Println("  mnemos process --text <content>")
-	fmt.Println("  mnemos query [--run <run-id>] <question>")
+	fmt.Println("  mnemos query [--run <run-id>] [--human] <question>")
 	fmt.Println("")
 	fmt.Println("Flags:")
 	fmt.Println("  -h, --help     show this help message")
-	fmt.Println("  -v, --verbose   show detailed error output")
+	fmt.Println("  -v, --verbose  show detailed error output")
+	fmt.Println("  --human        human-readable output (default: JSON)")
+	fmt.Println("")
+	fmt.Println("Quick Start:")
+	fmt.Println("  mnemos process --text \"Your text here\"")
+	fmt.Println("  mnemos query --human \"Your question\"")
 }
 
 func parseQueryArgs(args []string) (string, string, error) {

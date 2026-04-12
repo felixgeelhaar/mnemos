@@ -1,165 +1,159 @@
 # Mnemos — Product Requirements Document (PRD)
 
-# 1\. Overview
+## 1. Overview
 
-Mnemos transforms arbitrary inputs into structured, evolving, evidence-backed knowledge. It enables users to understand what is true and why.
+Mnemos transforms arbitrary inputs into structured, evolving, evidence-backed knowledge. It enables users to understand what is true and why—eliminating AI hallucination through traceable claims.
 
-# 2\. Problem Statement
+## 2. Problem Statement
 
-## 2.1 Fragmented Knowledge
+### 2.1 The Hallucination Problem
 
-Information is spread across disparate sources such as documents, chats, logs, and spreadsheets, leading to a lack of unified understanding.
+AI systems are becoming decision-makers, but they forget context, invent facts, and contradict themselves. Without a system of truth, AI cannot be reliable.
 
-## 2.2 Loss of Context
+**The cost is real:**
+- $67.4B annual cost of AI hallucination (2026)
+- 51% of enterprise AI responses contain fabrications on RAG data
+- 52% of organizations report significant negative consequences from AI inaccuracies
+- 62% remain in "Pilot Purgatory" because they can't guarantee reliability
 
-Critical reasoning, assumptions, and historical context are often lost when decisions are made.
+**The root cause:** RAG alone reduces hallucination by 40-71%, but RAG on ungoverned data = 52% fabrication rate. The problem isn't the model—it's the data layer.
 
-## 2.3 Conflicting Information
+### 2.2 Knowledge Decay
 
-Different sources often contradict each other, creating uncertainty and making reconciliation difficult.
+- **Fragmented:** Scattered across siloed tools, documents, and message threads
+- **Contradictory:** No version control to know which information is current
+- **Ungrounded:** Essential context, evidence, and history constantly lost
 
-## 2.4 AI Unreliability
+## 3. Strategic Vision
 
-Current AI systems frequently hallucinate, lack persistent memory, and cannot explain their reasoning.
+**Mnemos is to knowledge what Git is to code.**
 
-# 3\. User Personas
+- versioned
+- traceable
+- auditable
+- collaborative
+- evolving
 
-## 3.1 Primary Users
+## 4. Phased Roadmap
 
-1. AI Engineers  
-2. Knowledge Workers  
-3. Product Teams
+### Phase 1: Developer Primitive (CURRENT) — v0.1
 
-## 3.2 Secondary Users
+**Goal:** Establish Mnemos as a local-first, open-source knowledge engine for AI agents and developer tooling.
 
-4. Founders / Executives  
-5. Analysts / Researchers
+**Target Users:** AI Engineers building RAG systems, developers needing persistent memory
 
-# 4\. Core Use Case (CRITICAL)
+**Deliverables:**
+- [x] CLI scaffold with ingestion for files and raw text
+- [x] SQLite-backed append-only event persistence
+- [x] Claim extraction with event-to-claim evidence mapping
+- [x] Relationship detection (supports/contradicts)
+- [x] CLI query interface with structured JSON output
+- [x] Workflow jobs with status transitions and structured logs
+- [x] SQLC-based typed data-access layer
+- [x] 68 eval test cases for extraction accuracy
+- [x] First-run experience and UX polish
+- [ ] LLM-powered extraction (future)
 
-*Scenario: "What happened to our investment?"*  
-**Inputs:** Meeting transcripts, documents, and metrics spreadsheets.  
-**Output:** A timeline of events, key decisions, claims (what was believed), contradictions (what changed), and supporting evidence.
+**Excluded:**
+- GUI / Web interface
+- Real-time streaming
+- Multi-modal inputs
+- Collaboration features
 
-# 5\. Product Vision
+**Success Metrics:**
+- Time-to-value < 5 minutes
+- ≥70% claim extraction precision on eval dataset
+- <20% false positive rate on contradiction detection
 
-Mnemos turns any input into structured, evolving knowledge that can be queried and trusted over time.
+---
 
-# 6\. Desired Outcomes
+### Phase 2: Team Knowledge Engine — v0.2
 
-## 6.1 Primary Outcome
+**Goal:** Expand to auditable, traceable institutional memory for knowledge workers and product teams.
 
-Users can reliably answer: "What is true and why?"
+**Target Users:** Knowledge workers, product teams with decision debt
 
-## 6.2 Secondary Outcomes
+**Deliverables:**
+- [ ] Web interface for non-technical users
+- [ ] Human-readable query output mode
+- [ ] Team collaboration features (shared knowledge bases)
+- [ ] Document ingestion from cloud sources (Google Drive, Notion, Confluence)
+- [ ] Decision tracking with status workflows
+- [ ] Evidence review and approval UI
+- [ ] API for programmatic access
 
-6. Understand how knowledge evolved  
-7. Identify contradictions  
-8. Trace decisions back to evidence  
-9. Build trust in system outputs
+**Success Metrics:**
+- Non-technical users can query without JSON knowledge
+- Team knowledge retention across project lifecycles
+- Reduction in "when did we decide X?" questions
 
-# 7\. Solution Architecture
+---
 
-**Core Pipeline:** Inputs → Events → Claims → Relationships → Truth
+### Phase 3: Cognitive Infrastructure — v1.0
 
-## 7.1 Pipeline Stages
+**Goal:** Evolve into backend standard for complex decision systems and enterprise AI.
 
-10. **Inputs:** Raw data (docs, logs, etc.)  
-11. **Events:** Normalized units of information  
-12. **Claims:** Extracted knowledge and facts  
-13. **Relationships:** Detection of support or contradiction  
-14. **Truth:** Evolving understanding over time
+**Target Users:** Enterprise AI systems, decision automation platforms
 
-# 8\. Core Capabilities
+**Deliverables:**
+- [ ] GraphRAG integration for multi-hop queries
+- [ ] Embeddings for semantic search
+- [ ] Multi-agent pipeline orchestration
+- [ ] Governance and bias detection
+- [ ] Enterprise integrations (Slack, Teams, Jira)
+- [ ] Compliance and audit trails
 
-## 8.1 Input Ingestion
+## 5. Core Use Cases
 
-Support for files (TXT, MD, JSON, CSV), folders, and raw text input.
+### Use Case 1: AI Engineer (Phase 1)
 
-## 8.2 Parsing
+**Scenario:** "Build a RAG system that doesn't hallucinate"
 
-Normalization of various inputs into discrete events.
+**Inputs:** Technical docs, architecture decisions, meeting notes
+**Output:** Evidence-backed claims with contradiction detection
+**Tool:** CLI, programmatic API
 
-## 8.3 Event Store
+### Use Case 2: Product Team (Phase 2)
 
-An append-only source of truth for all processed information.
+**Scenario:** "What decisions were made about feature X and why?"
 
-## 8.4 Claim Extraction
+**Inputs:** PRDs, meeting notes, Slack threads, metrics
+**Output:** Timeline of decisions with evidence and contradictions
+**Tool:** Web interface, natural language queries
 
-Automated extraction of facts, hypotheses, and decisions.
+### Use Case 3: Enterprise AI (Phase 3)
 
-## 8.5 Relationship Detection
+**Scenario:** "Ground AI decisions in verified organizational knowledge"
 
-Identification of supporting and contradictory claims.
+**Inputs:** All organizational data sources
+**Output:** Trusted, auditable AI responses
+**Tool:** Backend API, SDK
 
-## 8.6 Query Interface
+## 6. Product Principles
 
-Natural language interface returning answers with claims, contradictions, and timelines.
+1. **Truth is derived, not stored** — All knowledge originates from raw inputs
+2. **Time matters** — History preserved, knowledge evolves
+3. **Contradictions are signals** — Conflict is insight, not error
+4. **Systems must explain themselves** — Every answer includes evidence
 
-# 9\. MVP Scope
+## 7. Non-Goals
 
-## 9.1 Included
+- Workflow automation and agent orchestration
+- Collaboration features in Phase 1
+- Real-time streaming
+- Multi-modal inputs (Phase 3)
 
-15. Input ingestion (files \+ text)  
-16. Parsing (TXT, JSON, CSV)  
-17. Event store and claim extraction  
-18. Relationship detection  
-19. CLI-based query interface
+## 8. Open Questions
 
-## 9.2 Excluded
+- [ ] What is the threshold for acceptable claim accuracy?
+- [ ] How should contradiction detection be tuned per domain?
+- [ ] When to introduce governance vs. let knowledge evolve organically?
+- [ ] What embedding model balances speed vs. accuracy?
 
-20. Graphical User Interface (UI)  
-21. Real-time ingestion and governance  
-22. Multi-modal inputs (images, slides)
+## 9. Definition of Success
 
-# 10\. Success Metrics
-
-23. Time-to-value \< 5 minutes  
-24. ≥70% of queries return structured claims  
-25. Contradictions surfaced in all complex queries  
-26. Users prefer output over standard RAG systems
-
-# 11\. Product Bets
-
-27. **Inputs → Knowledge:** Users want structured understanding from arbitrary inputs.
-
-Users want to provide any input and get structured understanding.
-
-28. **Claims vs Docs:** Users prefer interacting with claims over raw documents.
-
-Users prefer claims over raw documents.
-
-29. **Conflict vs Trust:** Exposing conflict increases overall system trust.
-
-Users trust systems that expose conflict.
-
-30. **Evidence vs RAG:** Grounded, evidence-backed answers outperform RAG.
-
-Users prefer grounded answers.
-
-# 12\. Risks and Constraints
-
-## 12.1 Risks
-
-31. Low-quality claim extraction or false contradictions  
-32. Poor query relevance or perceived lack of differentiation from RAG
-
-## 12.2 Constraints
-
-33. Local-first architecture with simple setup  
-34. Minimal dependencies and no heavy infrastructure
-
-# 13\. Non-Goals
-
-35. Workflow automation and agent orchestration  
-36. Collaboration features and real-time streaming
-
-# 14\. Open Questions
-
-37. What is the threshold for acceptable claim accuracy?  
-38. How should contradiction detection be tuned?  
-39. When is the appropriate time to introduce governance?
-
-# 15\. Definition of Success
-
-Mnemos is successful when users can answer complex questions across messy inputs, answers are trusted due to evidence, and the system feels fundamentally superior to search or RAG.  
+Mnemos is successful when:
+- Users can answer "What is true and why?"
+- Answers are trusted due to evidence backing
+- The system feels fundamentally superior to search or RAG
+- AI outputs are grounded in verified knowledge

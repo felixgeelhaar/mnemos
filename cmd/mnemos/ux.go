@@ -93,7 +93,7 @@ func formatHint(cmd string) string {
 		"ingest":    "Tip: After ingest, run 'mnemos extract <event-id>' to extract claims",
 		"extract":   "Tip: After extract, run 'mnemos relate' to detect relationships",
 		"relate":    "Tip: After relate, run 'mnemos query <question>' to get answers",
-		"process":   "Tip: Run 'mnemos query --run <run-id> <question>' to query this run",
+		"process":   "Tip: Run 'mnemos query --run <session-id> <question>' to query this session",
 		"query":     "Tip: Use 'mnemos process --text <text>' to add more knowledge",
 		"no_claims": "Tip: Try a longer text with more complete sentences",
 		"need_more": "Tip: Need at least 2 claims to detect contradictions",

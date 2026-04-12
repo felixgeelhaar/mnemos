@@ -5,6 +5,7 @@ import "strings"
 type Flags struct {
 	Help    bool
 	Verbose bool
+	Human   bool
 }
 
 func ParseFlags(args []string) (Flags, []string) {
@@ -17,6 +18,8 @@ func ParseFlags(args []string) (Flags, []string) {
 			f.Help = true
 		case "-v", "--verbose":
 			f.Verbose = true
+		case "--human", "-o", "text":
+			f.Human = true
 		default:
 			filtered = append(filtered, arg)
 		}

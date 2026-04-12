@@ -1,45 +1,71 @@
-# Mnemos Project Roadmap
+# Mnemos Roadmap
 
 *Core Principle: Validate each phase before expanding.*
 
-## Phase 0: Data Ingestion
+---
 
-* Goal: Efficiently ingest and store raw data from diverse sources.
+## Phase 1: Developer Primitive (CURRENT)
 
-## Phase 1: Knowledge Extraction
+**Status:** In Progress (v0.1)
+**Goal:** Establish Mnemos as a local-first, open-source knowledge engine for AI agents and developer tooling.
 
-* Goal: Transform raw data into structured claims and granular knowledge units.
+### Milestones
 
-## Phase 2: Semantic Relationships
+- [x] Core domain model (Event, Claim, Relationship)
+- [x] Multi-format input ingestion (TXT, MD, JSON, CSV, raw text)
+- [x] Append-only SQLite event store
+- [x] Claim extraction engine with evidence mapping
+- [x] Relationship detection (supports/contradicts)
+- [x] CLI query interface
+- [x] Workflow orchestration with structured logs
+- [x] SQLC typed data access
+- [x] 68 eval test cases
+- [x] First-run UX polish
+- [ ] LLM-powered extraction
+- [ ] Embeddings for semantic search
 
-* Goal: Map connections between claims to identify truth conflicts and logic gaps.
+---
 
-## Phase 3: Intelligent Querying
+## Phase 2: Team Knowledge Engine
 
-* Goal: Enable complex natural language questions backed by verifiable data.
+**Status:** Planned (v0.2)
+**Goal:** Expand to auditable, traceable institutional memory for knowledge workers.
 
-## Phase 4: Open Source Strategy
+### Milestones
 
-* Goal: Refine developer experience to drive community usability and adoption.
+- [ ] Web interface for non-technical users
+- [ ] Human-readable query output mode
+- [ ] Team collaboration (shared knowledge bases)
+- [ ] Cloud document ingestion (Drive, Notion, Confluence)
+- [ ] Decision tracking with status workflows
+- [ ] Evidence review and approval UI
+- [ ] Programmatic REST API
 
-## Phase 5: Market Adoption
+---
 
-* Goal: Pilot real-world usage scenarios with enterprise partners.
+## Phase 3: Cognitive Infrastructure
 
-## Phase 6: Multi-modal Support
+**Status:** Future (v1.0)
+**Goal:** Backend standard for enterprise AI and decision systems.
 
-* Goal: Extend analysis to images, presentation slides, and complex spreadsheets.
+### Milestones
 
-## Phase 7: Governance & Ethics
+- [ ] GraphRAG integration (multi-hop queries)
+- [ ] Semantic search with embeddings
+- [ ] Multi-agent pipeline orchestration
+- [ ] Governance and bias detection
+- [ ] Enterprise integrations (Slack, Teams, Jira)
+- [ ] Compliance and audit trails
 
-* Goal: Implement frameworks to improve truth quality and bias detection.
+---
 
-## Phase 8: Ecosystem Integrations
+## Development Principles
 
-* Goal: Expand as a core platform through API and third-party integrations.
+1. **Validate before scaling** — Each phase must prove value before expanding
+2. **Local-first** — Data stays on user's machine until explicitly shared
+3. **Evidence-backed** — Every claim traces to source material
+4. **No magic** — Explicit over implicit; simple over complex
 
-**Development Guardrails:**
+## Contributing
 
-* Avoid overengineering by focusing on core utility first.  
-* Validate architectural assumptions before scaling.
-
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development guidelines.

@@ -109,9 +109,18 @@
       "estimate": "",
       "depends_on": [],
       "feature_id": "sqlc-migration-phase-2"
+    },
+    {
+      "id": "task-one-step-process-command",
+      "title": "Implement One-Step Process Command",
+      "description": "Implement the feature: One-Step Process Command. Add a CLI `process` command that runs ingest, extract, and relate in one workflow for either file input or raw text, then prints IDs/counts so users can immediately run query without manual event ID lookups.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "one-step-process-command"
     }
   ],
   "approval_status": "approved",
   "created_at": "2026-04-12T11:03:09.397775+02:00",
-  "updated_at": "2026-04-12T14:50:33.545314+02:00"
+  "updated_at": "2026-04-12T15:01:56.780437+02:00"
 }

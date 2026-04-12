@@ -29,6 +29,7 @@ make build
 ./bin/mnemos ingest --text "Revenue decreased after launch"
 ./bin/mnemos extract <event-id> [event-id ...]
 ./bin/mnemos relate
+./bin/mnemos process --text "Revenue decreased after launch. Revenue did not decrease after launch."
 ./bin/mnemos query "What happened to our investment?"
 ```
 
@@ -36,6 +37,7 @@ Ingested events are persisted to `data/mnemos.db`.
 Compilation job state is persisted to `compilation_jobs` in the same database.
 
 Typical flow: `ingest -> extract -> relate -> query`.
+Shortcut flow: `process -> query`.
 
 ## Commands
 

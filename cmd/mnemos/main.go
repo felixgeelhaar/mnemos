@@ -35,6 +35,8 @@ func main() {
 		handleExtract(os.Args[2:])
 	case "relate":
 		handleRelate(os.Args[2:])
+	case "process":
+		handleProcess(os.Args[2:])
 	case "query":
 		handleQuery(os.Args[2:])
 	default:
@@ -272,6 +274,99 @@ func handleRelate(args []string) {
 	}
 }
 
+func handleProcess(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "process expects a file path or --text <content>")
+		os.Exit(1)
+	}
+
+	service := ingest.NewService()
+	normalizer := parser.NewNormalizer()
+
+	err := runJob("process", map[string]string{"args": strings.Join(args, " ")}, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
+		if err := job.SetStatus("loading", ""); err != nil {
+			return err
+		}
+
+		var (
+			input   domain.Input
+			content string
+			err     error
+		)
+
+		if args[0] == "--text" {
+			if len(args) < 2 {
+				return fmt.Errorf("process --text expects content")
+			}
+			input, content, err = service.IngestText(strings.Join(args[1:], " "), nil)
+		} else {
+			if len(args) != 1 {
+				return fmt.Errorf("process expects exactly one path argument")
+			}
+			input, content, err = service.IngestFile(args[0])
+		}
+		if err != nil {
+			return err
+		}
+
+		if err := job.SetStatus("extracting", ""); err != nil {
+			return err
+		}
+		events, err := normalizer.Normalize(input, content)
+		if err != nil {
+			return err
+		}
+
+		if err := job.SetStatus("saving", ""); err != nil {
+			return err
+		}
+		eventRepo := sqlite.NewEventRepository(db)
+		for _, event := range events {
+			if err := eventRepo.Append(event); err != nil {
+				return err
+			}
+		}
+
+		engine := extract.NewEngine()
+		claims, links, err := engine.Extract(events)
+		if err != nil {
+			return err
+		}
+		claimRepo := sqlite.NewClaimRepository(db)
+		if err := claimRepo.Upsert(claims); err != nil {
+			return err
+		}
+		if err := claimRepo.UpsertEvidence(links); err != nil {
+			return err
+		}
+
+		if err := job.SetStatus("relating", ""); err != nil {
+			return err
+		}
+		relEngine := relate.NewEngine()
+		rels, err := relEngine.Detect(claims)
+		if err != nil {
+			return err
+		}
+		relRepo := sqlite.NewRelationshipRepository(db)
+		if err := relRepo.Upsert(rels); err != nil {
+			return err
+		}
+
+		eventIDs := make([]string, 0, len(events))
+		for _, event := range events {
+			eventIDs = append(eventIDs, event.ID)
+		}
+
+		fmt.Printf("input=%s events=%d claims=%d relationships=%d event_ids=%s db=%s\n", input.ID, len(events), len(claims), len(rels), strings.Join(eventIDs, ","), defaultDBPath)
+		return nil
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "process job error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
 func printUsage() {
 	fmt.Println("Mnemos CLI")
 	fmt.Println("")
@@ -280,6 +375,8 @@ func printUsage() {
 	fmt.Println("  mnemos ingest --text <content>")
 	fmt.Println("  mnemos extract <event-id> [event-id ...]")
 	fmt.Println("  mnemos relate [event-id ...]")
+	fmt.Println("  mnemos process <path>")
+	fmt.Println("  mnemos process --text <content>")
 	fmt.Println("  mnemos query <question>")
 }
 

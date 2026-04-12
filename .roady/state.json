@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 30,
+  "version": 33,
   "task_states": {
     "task-append-only-event-store": {
       "status": "done",
@@ -79,6 +79,17 @@
       "completed_at": "2026-04-12T11:28:55.835793+02:00",
       "elapsed_minutes": 1
     },
+    "task-one-step-process-command": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Implemented CLI process command to run ingest+extract+relate in one job for file or raw text inputs, updated usage/docs, and validated via make check plus process/query smoke run"
+      ],
+      "started_at": "2026-04-12T15:02:05.176356+02:00",
+      "completed_at": "2026-04-12T15:03:17.291276+02:00",
+      "elapsed_minutes": 1
+    },
     "task-parser-and-event-normalization": {
       "status": "done",
       "path": "",
@@ -135,5 +146,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-04-12T14:53:46.434048+02:00"
+  "updated_at": "2026-04-12T15:03:17.291277+02:00"
 }

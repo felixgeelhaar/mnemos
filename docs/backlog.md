@@ -58,3 +58,9 @@ Adopt sqlc for SQLite data-access to replace handwritten SQL in repositories wit
 Complete sqlc adoption by migrating relationship and compilation job repositories to generated typed queries, reducing handwritten SQL and unifying data access patterns.
 
 ---
+
+## One-Step Process Command
+
+Add a CLI `process` command that runs ingest, extract, and relate in one workflow for either file input or raw text, then prints IDs/counts so users can immediately run query without manual event ID lookups.
+
+---

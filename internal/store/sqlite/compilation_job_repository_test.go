@@ -9,6 +9,7 @@ import (
 
 func TestCompilationJobRepositoryUpsertAndGetByID(t *testing.T) {
 	db := openTestDB(t)
+	//nolint:errcheck
 	defer db.Close()
 
 	repo := NewCompilationJobRepository(db)

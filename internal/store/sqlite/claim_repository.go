@@ -29,6 +29,7 @@ func (r ClaimRepository) Upsert(claims []domain.Claim) error {
 	if err != nil {
 		return fmt.Errorf("begin claim upsert tx: %w", err)
 	}
+	//nolint:errcheck
 	defer tx.Rollback()
 
 	qtx := r.q.WithTx(tx)
@@ -66,6 +67,7 @@ func (r ClaimRepository) UpsertEvidence(links []domain.ClaimEvidence) error {
 	if err != nil {
 		return fmt.Errorf("begin claim evidence tx: %w", err)
 	}
+	//nolint:errcheck
 	defer tx.Rollback()
 
 	qtx := r.q.WithTx(tx)
@@ -102,6 +104,7 @@ func (r ClaimRepository) ListByEventIDs(eventIDs []string) ([]domain.Claim, erro
 		args = append(args, id)
 	}
 
+	//nolint:gosec
 	query := fmt.Sprintf(`
 SELECT DISTINCT c.id, c.text, c.type, c.confidence, c.status, c.created_at
 FROM claims c
@@ -113,6 +116,7 @@ ORDER BY c.created_at ASC`, strings.Join(placeholders, ","))
 	if err != nil {
 		return nil, fmt.Errorf("list claims by event ids: %w", err)
 	}
+	//nolint:errcheck
 	defer rows.Close()
 
 	claims := make([]domain.Claim, 0)

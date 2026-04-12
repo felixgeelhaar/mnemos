@@ -1,0 +1,47 @@
+{
+  "schema_version": "1.0.0",
+  "entries": [
+    {
+      "fingerprint": "60ac202a2d4961ce667f1df1f4d1049efb362efab279c5e981bb7b64bc84f393",
+      "rule_id": "AI-050",
+      "file_path": "workflow/runner_test.go",
+      "severity": "medium",
+      "created_at": "2026-04-12T13:38:00.748406+00:00"
+    },
+    {
+      "fingerprint": "0c45993cb1736d3aabcdc4f8527d39e3336647c5927b4282c93fe474b4a4e49a",
+      "rule_id": "SEC-659",
+      "file_path": "extract/engine_test.go",
+      "severity": "high",
+      "created_at": "2026-04-12T13:38:00.748541+00:00"
+    },
+    {
+      "fingerprint": "4e485f7e3b84fe1731700b5dacd535dffaf53825b970fa84351913949221f4b1",
+      "rule_id": "SEC-659",
+      "file_path": "extract/engine_test.go",
+      "severity": "high",
+      "created_at": "2026-04-12T13:38:00.748543+00:00"
+    },
+    {
+      "fingerprint": "08c0d7541d2158f7163ff6fb98fd42c784f3d1558297f33992038e03ca546c7b",
+      "rule_id": "SEC-659",
+      "file_path": "extract/engine_test.go",
+      "severity": "high",
+      "created_at": "2026-04-12T13:38:00.748544+00:00"
+    },
+    {
+      "fingerprint": "3f012018e2bc557e269405f9901c5928a86a3d491ccde68f9c213c97ab0e2481",
+      "rule_id": "SEC-659",
+      "file_path": "parser/normalizer_test.go",
+      "severity": "high",
+      "created_at": "2026-04-12T13:38:00.748545+00:00"
+    },
+    {
+      "fingerprint": "5d15aa908a5043a03ddca27c3a8da29e624245ed8ed2e1d2a7b5f6147e2c59ad",
+      "rule_id": "SEC-659",
+      "file_path": "parser/normalizer_test.go",
+      "severity": "high",
+      "created_at": "2026-04-12T13:38:00.748546+00:00"
+    }
+  ]
+}

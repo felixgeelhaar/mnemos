@@ -14,6 +14,7 @@ func Open(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("database path is required")
 	}
 
+	//nolint:gosec
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("create database directory: %w", err)
 	}
@@ -113,6 +114,7 @@ func ensureEventsRunIDColumn(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("read events table info: %w", err)
 	}
+	//nolint:errcheck
 	defer rows.Close()
 
 	hasRunID := false

@@ -11,6 +11,7 @@ import (
 
 func TestEventRepositoryAppendAndGetByID(t *testing.T) {
 	db := openTestDB(t)
+	//nolint:errcheck
 	defer db.Close()
 
 	repo := NewEventRepository(db)
@@ -49,6 +50,7 @@ func TestEventRepositoryAppendAndGetByID(t *testing.T) {
 
 func TestEventRepositoryListByIDsOrder(t *testing.T) {
 	db := openTestDB(t)
+	//nolint:errcheck
 	defer db.Close()
 
 	repo := NewEventRepository(db)
@@ -78,6 +80,7 @@ func TestEventRepositoryListByIDsOrder(t *testing.T) {
 
 func TestEventRepositoryListAll(t *testing.T) {
 	db := openTestDB(t)
+	//nolint:errcheck
 	defer db.Close()
 
 	repo := NewEventRepository(db)
@@ -103,6 +106,7 @@ func TestEventRepositoryListAll(t *testing.T) {
 
 func TestEventRepositoryListByRunID(t *testing.T) {
 	db := openTestDB(t)
+	//nolint:errcheck
 	defer db.Close()
 
 	repo := NewEventRepository(db)

@@ -383,6 +383,7 @@ func persistProcessArtifacts(db *sql.DB, events []domain.Event, claims []domain.
 	if err != nil {
 		return fmt.Errorf("begin process transaction: %w", err)
 	}
+	//nolint:errcheck
 	defer tx.Rollback()
 
 	q := sqlcgen.New(tx)
@@ -499,6 +500,7 @@ func runJob(kind string, scope map[string]string, fn func(context.Context, *work
 	if err != nil {
 		return err
 	}
+	//nolint:errcheck
 	defer db.Close()
 
 	runner := workflow.NewRunner(sqlite.NewCompilationJobRepository(db))

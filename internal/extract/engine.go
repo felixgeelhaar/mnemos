@@ -108,15 +108,12 @@ func inferClaimType(text string) domain.ClaimType {
 
 func inferConfidence(text string, claimType domain.ClaimType) float64 {
 	lower := strings.ToLower(text)
-	value := 0.75
-
+	value := 0.8
 	switch claimType {
 	case domain.ClaimTypeDecision:
 		value = 0.88
 	case domain.ClaimTypeHypothesis:
 		value = 0.62
-	default:
-		value = 0.8
 	}
 
 	if hasAny(lower, []string{"approximately", "about", "around", "maybe", "might", "likely"}) {

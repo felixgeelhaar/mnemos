@@ -73,6 +73,7 @@ func (r EventRepository) ListByIDs(ids []string) ([]domain.Event, error) {
 		args = append(args, id)
 	}
 
+	//nolint:gosec
 	query := fmt.Sprintf(`
 SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at
 FROM events
@@ -82,6 +83,7 @@ WHERE id IN (%s)`, strings.Join(placeholders, ","))
 	if err != nil {
 		return nil, fmt.Errorf("query events by ids: %w", err)
 	}
+	//nolint:errcheck
 	defer rows.Close()
 
 	byID := map[string]domain.Event{}

@@ -33,6 +33,7 @@ func (s Service) IngestFile(path string) (domain.Input, string, error) {
 		return domain.Input{}, "", errors.New("path is required")
 	}
 
+	//nolint:gosec
 	contentBytes, err := os.ReadFile(path)
 	if err != nil {
 		return domain.Input{}, "", fmt.Errorf("read input file: %w", err)

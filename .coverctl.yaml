@@ -1,0 +1,46 @@
+version: 1
+language: go
+policy:
+  default:
+    min: 30
+  domains:
+    - name: cmd
+      match:
+        - ./cmd/...
+      min: 0
+    - name: domain
+      match:
+        - ./internal/domain/...
+      min: 80
+    - name: extract
+      match:
+        - ./internal/extract/...
+      min: 80
+    - name: ingest
+      match:
+        - ./internal/ingest/...
+      min: 30
+    - name: parser
+      match:
+        - ./internal/parser/...
+      min: 60
+    - name: ports
+      match:
+        - ./internal/ports/...
+      min: 0
+    - name: query
+      match:
+        - ./internal/query/...
+      min: 60
+    - name: relate
+      match:
+        - ./internal/relate/...
+      min: 60
+    - name: store
+      match:
+        - ./internal/store/...
+      min: 40
+    - name: workflow
+      match:
+        - ./internal/workflow/...
+      min: 60

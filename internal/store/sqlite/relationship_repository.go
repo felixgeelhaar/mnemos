@@ -28,6 +28,7 @@ func (r RelationshipRepository) Upsert(relationships []domain.Relationship) erro
 	if err != nil {
 		return fmt.Errorf("begin relationship upsert tx: %w", err)
 	}
+	//nolint:errcheck
 	defer tx.Rollback()
 
 	qtx := r.q.WithTx(tx)

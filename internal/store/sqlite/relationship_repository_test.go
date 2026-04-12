@@ -9,6 +9,7 @@ import (
 
 func TestRelationshipRepositoryUpsertAndListByClaim(t *testing.T) {
 	db := openTestDB(t)
+	//nolint:errcheck
 	defer db.Close()
 
 	claimRepo := NewClaimRepository(db)

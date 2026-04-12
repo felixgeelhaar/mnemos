@@ -1,0 +1,23 @@
+version: 2
+
+run:
+  timeout: 2m
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - gosec
+    - staticcheck
+    - ineffassign
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+
+issues:
+  exclude-rules:
+    - linters:
+        - gosec
+      text: "G201|G304|G301"
+      severity: "suppress"

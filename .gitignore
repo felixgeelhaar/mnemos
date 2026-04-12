@@ -9,6 +9,7 @@ data/ingestion/*
 
 # Build artifacts
 bin/
+dist/
 
 # Coverage and test outputs
 *.out

@@ -167,6 +167,8 @@ internal/
 | `make build` | Build CLI binary |
 | `make install` | Install `mnemos` and `mnemos-mcp` |
 | `make test` | Run tests (includes 78 eval cases) |
+| `make release-check` | Validate GoReleaser config |
+| `make release-snapshot` | Build local GoReleaser archives without publishing |
 | `mnemos ingest <file>` | Ingest document |
 | `mnemos ingest --text <text>` | Ingest raw text |
 | `mnemos extract <event-id>...` | Extract claims from events |
@@ -180,6 +182,12 @@ internal/
 ## Contributing
 
 Contributions welcome. See [PRD.md](./PRD.md) for product direction and [TDD.md](./TDD.md) for technical design.
+
+## Releases
+
+- Tagged releases are published with GoReleaser via `.github/workflows/release.yml`
+- Validate config locally with `make release-check`
+- Build local release archives with `make release-snapshot`
 
 ## License
 

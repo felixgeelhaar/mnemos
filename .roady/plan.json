@@ -100,9 +100,18 @@
       "estimate": "",
       "depends_on": [],
       "feature_id": "sqlc-typed-data-access"
+    },
+    {
+      "id": "task-sqlc-migration-phase-2",
+      "title": "Implement SQLC Migration Phase 2",
+      "description": "Implement the feature: SQLC Migration Phase 2. Complete sqlc adoption by migrating relationship and compilation job repositories to generated typed queries, reducing handwritten SQL and unifying data access patterns.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "sqlc-migration-phase-2"
     }
   ],
   "approval_status": "approved",
   "created_at": "2026-04-12T11:03:09.397775+02:00",
-  "updated_at": "2026-04-12T14:34:15.666929+02:00"
+  "updated_at": "2026-04-12T14:50:33.545314+02:00"
 }

@@ -2,9 +2,7 @@ version: "2"
 sql:
   - engine: "sqlite"
     schema: "sql/sqlite/schema.sql"
-    queries:
-      - "sql/sqlite/query/events.sql"
-      - "sql/sqlite/query/claims.sql"
+    queries: "sql/sqlite/query/*.sql"
     gen:
       go:
         package: "sqlcgen"

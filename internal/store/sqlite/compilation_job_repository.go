@@ -1,20 +1,23 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
 )
 
 type CompilationJobRepository struct {
 	db *sql.DB
+	q  *sqlcgen.Queries
 }
 
 func NewCompilationJobRepository(db *sql.DB) CompilationJobRepository {
-	return CompilationJobRepository{db: db}
+	return CompilationJobRepository{db: db, q: sqlcgen.New(db)}
 }
 
 func (r CompilationJobRepository) Upsert(job domain.CompilationJob) error {
@@ -23,27 +26,15 @@ func (r CompilationJobRepository) Upsert(job domain.CompilationJob) error {
 		return fmt.Errorf("marshal job scope: %w", err)
 	}
 
-	const upsert = `
-INSERT INTO compilation_jobs (id, kind, status, scope_json, started_at, updated_at, error)
-VALUES (?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(id) DO UPDATE SET
-	kind = excluded.kind,
-	status = excluded.status,
-	scope_json = excluded.scope_json,
-	started_at = excluded.started_at,
-	updated_at = excluded.updated_at,
-	error = excluded.error`
-
-	_, err = r.db.Exec(
-		upsert,
-		job.ID,
-		job.Kind,
-		job.Status,
-		string(scopeJSON),
-		job.StartedAt.UTC().Format(time.RFC3339Nano),
-		job.UpdatedAt.UTC().Format(time.RFC3339Nano),
-		job.Error,
-	)
+	err = r.q.UpsertCompilationJob(context.Background(), sqlcgen.UpsertCompilationJobParams{
+		ID:        job.ID,
+		Kind:      job.Kind,
+		Status:    job.Status,
+		ScopeJson: string(scopeJSON),
+		StartedAt: job.StartedAt.UTC().Format(time.RFC3339Nano),
+		UpdatedAt: job.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		Error:     job.Error,
+	})
 	if err != nil {
 		return fmt.Errorf("upsert compilation job %s: %w", job.ID, err)
 	}
@@ -52,38 +43,26 @@ ON CONFLICT(id) DO UPDATE SET
 }
 
 func (r CompilationJobRepository) GetByID(id string) (domain.CompilationJob, error) {
-	const query = `
-SELECT id, kind, status, scope_json, started_at, updated_at, error
-FROM compilation_jobs
-WHERE id = ?`
-
-	var (
-		job          domain.CompilationJob
-		scopeJSON    string
-		startedAtRaw string
-		updatedAtRaw string
-	)
-
-	if err := r.db.QueryRow(query, id).Scan(
-		&job.ID,
-		&job.Kind,
-		&job.Status,
-		&scopeJSON,
-		&startedAtRaw,
-		&updatedAtRaw,
-		&job.Error,
-	); err != nil {
+	row, err := r.q.GetCompilationJobByID(context.Background(), id)
+	if err != nil {
 		return domain.CompilationJob{}, fmt.Errorf("get compilation job %s: %w", id, err)
 	}
 
-	if err := json.Unmarshal([]byte(scopeJSON), &job.Scope); err != nil {
+	job := domain.CompilationJob{
+		ID:     row.ID,
+		Kind:   row.Kind,
+		Status: row.Status,
+		Error:  row.Error,
+	}
+
+	if err := json.Unmarshal([]byte(row.ScopeJson), &job.Scope); err != nil {
 		return domain.CompilationJob{}, fmt.Errorf("unmarshal job scope: %w", err)
 	}
-	startedAt, err := time.Parse(time.RFC3339Nano, startedAtRaw)
+	startedAt, err := time.Parse(time.RFC3339Nano, row.StartedAt)
 	if err != nil {
 		return domain.CompilationJob{}, fmt.Errorf("parse job started_at: %w", err)
 	}
-	updatedAt, err := time.Parse(time.RFC3339Nano, updatedAtRaw)
+	updatedAt, err := time.Parse(time.RFC3339Nano, row.UpdatedAt)
 	if err != nil {
 		return domain.CompilationJob{}, fmt.Errorf("parse job updated_at: %w", err)
 	}

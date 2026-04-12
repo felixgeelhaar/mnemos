@@ -46,5 +46,9 @@ features:
       title: SQLC Typed Data Access
       description: Adopt sqlc for SQLite data-access to replace handwritten SQL in repositories with generated, typed query methods; include schema/queries layout, generation command, and initial migration of core event and claim reads/writes.
       requirements: []
+    - id: sqlc-migration-phase-2
+      title: SQLC Migration Phase 2
+      description: Complete sqlc adoption by migrating relationship and compilation job repositories to generated typed queries, reducing handwritten SQL and unifying data access patterns.
+      requirements: []
 constraints: []
 version: 0.1.0

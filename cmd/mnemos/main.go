@@ -217,7 +217,11 @@ func handleExtract(args []string, f Flags) {
 			return NewSystemError(err, "database lookup failed")
 		}
 		if len(events) == 0 {
-			return NewNotFoundError("no events found for the provided IDs (%d given)", len(args))
+			return &MnemosError{
+				Code:    ExitNotFound,
+				Message: fmt.Sprintf("no events found for the provided IDs (%d given)", len(args)),
+				Hint:    "Tip: Run 'mnemos ingest <file>' or 'mnemos process --text <text>' first",
+			}
 		}
 
 		if err := job.SetStatus("extracting", ""); err != nil {
@@ -265,7 +269,11 @@ func handleRelate(args []string, f Flags) {
 			return NewSystemError(err, "database lookup failed")
 		}
 		if len(claims) < 2 {
-			return NewUserError("need at least 2 claims to detect relationships (found %d)", len(claims))
+			return &MnemosError{
+				Code:    ExitUsage,
+				Message: fmt.Sprintf("need at least 2 claims to detect relationships (found %d)", len(claims)),
+				Hint:    "Tip: Run 'mnemos ingest' followed by 'mnemos extract' to add more claims",
+			}
 		}
 
 		if err := job.SetStatus("relating", ""); err != nil {
@@ -370,6 +378,12 @@ func handleProcess(args []string, f Flags) {
 		}
 
 		fmt.Printf("run_id=%s input=%s events=%d claims=%d relationships=%d event_ids=%s db=%s\n", job.ID(), input.ID, len(events), len(claims), len(rels), strings.Join(eventIDs, ","), defaultDBPath)
+
+		printExtractionSummary(claims, rels)
+		if len(claims) > 0 {
+			printClaimPreview(claims, 3)
+		}
+
 		return nil
 	})
 	exitWithMnemosError(f.Verbose, err)
@@ -497,6 +511,12 @@ func parseQueryArgs(args []string) (string, string, error) {
 }
 
 func runJob(kind string, scope map[string]string, fn func(context.Context, *workflow.Job, *sql.DB) error) error {
+	if isFirstRun(defaultDBPath) && kind != "ingest" && kind != "process" {
+		printWelcome()
+		fmt.Println("  First run detected. Use 'process' or 'ingest' to add knowledge.")
+		printFirstRunHints()
+	}
+
 	db, err := sqlite.Open(defaultDBPath)
 	if err != nil {
 		return NewSystemError(err, "failed to open database at %q", defaultDBPath)

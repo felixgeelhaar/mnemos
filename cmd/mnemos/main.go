@@ -16,6 +16,7 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/query"
 	"github.com/felixgeelhaar/mnemos/internal/relate"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
+	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
 	"github.com/felixgeelhaar/mnemos/internal/workflow"
 )
 
@@ -299,7 +300,12 @@ func handleProcess(args []string) {
 	service := ingest.NewService()
 	normalizer := parser.NewNormalizer()
 
-	err := runJob("process", map[string]string{"args": strings.Join(args, " ")}, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
+	scope := map[string]string{"source": "file"}
+	if args[0] == "--text" {
+		scope = map[string]string{"source": "raw_text"}
+	}
+
+	err := runJob("process", scope, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -336,26 +342,9 @@ func handleProcess(args []string) {
 			events[i].RunID = job.ID()
 		}
 
-		if err := job.SetStatus("saving", ""); err != nil {
-			return err
-		}
-		eventRepo := sqlite.NewEventRepository(db)
-		for _, event := range events {
-			if err := eventRepo.Append(event); err != nil {
-				return err
-			}
-		}
-
 		engine := extract.NewEngine()
 		claims, links, err := engine.Extract(events)
 		if err != nil {
-			return err
-		}
-		claimRepo := sqlite.NewClaimRepository(db)
-		if err := claimRepo.Upsert(claims); err != nil {
-			return err
-		}
-		if err := claimRepo.UpsertEvidence(links); err != nil {
 			return err
 		}
 
@@ -367,8 +356,11 @@ func handleProcess(args []string) {
 		if err != nil {
 			return err
 		}
-		relRepo := sqlite.NewRelationshipRepository(db)
-		if err := relRepo.Upsert(rels); err != nil {
+
+		if err := job.SetStatus("saving", ""); err != nil {
+			return err
+		}
+		if err := persistProcessArtifacts(db, events, claims, links, rels); err != nil {
 			return err
 		}
 
@@ -384,6 +376,83 @@ func handleProcess(args []string) {
 		fmt.Fprintf(os.Stderr, "process job error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func persistProcessArtifacts(db *sql.DB, events []domain.Event, claims []domain.Claim, links []domain.ClaimEvidence, relationships []domain.Relationship) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin process transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	q := sqlcgen.New(tx)
+	ctx := context.Background()
+
+	for _, event := range events {
+		metadata, err := json.Marshal(event.Metadata)
+		if err != nil {
+			return fmt.Errorf("marshal event metadata: %w", err)
+		}
+		err = q.CreateEvent(ctx, sqlcgen.CreateEventParams{
+			ID:            event.ID,
+			RunID:         event.RunID,
+			SchemaVersion: event.SchemaVersion,
+			Content:       event.Content,
+			SourceInputID: event.SourceInputID,
+			Timestamp:     event.Timestamp.UTC().Format(time.RFC3339Nano),
+			MetadataJson:  string(metadata),
+			IngestedAt:    event.IngestedAt.UTC().Format(time.RFC3339Nano),
+		})
+		if err != nil {
+			return fmt.Errorf("insert event %s: %w", event.ID, err)
+		}
+	}
+
+	for _, claim := range claims {
+		if err := claim.Validate(); err != nil {
+			return fmt.Errorf("invalid claim %s: %w", claim.ID, err)
+		}
+		err = q.UpsertClaim(ctx, sqlcgen.UpsertClaimParams{
+			ID:         claim.ID,
+			Text:       claim.Text,
+			Type:       string(claim.Type),
+			Confidence: claim.Confidence,
+			Status:     string(claim.Status),
+			CreatedAt:  claim.CreatedAt.UTC().Format(time.RFC3339Nano),
+		})
+		if err != nil {
+			return fmt.Errorf("upsert claim %s: %w", claim.ID, err)
+		}
+	}
+
+	for _, link := range links {
+		if err := link.Validate(); err != nil {
+			return fmt.Errorf("invalid claim evidence: %w", err)
+		}
+		err = q.UpsertClaimEvidence(ctx, sqlcgen.UpsertClaimEvidenceParams{ClaimID: link.ClaimID, EventID: link.EventID})
+		if err != nil {
+			return fmt.Errorf("upsert claim evidence (%s,%s): %w", link.ClaimID, link.EventID, err)
+		}
+	}
+
+	for _, rel := range relationships {
+		err = q.UpsertRelationship(ctx, sqlcgen.UpsertRelationshipParams{
+			ID:          rel.ID,
+			Type:        string(rel.Type),
+			FromClaimID: rel.FromClaimID,
+			ToClaimID:   rel.ToClaimID,
+			CreatedAt:   rel.CreatedAt.UTC().Format(time.RFC3339Nano),
+		})
+		if err != nil {
+			return fmt.Errorf("upsert relationship %s: %w", rel.ID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit process transaction: %w", err)
+	}
+
+	return nil
 }
 
 func printUsage() {

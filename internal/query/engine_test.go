@@ -1,6 +1,7 @@
 package query
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -66,5 +67,11 @@ func TestAnswerIncludesClaimsAndContradictions(t *testing.T) {
 	}
 	if len(answer.TimelineEventIDs) == 0 {
 		t.Fatal("TimelineEventIDs should not be empty")
+	}
+	if !strings.Contains(answer.AnswerText, "strongest signal") {
+		t.Fatalf("AnswerText = %q, expected strongest signal narrative", answer.AnswerText)
+	}
+	if !strings.Contains(answer.AnswerText, "contested") {
+		t.Fatalf("AnswerText = %q, expected contradiction context", answer.AnswerText)
 	}
 }

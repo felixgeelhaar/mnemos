@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 27,
+  "version": 30,
   "task_states": {
     "task-append-only-event-store": {
       "status": "done",
@@ -101,6 +101,17 @@
       "completed_at": "2026-04-12T11:50:40.489501+02:00",
       "elapsed_minutes": 2
     },
+    "task-sqlc-migration-phase-2": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Completed sqlc phase 2 by adding relationship/compilation_jobs query definitions, regenerating sqlc output, and migrating RelationshipRepository and CompilationJobRepository to sqlc-generated typed queries; verified with make check"
+      ],
+      "started_at": "2026-04-12T14:50:50.391279+02:00",
+      "completed_at": "2026-04-12T14:53:46.434047+02:00",
+      "elapsed_minutes": 2
+    },
     "task-sqlc-typed-data-access": {
       "status": "done",
       "path": "",
@@ -124,5 +135,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-04-12T14:37:50.063803+02:00"
+  "updated_at": "2026-04-12T14:53:46.434048+02:00"
 }

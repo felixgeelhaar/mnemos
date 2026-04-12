@@ -52,3 +52,9 @@ Improve claim extraction quality by splitting event text into sentence-level can
 Adopt sqlc for SQLite data-access to replace handwritten SQL in repositories with generated, typed query methods; include schema/queries layout, generation command, and initial migration of core event and claim reads/writes.
 
 ---
+
+## SQLC Migration Phase 2
+
+Complete sqlc adoption by migrating relationship and compilation job repositories to generated typed queries, reducing handwritten SQL and unifying data access patterns.
+
+---

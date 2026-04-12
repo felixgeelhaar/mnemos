@@ -17,6 +17,7 @@ func TestEventRepositoryAppendAndGetByID(t *testing.T) {
 	now := time.Date(2026, 4, 12, 12, 30, 0, 0, time.UTC)
 	event := domain.Event{
 		ID:            "ev_1",
+		RunID:         "run_1",
 		SchemaVersion: "v1",
 		Content:       "Claim moved from active to contested",
 		SourceInputID: "in_1",
@@ -38,6 +39,9 @@ func TestEventRepositoryAppendAndGetByID(t *testing.T) {
 	if got.ID != event.ID {
 		t.Fatalf("GetByID() id = %q, want %q", got.ID, event.ID)
 	}
+	if got.RunID != event.RunID {
+		t.Fatalf("GetByID() run_id = %q, want %q", got.RunID, event.RunID)
+	}
 	if got.Metadata["chunk_kind"] != "text" {
 		t.Fatalf("GetByID() metadata chunk_kind = %q, want text", got.Metadata["chunk_kind"])
 	}
@@ -50,9 +54,9 @@ func TestEventRepositoryListByIDsOrder(t *testing.T) {
 	repo := NewEventRepository(db)
 	now := time.Now().UTC()
 	seed := []domain.Event{
-		{ID: "ev_a", SchemaVersion: "v1", Content: "a", SourceInputID: "in_1", Timestamp: now, IngestedAt: now, Metadata: map[string]string{}},
-		{ID: "ev_b", SchemaVersion: "v1", Content: "b", SourceInputID: "in_1", Timestamp: now, IngestedAt: now, Metadata: map[string]string{}},
-		{ID: "ev_c", SchemaVersion: "v1", Content: "c", SourceInputID: "in_1", Timestamp: now, IngestedAt: now, Metadata: map[string]string{}},
+		{ID: "ev_a", RunID: "run_a", SchemaVersion: "v1", Content: "a", SourceInputID: "in_1", Timestamp: now, IngestedAt: now, Metadata: map[string]string{}},
+		{ID: "ev_b", RunID: "run_b", SchemaVersion: "v1", Content: "b", SourceInputID: "in_1", Timestamp: now, IngestedAt: now, Metadata: map[string]string{}},
+		{ID: "ev_c", RunID: "run_a", SchemaVersion: "v1", Content: "c", SourceInputID: "in_1", Timestamp: now, IngestedAt: now, Metadata: map[string]string{}},
 	}
 	for _, event := range seed {
 		if err := repo.Append(event); err != nil {
@@ -79,8 +83,8 @@ func TestEventRepositoryListAll(t *testing.T) {
 	repo := NewEventRepository(db)
 	now := time.Now().UTC()
 	seed := []domain.Event{
-		{ID: "ev_1", SchemaVersion: "v1", Content: "one", SourceInputID: "in_1", Timestamp: now, IngestedAt: now, Metadata: map[string]string{}},
-		{ID: "ev_2", SchemaVersion: "v1", Content: "two", SourceInputID: "in_1", Timestamp: now.Add(time.Second), IngestedAt: now, Metadata: map[string]string{}},
+		{ID: "ev_1", RunID: "run_1", SchemaVersion: "v1", Content: "one", SourceInputID: "in_1", Timestamp: now, IngestedAt: now, Metadata: map[string]string{}},
+		{ID: "ev_2", RunID: "run_2", SchemaVersion: "v1", Content: "two", SourceInputID: "in_1", Timestamp: now.Add(time.Second), IngestedAt: now, Metadata: map[string]string{}},
 	}
 	for _, event := range seed {
 		if err := repo.Append(event); err != nil {
@@ -94,6 +98,35 @@ func TestEventRepositoryListAll(t *testing.T) {
 	}
 	if len(events) != 2 {
 		t.Fatalf("ListAll() len = %d, want 2", len(events))
+	}
+}
+
+func TestEventRepositoryListByRunID(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+
+	repo := NewEventRepository(db)
+	now := time.Now().UTC()
+	seed := []domain.Event{
+		{ID: "ev_1", RunID: "run_1", SchemaVersion: "v1", Content: "one", SourceInputID: "in_1", Timestamp: now, IngestedAt: now, Metadata: map[string]string{}},
+		{ID: "ev_2", RunID: "run_2", SchemaVersion: "v1", Content: "two", SourceInputID: "in_1", Timestamp: now.Add(time.Second), IngestedAt: now, Metadata: map[string]string{}},
+		{ID: "ev_3", RunID: "run_1", SchemaVersion: "v1", Content: "three", SourceInputID: "in_1", Timestamp: now.Add(2 * time.Second), IngestedAt: now, Metadata: map[string]string{}},
+	}
+	for _, event := range seed {
+		if err := repo.Append(event); err != nil {
+			t.Fatalf("Append() error = %v", err)
+		}
+	}
+
+	events, err := repo.ListByRunID("run_1")
+	if err != nil {
+		t.Fatalf("ListByRunID() error = %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("ListByRunID() len = %d, want 2", len(events))
+	}
+	if events[0].RunID != "run_1" || events[1].RunID != "run_1" {
+		t.Fatalf("ListByRunID() unexpected run ids: %q, %q", events[0].RunID, events[1].RunID)
 	}
 }
 

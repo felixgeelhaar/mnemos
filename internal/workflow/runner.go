@@ -39,7 +39,7 @@ func NewRunner(store jobStore) Runner {
 		MaxRetries: 2,
 		now:        time.Now,
 		nextID:     newJobID,
-		logger:     log.New(os.Stdout, "", 0),
+		logger:     log.New(os.Stderr, "", 0),
 	}
 }
 

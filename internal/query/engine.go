@@ -12,6 +12,7 @@ import (
 type eventLister interface {
 	ports.EventRepository
 	ListAll() ([]domain.Event, error)
+	ListByRunID(runID string) ([]domain.Event, error)
 }
 
 type Engine struct {
@@ -25,14 +26,31 @@ func NewEngine(events eventLister, claims ports.ClaimRepository, relationships p
 }
 
 func (e Engine) Answer(question string) (domain.Answer, error) {
-	q := strings.TrimSpace(question)
-	if q == "" {
-		return domain.Answer{}, fmt.Errorf("query question is required")
-	}
-
 	allEvents, err := e.events.ListAll()
 	if err != nil {
 		return domain.Answer{}, fmt.Errorf("load events for query: %w", err)
+	}
+	return e.answerWithEvents(question, allEvents)
+}
+
+func (e Engine) AnswerForRun(question, runID string) (domain.Answer, error) {
+	if strings.TrimSpace(runID) == "" {
+		return domain.Answer{}, fmt.Errorf("run id is required")
+	}
+	events, err := e.events.ListByRunID(runID)
+	if err != nil {
+		return domain.Answer{}, fmt.Errorf("load events for run: %w", err)
+	}
+	if len(events) == 0 {
+		return domain.Answer{AnswerText: fmt.Sprintf("No events found for run %q.", runID)}, nil
+	}
+	return e.answerWithEvents(question, events)
+}
+
+func (e Engine) answerWithEvents(question string, allEvents []domain.Event) (domain.Answer, error) {
+	q := strings.TrimSpace(question)
+	if q == "" {
+		return domain.Answer{}, fmt.Errorf("query question is required")
 	}
 	if len(allEvents) == 0 {
 		return domain.Answer{AnswerText: "No ingested events yet."}, nil

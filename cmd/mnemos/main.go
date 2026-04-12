@@ -77,6 +77,9 @@ func handleIngest(args []string) {
 			if err != nil {
 				return err
 			}
+			for i := range events {
+				events[i].RunID = job.ID()
+			}
 			if err := job.SetStatus("saving", ""); err != nil {
 				return err
 			}
@@ -86,7 +89,7 @@ func handleIngest(args []string) {
 					return err
 				}
 			}
-			fmt.Printf("input=%s type=%s format=%s bytes=%d events=%d db=%s source=%s\n", input.ID, input.Type, input.Format, len(content), len(events), defaultDBPath, input.Metadata["source"])
+			fmt.Printf("run_id=%s input=%s type=%s format=%s bytes=%d events=%d db=%s source=%s\n", job.ID(), input.ID, input.Type, input.Format, len(content), len(events), defaultDBPath, input.Metadata["source"])
 			return nil
 		})
 		if err != nil {
@@ -117,6 +120,9 @@ func handleIngest(args []string) {
 		if err != nil {
 			return err
 		}
+		for i := range events {
+			events[i].RunID = job.ID()
+		}
 		if err := job.SetStatus("saving", ""); err != nil {
 			return err
 		}
@@ -126,7 +132,7 @@ func handleIngest(args []string) {
 				return err
 			}
 		}
-		fmt.Printf("input=%s type=%s format=%s bytes=%d events=%d db=%s source=%s\n", input.ID, input.Type, input.Format, len(content), len(events), defaultDBPath, input.Metadata["source_path"])
+		fmt.Printf("run_id=%s input=%s type=%s format=%s bytes=%d events=%d db=%s source=%s\n", job.ID(), input.ID, input.Type, input.Format, len(content), len(events), defaultDBPath, input.Metadata["source_path"])
 		return nil
 	})
 	if err != nil {
@@ -136,14 +142,18 @@ func handleIngest(args []string) {
 }
 
 func handleQuery(args []string) {
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "query expects a question")
+	question, runID, err := parseQueryArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "query error: %v\n", err)
 		os.Exit(1)
 	}
 
-	question := strings.Join(args, " ")
+	scope := map[string]string{"question": question}
+	if runID != "" {
+		scope["run_id"] = runID
+	}
 
-	err := runJob("query", map[string]string{"question": question}, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
+	err = runJob("query", scope, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -155,7 +165,13 @@ func handleQuery(args []string) {
 		if err := job.SetStatus("querying", ""); err != nil {
 			return err
 		}
-		answer, err := engine.Answer(question)
+		var answer domain.Answer
+		var err error
+		if runID != "" {
+			answer, err = engine.AnswerForRun(question, runID)
+		} else {
+			answer, err = engine.Answer(question)
+		}
 		if err != nil {
 			return err
 		}
@@ -316,6 +332,9 @@ func handleProcess(args []string) {
 		if err != nil {
 			return err
 		}
+		for i := range events {
+			events[i].RunID = job.ID()
+		}
 
 		if err := job.SetStatus("saving", ""); err != nil {
 			return err
@@ -358,7 +377,7 @@ func handleProcess(args []string) {
 			eventIDs = append(eventIDs, event.ID)
 		}
 
-		fmt.Printf("input=%s events=%d claims=%d relationships=%d event_ids=%s db=%s\n", input.ID, len(events), len(claims), len(rels), strings.Join(eventIDs, ","), defaultDBPath)
+		fmt.Printf("run_id=%s input=%s events=%d claims=%d relationships=%d event_ids=%s db=%s\n", job.ID(), input.ID, len(events), len(claims), len(rels), strings.Join(eventIDs, ","), defaultDBPath)
 		return nil
 	})
 	if err != nil {
@@ -377,7 +396,33 @@ func printUsage() {
 	fmt.Println("  mnemos relate [event-id ...]")
 	fmt.Println("  mnemos process <path>")
 	fmt.Println("  mnemos process --text <content>")
-	fmt.Println("  mnemos query <question>")
+	fmt.Println("  mnemos query [--run <run-id>] <question>")
+}
+
+func parseQueryArgs(args []string) (string, string, error) {
+	if len(args) == 0 {
+		return "", "", fmt.Errorf("query expects a question")
+	}
+
+	runID := ""
+	questionArgs := args
+	if args[0] == "--run" {
+		if len(args) < 3 {
+			return "", "", fmt.Errorf("query --run expects <run-id> and question")
+		}
+		runID = strings.TrimSpace(args[1])
+		if runID == "" {
+			return "", "", fmt.Errorf("query --run requires a non-empty run id")
+		}
+		questionArgs = args[2:]
+	}
+
+	question := strings.TrimSpace(strings.Join(questionArgs, " "))
+	if question == "" {
+		return "", "", fmt.Errorf("query expects a question")
+	}
+
+	return question, runID, nil
 }
 
 func runJob(kind string, scope map[string]string, fn func(context.Context, *workflow.Job, *sql.DB) error) error {

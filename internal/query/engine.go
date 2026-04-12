@@ -54,7 +54,7 @@ func (e Engine) Answer(question string) (domain.Answer, error) {
 		return domain.Answer{}, fmt.Errorf("load contradictions for query: %w", err)
 	}
 
-	answerText := buildAnswerText(q, len(topEvents), len(claims), len(contradictions))
+	answerText := buildAnswerText(q, claims, contradictions, len(topEvents))
 	return domain.Answer{
 		AnswerText:       answerText,
 		Claims:           claims,
@@ -122,14 +122,26 @@ func collectContradictions(repo ports.RelationshipRepository, claims []domain.Cl
 	return result, nil
 }
 
-func buildAnswerText(question string, eventCount, claimCount, contradictionCount int) string {
-	return fmt.Sprintf(
-		"For %q, I found %d relevant events, %d related claims, and %d contradictions.",
-		question,
-		eventCount,
-		claimCount,
-		contradictionCount,
-	)
+func buildAnswerText(question string, claims []domain.Claim, contradictions []domain.Relationship, eventCount int) string {
+	if len(claims) == 0 {
+		return fmt.Sprintf("I could not find claims yet for %q. Try running extract/relate first.", question)
+	}
+
+	parts := []string{}
+	parts = append(parts, fmt.Sprintf("For %q, the strongest signal is: %s.", question, claims[0].Text))
+
+	if len(claims) > 1 {
+		parts = append(parts, fmt.Sprintf("Other relevant claim: %s.", claims[1].Text))
+	}
+
+	if len(contradictions) > 0 {
+		parts = append(parts, fmt.Sprintf("I also found %d contradiction(s), so this topic is contested.", len(contradictions)))
+	} else {
+		parts = append(parts, "No contradictions were found in the current claim set.")
+	}
+
+	parts = append(parts, fmt.Sprintf("Context used %d event(s) and %d claim(s).", eventCount, len(claims)))
+	return strings.Join(parts, " ")
 }
 
 func tokenSet(text string) map[string]struct{} {

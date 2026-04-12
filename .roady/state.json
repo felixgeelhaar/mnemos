@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 21,
+  "version": 27,
   "task_states": {
     "task-append-only-event-store": {
       "status": "done",
@@ -23,6 +23,17 @@
       "started_at": "2026-04-12T11:42:36.912208+02:00",
       "completed_at": "2026-04-12T11:45:12.031532+02:00",
       "elapsed_minutes": 2
+    },
+    "task-claim-extraction-heuristics-v2": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Implemented claim extraction heuristics v2 with sentence-level candidate splitting, global deduplication, signal-based type classification, dynamic confidence scoring, contested-claim status marking for opposite-polarity overlapping claims, and added extraction tests for splitting/deduplication/contested behavior; verified with make check"
+      ],
+      "started_at": "2026-04-12T13:32:36.595368+02:00",
+      "completed_at": "2026-04-12T13:35:47.092813+02:00",
+      "elapsed_minutes": 3
     },
     "task-cli-query-interface": {
       "status": "done",
@@ -90,6 +101,17 @@
       "completed_at": "2026-04-12T11:50:40.489501+02:00",
       "elapsed_minutes": 2
     },
+    "task-sqlc-typed-data-access": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Added sqlc configuration and SQL source files (schema + events/claims queries), generated typed code in internal/store/sqlite/sqlcgen, migrated core EventRepository and ClaimRepository methods to sqlc-generated queries, added make sqlc command and docs, and verified with make check + ingest smoke test"
+      ],
+      "started_at": "2026-04-12T14:34:28.536768+02:00",
+      "completed_at": "2026-04-12T14:37:50.063802+02:00",
+      "elapsed_minutes": 3
+    },
     "task-workflow-orchestration-and-observability": {
       "status": "done",
       "path": "",
@@ -102,5 +124,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-04-12T13:12:47.248522+02:00"
+  "updated_at": "2026-04-12T14:37:50.063803+02:00"
 }

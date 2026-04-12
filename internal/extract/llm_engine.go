@@ -2,11 +2,16 @@ package extract
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/felixgeelhaar/fortify/retry"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/llm"
 )
@@ -18,6 +23,7 @@ type LLMEngine struct {
 	fallback Engine
 	now      func() time.Time
 	nextID   func() (string, error)
+	cacheDir string
 }
 
 // NewLLMEngine creates an LLM-powered extraction engine with rule-based
@@ -28,6 +34,7 @@ func NewLLMEngine(client llm.Client) LLMEngine {
 		fallback: NewEngine(),
 		now:      time.Now,
 		nextID:   newClaimID,
+		cacheDir: filepath.Join("data", "cache", "llm-extraction"),
 	}
 }
 
@@ -66,7 +73,23 @@ func (e LLMEngine) Extract(events []domain.Event) ([]domain.Claim, []domain.Clai
 		{Role: llm.RoleUser, Content: buildExtractionPrompt(texts)},
 	}
 
-	resp, err := e.client.Complete(ctx, messages)
+	cacheKey := e.cacheKey(texts)
+	if rawClaims, ok := e.loadCachedClaims(cacheKey); ok {
+		return e.buildClaims(rawClaims, sourceEvents)
+	}
+
+	retrier := retry.New[llm.Response](retry.Config{
+		MaxAttempts:   3,
+		InitialDelay:  200 * time.Millisecond,
+		MaxDelay:      time.Second,
+		BackoffPolicy: retry.BackoffExponential,
+		Jitter:        true,
+		Logger:        slog.New(slog.NewJSONHandler(os.Stderr, nil)),
+	})
+
+	resp, err := retrier.Do(ctx, func(ctx context.Context) (llm.Response, error) {
+		return e.client.Complete(ctx, messages)
+	})
 	if err != nil {
 		// Fallback to rule-based extraction.
 		return e.fallback.Extract(events)
@@ -79,10 +102,19 @@ func (e LLMEngine) Extract(events []domain.Event) ([]domain.Claim, []domain.Clai
 	}
 
 	if len(rawClaims) == 0 {
+		e.storeCachedClaims(cacheKey, rawClaims)
 		return nil, nil, nil
 	}
+	if cacheKey != "" {
+		e.storeCachedClaims(cacheKey, rawClaims)
+	}
 
-	// Convert LLM output to domain claims.
+	return e.buildClaims(rawClaims, sourceEvents)
+}
+
+// Convert LLM output to domain claims.
+
+func (e LLMEngine) buildClaims(rawClaims []llmClaim, sourceEvents []domain.Event) ([]domain.Claim, []domain.ClaimEvidence, error) {
 	claims := make([]domain.Claim, 0, len(rawClaims))
 	evidence := make([]domain.ClaimEvidence, 0, len(rawClaims))
 	seen := map[string]struct{}{}
@@ -137,6 +169,53 @@ func (e LLMEngine) Extract(events []domain.Event) ([]domain.Claim, []domain.Clai
 	markContestedClaims(claims)
 
 	return claims, evidence, nil
+}
+
+func (e LLMEngine) cacheKey(texts []string) string {
+	if e.cacheDir == "" {
+		return ""
+	}
+	h := sha256.New()
+	_, _ = h.Write([]byte(PromptVersion))
+	_, _ = h.Write([]byte("\n"))
+	_, _ = h.Write([]byte(strings.TrimSpace(os.Getenv("MNEMOS_LLM_PROVIDER"))))
+	_, _ = h.Write([]byte("\n"))
+	_, _ = h.Write([]byte(strings.TrimSpace(os.Getenv("MNEMOS_LLM_MODEL"))))
+	for _, text := range texts {
+		_, _ = h.Write([]byte("\n"))
+		_, _ = h.Write([]byte(text))
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+func (e LLMEngine) loadCachedClaims(key string) ([]llmClaim, bool) {
+	if key == "" || e.cacheDir == "" {
+		return nil, false
+	}
+	path := filepath.Join(e.cacheDir, key+".json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
+	var claims []llmClaim
+	if err := json.Unmarshal(data, &claims); err != nil {
+		return nil, false
+	}
+	return claims, true
+}
+
+func (e LLMEngine) storeCachedClaims(key string, claims []llmClaim) {
+	if key == "" || e.cacheDir == "" {
+		return
+	}
+	if err := os.MkdirAll(e.cacheDir, 0o750); err != nil {
+		return
+	}
+	data, err := json.Marshal(claims)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(e.cacheDir, key+".json"), data, 0o600)
 }
 
 // ExtractClaims implements ports.ExtractionEngine.

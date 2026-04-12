@@ -52,7 +52,8 @@ AI systems are becoming decision-makers, but they forget context, invent facts, 
 - [x] SQLC-based typed data-access layer
 - [x] 68 eval test cases for extraction accuracy
 - [x] First-run experience and UX polish
-- [ ] LLM-powered extraction (future)
+- [x] LLM-powered extraction (Anthropic, OpenAI, Gemini, Ollama, OpenAI-compatible)
+- [x] Embeddings for semantic search (multi-provider)
 
 **Excluded:**
 - GUI / Web interface
@@ -97,7 +98,7 @@ AI systems are becoming decision-makers, but they forget context, invent facts, 
 
 **Deliverables:**
 - [ ] GraphRAG integration for multi-hop queries
-- [ ] Embeddings for semantic search
+- [x] Embeddings for semantic search (shipped in Phase 1)
 - [ ] Multi-agent pipeline orchestration
 - [ ] Governance and bias detection
 - [ ] Enterprise integrations (Slack, Teams, Jira)
@@ -145,10 +146,10 @@ AI systems are becoming decision-makers, but they forget context, invent facts, 
 
 ## 8. Open Questions
 
-- [ ] What is the threshold for acceptable claim accuracy?
 - [ ] How should contradiction detection be tuned per domain?
 - [ ] When to introduce governance vs. let knowledge evolve organically?
-- [ ] What embedding model balances speed vs. accuracy?
+- [x] ~~What embedding model balances speed vs. accuracy?~~ (Defaults: text-embedding-3-small for OpenAI, text-embedding-004 for Gemini, nomic-embed-text for Ollama)
+- [x] ~~What is the threshold for acceptable claim accuracy?~~ (78 eval test cases, rule-based + LLM extraction)
 
 ## 9. Definition of Success
 

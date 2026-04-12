@@ -48,7 +48,10 @@ func TestDecodeVectorEmpty(t *testing.T) {
 
 func TestCosineSimilarityIdentical(t *testing.T) {
 	v := []float32{1, 2, 3}
-	sim := CosineSimilarity(v, v)
+	sim, err := CosineSimilarity(v, v)
+	if err != nil {
+		t.Fatalf("CosineSimilarity() error = %v", err)
+	}
 	if math.Abs(float64(sim-1.0)) > 0.0001 {
 		t.Fatalf("CosineSimilarity identical vectors = %f, want 1.0", sim)
 	}
@@ -57,7 +60,10 @@ func TestCosineSimilarityIdentical(t *testing.T) {
 func TestCosineSimilarityOrthogonal(t *testing.T) {
 	a := []float32{1, 0, 0}
 	b := []float32{0, 1, 0}
-	sim := CosineSimilarity(a, b)
+	sim, err := CosineSimilarity(a, b)
+	if err != nil {
+		t.Fatalf("CosineSimilarity() error = %v", err)
+	}
 	if math.Abs(float64(sim)) > 0.0001 {
 		t.Fatalf("CosineSimilarity orthogonal = %f, want 0.0", sim)
 	}
@@ -66,7 +72,10 @@ func TestCosineSimilarityOrthogonal(t *testing.T) {
 func TestCosineSimilarityOpposite(t *testing.T) {
 	a := []float32{1, 0}
 	b := []float32{-1, 0}
-	sim := CosineSimilarity(a, b)
+	sim, err := CosineSimilarity(a, b)
+	if err != nil {
+		t.Fatalf("CosineSimilarity() error = %v", err)
+	}
 	if math.Abs(float64(sim+1.0)) > 0.0001 {
 		t.Fatalf("CosineSimilarity opposite = %f, want -1.0", sim)
 	}
@@ -75,23 +84,29 @@ func TestCosineSimilarityOpposite(t *testing.T) {
 func TestCosineSimilarityDifferentLengths(t *testing.T) {
 	a := []float32{1, 0}
 	b := []float32{1, 0, 0}
-	sim := CosineSimilarity(a, b)
-	if sim != 0 {
-		t.Fatalf("CosineSimilarity different lengths = %f, want 0", sim)
+	_, err := CosineSimilarity(a, b)
+	if err == nil {
+		t.Fatal("expected error for different length vectors")
 	}
 }
 
 func TestCosineSimilarityZeroVector(t *testing.T) {
 	a := []float32{0, 0, 0}
 	b := []float32{1, 2, 3}
-	sim := CosineSimilarity(a, b)
+	sim, err := CosineSimilarity(a, b)
+	if err != nil {
+		t.Fatalf("CosineSimilarity() error = %v", err)
+	}
 	if sim != 0 {
 		t.Fatalf("CosineSimilarity zero vector = %f, want 0", sim)
 	}
 }
 
 func TestCosineSimilarityEmpty(t *testing.T) {
-	sim := CosineSimilarity([]float32{}, []float32{})
+	sim, err := CosineSimilarity([]float32{}, []float32{})
+	if err != nil {
+		t.Fatalf("CosineSimilarity() error = %v", err)
+	}
 	if sim != 0 {
 		t.Fatalf("CosineSimilarity empty = %f, want 0", sim)
 	}

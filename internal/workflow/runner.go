@@ -4,13 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"time"
 
+	"github.com/felixgeelhaar/bolt"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/statekit"
 )
 
 type jobStore interface {
@@ -24,7 +24,7 @@ type Runner struct {
 	MaxRetries int
 	now        func() time.Time
 	nextID     func() (string, error)
-	logger     *log.Logger
+	logger     *bolt.Logger
 }
 
 // Job represents a single in-flight compilation job managed by a Runner.
@@ -32,6 +32,7 @@ type Job struct {
 	id     string
 	runner *Runner
 	data   domain.CompilationJob
+	fsm    *statekit.Interpreter[struct{}]
 }
 
 // NewRunner returns a Runner with sensible defaults for timeout and retries.
@@ -42,7 +43,7 @@ func NewRunner(store jobStore) Runner {
 		MaxRetries: 2,
 		now:        time.Now,
 		nextID:     newJobID,
-		logger:     log.New(os.Stderr, "", 0),
+		logger:     bolt.New(bolt.NewJSONHandler(os.Stderr)),
 	}
 }
 
@@ -66,7 +67,13 @@ func (r Runner) Run(kind string, scope map[string]string, fn func(context.Contex
 		return fmt.Errorf("create job: %w", err)
 	}
 
-	job := &Job{id: jobID, runner: &r, data: jobData}
+	fsm, err := newStatusMachine()
+	if err != nil {
+		return fmt.Errorf("create workflow state machine: %w", err)
+	}
+	fsm.Start()
+
+	job := &Job{id: jobID, runner: &r, data: jobData, fsm: fsm}
 	job.log("started", map[string]any{"attempt": 0})
 
 	var lastErr error
@@ -114,6 +121,15 @@ func (j *Job) ID() string {
 
 // SetStatus transitions the job to the given status and persists the change.
 func (j *Job) SetStatus(status, errMsg string) error {
+	if j.fsm != nil {
+		before := j.fsm.State().Value
+		j.fsm.Send(statekit.Event{Type: statekit.EventType(status)})
+		after := j.fsm.State().Value
+		if before == after && string(after) != status {
+			return fmt.Errorf("invalid workflow status transition: %s -> %s", before, status)
+		}
+	}
+
 	j.data.Status = status
 	j.data.Error = errMsg
 	j.data.UpdatedAt = j.runner.now().UTC()
@@ -124,21 +140,18 @@ func (j *Job) SetStatus(status, errMsg string) error {
 }
 
 func (j *Job) log(stage string, fields map[string]any) {
-	payload := map[string]any{
-		"ts":     j.runner.now().UTC().Format(time.RFC3339Nano),
-		"job_id": j.id,
-		"kind":   j.data.Kind,
-		"stage":  stage,
+	event := j.runner.logger.Info().
+		Str("job_id", j.id).
+		Str("kind", j.data.Kind).
+		Str("stage", stage).
+		Str("status", j.data.Status)
+	if errMsg := j.data.Error; errMsg != "" {
+		event = event.Str("error", errMsg)
 	}
 	for k, v := range fields {
-		payload[k] = v
+		event = event.Any(k, v)
 	}
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		j.runner.logger.Printf("job=%s stage=%s log_marshal_error=%v", j.id, stage, err)
-		return
-	}
-	j.runner.logger.Println(string(encoded))
+	event.Msg("workflow")
 }
 
 func newJobID() (string, error) {

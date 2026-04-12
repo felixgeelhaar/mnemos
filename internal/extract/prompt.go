@@ -5,6 +5,10 @@ import (
 	"strings"
 )
 
+// PromptVersion tracks the extraction prompt revision. Bump when changing
+// the system prompt to invalidate cached results.
+const PromptVersion = "v1.1"
+
 const systemPrompt = `You are Mnemos, a knowledge extraction engine. Your job is to extract discrete, evidence-backed claims from source text.
 
 Rules:

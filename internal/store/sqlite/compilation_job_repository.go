@@ -13,13 +13,12 @@ import (
 
 // CompilationJobRepository provides SQLite-backed storage for compilation jobs.
 type CompilationJobRepository struct {
-	db *sql.DB
-	q  *sqlcgen.Queries
+	q *sqlcgen.Queries
 }
 
 // NewCompilationJobRepository returns a CompilationJobRepository backed by the given database.
 func NewCompilationJobRepository(db *sql.DB) CompilationJobRepository {
-	return CompilationJobRepository{db: db, q: sqlcgen.New(db)}
+	return CompilationJobRepository{q: sqlcgen.New(db)}
 }
 
 // Upsert inserts or updates a compilation job record.

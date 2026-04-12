@@ -9,6 +9,8 @@ Thank you for your interest in contributing to Mnemos!
 3. Install dependencies: `go mod download`
 4. Build and test: `make check`
 
+`make check` is the same baseline enforced in CI.
+
 ## Development Workflow
 
 ### Prerequisites
@@ -22,6 +24,8 @@ Thank you for your interest in contributing to Mnemos!
 make test        # Run all tests
 make check       # Format, lint, test, build
 ```
+
+CI runs `make check` on every push and pull request.
 
 ### Code Style
 
@@ -79,6 +83,8 @@ Run eval tests:
 ```bash
 cd data/eval && go test -v
 ```
+
+LLM-specific eval cases are skipped unless `MNEMOS_LLM_PROVIDER` is configured.
 
 ## Reporting Issues
 

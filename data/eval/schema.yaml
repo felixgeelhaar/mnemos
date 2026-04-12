@@ -1,7 +1,7 @@
-version: "1.0"
+version: "1.1"
 description: "Mnemos extraction engine evaluation dataset"
 created: "2026-04-12"
-total_cases: 50
+total_cases: 78
 
 categories:
   - id: claim_types
@@ -22,6 +22,9 @@ categories:
   - id: real_world
     name: "Real-World Documents"
     description: "Tests with realistic multi-paragraph documents"
+  - id: llm
+    name: "LLM Extraction"
+    description: "Tests for LLM-powered extraction quality (requires MNEMOS_LLM_PROVIDER)"
 
 format:
   input:

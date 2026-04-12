@@ -1,0 +1,145 @@
+# LLM Extraction Eval Cases
+# These cases test LLM-powered extraction quality.
+# Run with: go test -tags llmeval -run TestLLMExtraction ./data/eval/
+# Requires: MNEMOS_LLM_PROVIDER and MNEMOS_LLM_API_KEY set in env.
+
+test_cases:
+  - id: llm-001
+    description: "LLM should extract nuanced claims from ambiguous phrasing"
+    tags: [llm, nuanced]
+    input: "The board discussed the possibility of entering the Asian market next year. While revenue is projected to grow 20%, some members expressed concern that the team lacks regional expertise. A preliminary budget of $2M was tentatively approved pending further review."
+    expected_claims:
+      - text: "revenue is projected to grow 20%"
+        type: fact
+        min_confidence: 0.70
+      - text: "team lacks regional expertise"
+        type: fact
+        min_confidence: 0.60
+      - text: "preliminary budget of $2M was tentatively approved"
+        type: decision
+        min_confidence: 0.65
+    expected_min_count: 3
+
+  - id: llm-002
+    description: "LLM should handle multi-sentence claims and implicit decisions"
+    tags: [llm, implicit]
+    input: "After three months of evaluation, the engineering team concluded that Rust provides better memory safety guarantees than C++. Going forward, all new backend services will be written in Rust. The migration of existing services is expected to take 18 months."
+    expected_claims:
+      - text: "Rust provides better memory safety guarantees than C++"
+        type: fact
+        min_confidence: 0.75
+      - text: "all new backend services will be written in Rust"
+        type: decision
+        min_confidence: 0.80
+      - text: "migration of existing services is expected to take 18 months"
+        type: fact
+        min_confidence: 0.70
+    expected_min_count: 2
+
+  - id: llm-003
+    description: "LLM should distinguish hypothesis from fact with hedged language"
+    tags: [llm, hedging]
+    input: "Customer churn increased to 8% last quarter. Our analysis suggests this may be correlated with the recent pricing change. If we revert to the old pricing model, we believe retention could improve by 3-5 percentage points. The data team confirmed that 60% of churned users cited cost as the primary reason."
+    expected_claims:
+      - text: "Customer churn increased to 8% last quarter"
+        type: fact
+        min_confidence: 0.80
+      - text: "60% of churned users cited cost as the primary reason"
+        type: fact
+        min_confidence: 0.80
+    expected_min_count: 3
+
+  - id: llm-004
+    description: "LLM should extract claims from dense technical text"
+    tags: [llm, technical]
+    input: "The Kubernetes cluster runs 47 pods across 3 nodes. Average CPU utilization is 72% with memory at 68%. We decided to enable horizontal pod autoscaling with a target of 70% CPU. The team hypothesizes that adding a fourth node would reduce p99 latency from 450ms to under 200ms."
+    expected_claims:
+      - text: "cluster runs 47 pods across 3 nodes"
+        type: fact
+        min_confidence: 0.80
+      - text: "Average CPU utilization is 72%"
+        type: fact
+        min_confidence: 0.80
+      - text: "enable horizontal pod autoscaling"
+        type: decision
+        min_confidence: 0.75
+    expected_min_count: 3
+
+  - id: llm-005
+    description: "LLM should handle contradictions within the same document"
+    tags: [llm, contradictions]
+    input: "The project is on track for the March deadline. However, the lead engineer reported that we are two weeks behind schedule. Management expects delivery by March 15. The technical team says a realistic estimate is April 1."
+    expected_claims:
+      - text: "project is on track for the March deadline"
+        type: fact
+        min_confidence: 0.60
+      - text: "two weeks behind schedule"
+        type: fact
+        min_confidence: 0.70
+    expected_min_count: 2
+
+  - id: llm-006
+    description: "LLM should extract from informal meeting notes"
+    tags: [llm, informal]
+    input: "Standup notes: Jake mentioned the auth service is flaky again - about 5% of requests timeout. Sarah thinks it might be the new Redis config. We agreed to roll back Redis to v7.0 and monitor. Mike said the iOS build passed all 340 tests. Android is still failing on the camera permission flow."
+    expected_claims:
+      - text: "5% of requests timeout"
+        type: fact
+        min_confidence: 0.70
+      - text: "roll back Redis to v7.0"
+        type: decision
+        min_confidence: 0.75
+      - text: "iOS build passed all 340 tests"
+        type: fact
+        min_confidence: 0.80
+    expected_min_count: 3
+
+  - id: llm-007
+    description: "LLM should not hallucinate claims from context-setting text"
+    tags: [llm, no_hallucination]
+    input: "Welcome to the Q4 planning session. Thank you all for joining. Let's get started with the agenda. First item: review last quarter."
+    not_expected_claims:
+      - "planning session is scheduled"
+      - "agenda was approved"
+    expected_count: 0
+
+  - id: llm-008
+    description: "LLM should extract from financial/metric-heavy text"
+    tags: [llm, metrics]
+    input: "Monthly Business Review: ARR reached $4.2M, up 15% QoQ. Gross margin improved to 78% from 72%. CAC decreased to $340 from $420. We decided to increase the sales team by 3 headcount. Expansion revenue might overtake new revenue by Q3 if current trends hold."
+    expected_claims:
+      - text: "ARR reached $4.2M"
+        type: fact
+        min_confidence: 0.80
+      - text: "Gross margin improved to 78%"
+        type: fact
+        min_confidence: 0.80
+      - text: "increase the sales team by 3 headcount"
+        type: decision
+        min_confidence: 0.75
+      - text: "Expansion revenue might overtake new revenue by Q3"
+        type: hypothesis
+        min_confidence: 0.50
+    expected_min_count: 4
+
+  - id: llm-009
+    description: "LLM should handle mixed languages / code references"
+    tags: [llm, code_refs]
+    input: "The getUserById function has O(n) complexity due to a linear scan. We profiled it: 200ms per call on a dataset of 50K users. The team decided to add a B-tree index on user_id column. This should reduce lookup to O(log n), estimated under 5ms."
+    expected_claims:
+      - text: "getUserById function has O(n) complexity"
+        type: fact
+        min_confidence: 0.75
+      - text: "200ms per call on a dataset of 50K users"
+        type: fact
+        min_confidence: 0.80
+      - text: "add a B-tree index on user_id column"
+        type: decision
+        min_confidence: 0.80
+    expected_min_count: 3
+
+  - id: llm-010
+    description: "LLM should handle empty/noise-only content gracefully"
+    tags: [llm, edge_case]
+    input: "--- --- --- ... ??? !!! ### @@@"
+    expected_count: 0

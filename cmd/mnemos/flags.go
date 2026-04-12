@@ -5,8 +5,10 @@ import "strings"
 // Flags holds parsed CLI flags.
 type Flags struct {
 	Help    bool
+	Version bool
 	Verbose bool
 	Human   bool
+	JSON    bool
 	LLM     bool
 	Embed   bool
 }
@@ -20,10 +22,14 @@ func ParseFlags(args []string) (Flags, []string) {
 		switch strings.ToLower(arg) {
 		case "-h", "--help":
 			f.Help = true
+		case "--version":
+			f.Version = true
 		case "-v", "--verbose":
 			f.Verbose = true
 		case "--human", "-o", "text":
 			f.Human = true
+		case "--json":
+			f.JSON = true
 		case "--llm":
 			f.LLM = true
 		case "--embed":

@@ -9,6 +9,7 @@ import (
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/extract"
+	"github.com/felixgeelhaar/mnemos/internal/llm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -270,6 +271,10 @@ func TestAllCases(t *testing.T) {
 
 	for _, tf := range testFiles {
 		for _, tc := range tf.TestCases {
+			// Skip LLM-specific cases in the rule-based suite.
+			if containsTag(tc.Tags, "llm") {
+				continue
+			}
 			t.Run(tc.ID, func(t *testing.T) {
 				runTestCase(t, tc, engine)
 				if t.Failed() {
@@ -287,6 +292,114 @@ func TestAllCases(t *testing.T) {
 	t.Logf("Total:  %d", passed+failed)
 	if passed+failed > 0 {
 		t.Logf("Pass Rate: %.1f%%", float64(passed)/float64(passed+failed)*100)
+	}
+}
+
+// TestLLMExtraction runs LLM-specific eval cases against the LLM-powered engine.
+// Skipped unless MNEMOS_LLM_PROVIDER is set (requires real API keys).
+func TestLLMExtraction(t *testing.T) {
+	provider := os.Getenv("MNEMOS_LLM_PROVIDER")
+	if provider == "" {
+		t.Skip("MNEMOS_LLM_PROVIDER not set; skipping LLM eval")
+	}
+
+	cfg, err := llm.ConfigFromEnv()
+	if err != nil {
+		t.Skipf("LLM config error: %v", err)
+	}
+	client, err := llm.NewClient(cfg)
+	if err != nil {
+		t.Skipf("LLM client error: %v", err)
+	}
+
+	engine := extract.NewLLMEngine(client)
+	testFiles := loadTestFiles(t)
+	passed := 0
+	failed := 0
+
+	for _, tf := range testFiles {
+		for _, tc := range tf.TestCases {
+			if !containsTag(tc.Tags, "llm") {
+				continue
+			}
+			t.Run(tc.ID, func(t *testing.T) {
+				runLLMTestCase(t, tc, engine)
+				if t.Failed() {
+					failed++
+				} else {
+					passed++
+				}
+			})
+		}
+	}
+
+	t.Logf("\n=== LLM EVAL SUMMARY ===")
+	t.Logf("Provider: %s / %s", cfg.Provider, cfg.Model)
+	t.Logf("Passed: %d", passed)
+	t.Logf("Failed: %d", failed)
+	t.Logf("Total:  %d", passed+failed)
+	if passed+failed > 0 {
+		t.Logf("Pass Rate: %.1f%%", float64(passed)/float64(passed+failed)*100)
+	}
+}
+
+// runLLMTestCase validates LLM extraction with looser matching (substring)
+// since LLMs rephrase claims rather than extracting verbatim text.
+func runLLMTestCase(t *testing.T, tc TestCase, engine extract.LLMEngine) {
+	event := testCaseToEvent(tc)
+	claims, _, err := engine.Extract([]domain.Event{event})
+	if err != nil {
+		t.Errorf("%s: extraction failed: %v", tc.ID, err)
+		return
+	}
+
+	if tc.ExpectedCount != nil && len(claims) != *tc.ExpectedCount {
+		t.Errorf("%s: expected %d claims, got %d", tc.ID, *tc.ExpectedCount, len(claims))
+	}
+
+	if tc.ExpectedMinCount != nil && len(claims) < *tc.ExpectedMinCount {
+		t.Errorf("%s: expected at least %d claims, got %d", tc.ID, *tc.ExpectedMinCount, len(claims))
+	}
+
+	for _, expected := range tc.ExpectedClaims {
+		found := false
+		for _, claim := range claims {
+			normalizedClaim := normalizeClaimText(claim.Text)
+			normalizedExpected := normalizeClaimText(expected.Text)
+
+			// LLM tests use substring matching since LLMs rephrase.
+			if strings.Contains(normalizedClaim, normalizedExpected) || strings.Contains(normalizedExpected, normalizedClaim) {
+				found = true
+
+				if expected.Type != "" && claim.Type != toClaimType(expected.Type) {
+					t.Logf("%s: claim '%s' type mismatch: want '%s', got '%s'",
+						tc.ID, expected.Text, expected.Type, claim.Type)
+				}
+
+				if expected.MinConfidence > 0 && claim.Confidence < expected.MinConfidence {
+					t.Logf("%s: claim '%s' confidence %.2f below min %.2f",
+						tc.ID, expected.Text, claim.Confidence, expected.MinConfidence)
+				}
+				break
+			}
+		}
+		if !found {
+			t.Logf("%s: expected claim not found (LLM may have rephrased): '%s'", tc.ID, expected.Text)
+			t.Logf("%s: actual claims:", tc.ID)
+			for _, c := range claims {
+				t.Logf("  - [%s] %s (%.2f)", c.Type, c.Text, c.Confidence)
+			}
+			t.Errorf("%s: expected claim not found: '%s'", tc.ID, expected.Text)
+		}
+	}
+
+	for _, notExpected := range tc.NotExpectedClaims {
+		normalizedNot := normalizeClaimText(notExpected)
+		for _, claim := range claims {
+			if strings.Contains(normalizeClaimText(claim.Text), normalizedNot) {
+				t.Errorf("%s: unexpected claim found: '%s' matches '%s'", tc.ID, claim.Text, notExpected)
+			}
+		}
 	}
 }
 

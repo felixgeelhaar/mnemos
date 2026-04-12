@@ -15,9 +15,11 @@ import (
 type mockLLMClient struct {
 	response string
 	err      error
+	calls    int
 }
 
 func (m *mockLLMClient) Complete(_ context.Context, _ []llm.Message) (llm.Response, error) {
+	m.calls++
 	if m.err != nil {
 		return llm.Response{}, m.err
 	}
@@ -226,11 +228,34 @@ func TestLLMEngineEmptyResponse(t *testing.T) {
 	}
 }
 
+func TestLLMEngineUsesPersistentCache(t *testing.T) {
+	claims := []llmClaim{{Text: "Revenue grew 15% in Q3", Type: "fact", Confidence: 0.92}}
+	responseJSON, _ := json.Marshal(claims)
+
+	client := &mockLLMClient{response: string(responseJSON)}
+	engine := newTestLLMEngine(client)
+	engine.cacheDir = t.TempDir()
+	t.Setenv("MNEMOS_LLM_PROVIDER", "openai")
+	t.Setenv("MNEMOS_LLM_MODEL", "gpt-4o-mini")
+
+	events := []domain.Event{{ID: "ev_1", Content: "Revenue grew 15% in Q3."}}
+	if _, _, err := engine.Extract(events); err != nil {
+		t.Fatalf("first extract error: %v", err)
+	}
+	if _, _, err := engine.Extract(events); err != nil {
+		t.Fatalf("second extract error: %v", err)
+	}
+	if client.calls != 1 {
+		t.Fatalf("expected 1 LLM call with cache hit, got %d", client.calls)
+	}
+}
+
 // newTestLLMEngine creates an LLMEngine with deterministic IDs and clock.
 func newTestLLMEngine(client llm.Client) LLMEngine {
 	seq := 0
 	engine := NewLLMEngine(client)
 	engine.now = func() time.Time { return time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC) }
+	engine.cacheDir = ""
 	engine.nextID = func() (string, error) {
 		seq++
 		return fmt.Sprintf("cl_test_%03d", seq), nil

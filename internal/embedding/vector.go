@@ -29,10 +29,14 @@ func DecodeVector(data []byte) ([]float32, error) {
 }
 
 // CosineSimilarity computes the cosine similarity between two vectors.
-// Returns 0.0 if either vector has zero magnitude.
-func CosineSimilarity(a, b []float32) float32 {
-	if len(a) != len(b) || len(a) == 0 {
-		return 0
+// Returns 0.0 if either vector has zero magnitude. Returns an error if
+// the vectors have different dimensions.
+func CosineSimilarity(a, b []float32) (float32, error) {
+	if len(a) != len(b) {
+		return 0, fmt.Errorf("embedding dimension mismatch: got %d and %d", len(a), len(b))
+	}
+	if len(a) == 0 {
+		return 0, nil
 	}
 	var dot, normA, normB float32
 	for i := range a {
@@ -41,7 +45,7 @@ func CosineSimilarity(a, b []float32) float32 {
 		normB += b[i] * b[i]
 	}
 	if normA == 0 || normB == 0 {
-		return 0
+		return 0, nil
 	}
-	return dot / (float32(math.Sqrt(float64(normA))) * float32(math.Sqrt(float64(normB))))
+	return dot / (float32(math.Sqrt(float64(normA))) * float32(math.Sqrt(float64(normB)))), nil
 }

@@ -4,9 +4,31 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 )
+
+// useASCII returns true when the terminal likely cannot render Unicode/emoji.
+func useASCII() bool {
+	term := os.Getenv("TERM")
+	lang := os.Getenv("LANG")
+	if term == "dumb" || term == "linux" {
+		return true
+	}
+	if lang != "" && !strings.Contains(strings.ToLower(lang), "utf") {
+		return true
+	}
+	return false
+}
+
+// icon returns the Unicode icon or its ASCII fallback.
+func icon(unicode, ascii string) string {
+	if useASCII() {
+		return ascii
+	}
+	return unicode
+}
 
 func printWelcome() {
 	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -49,6 +71,8 @@ func printExtractionSummary(claims []domain.Claim, rels []domain.Relationship) {
 		}
 	}
 
+	warn := icon("⚠️", "(!)")
+
 	fmt.Println("")
 	fmt.Println("  Extraction Summary:")
 	fmt.Println("  ┌─────────────────────────────────────────┐")
@@ -56,24 +80,25 @@ func printExtractionSummary(claims []domain.Claim, rels []domain.Relationship) {
 	fmt.Printf("  │ Decisions:   %-5d                      │\n", decisions)
 	fmt.Printf("  │ Hypotheses: %-5d                      │\n", hypotheses)
 	if contested > 0 {
-		fmt.Printf("  │ Contested:  %-5d ⚠️                     │\n", contested)
+		fmt.Printf("  │ Contested:  %-5d %s                     │\n", contested, warn)
 	}
 	if contradictions > 0 {
-		fmt.Printf("  │ Contradictions: %-3d ⚠️                │\n", contradictions)
+		fmt.Printf("  │ Contradictions: %-3d %s                │\n", contradictions, warn)
 	}
 	fmt.Println("  └─────────────────────────────────────────┘")
 	fmt.Println("")
 
 	if contested > 0 || contradictions > 0 {
-		fmt.Println("  Tip: Run 'mnemos query --run <run-id> \"What contradicts?\"' to see details")
+		fmt.Println("  Run 'mnemos query --human \"What contradicts?\"' to see details.")
 	}
 }
 
 func printFirstRunHints() {
-	fmt.Println("  💡 Tips:")
-	fmt.Println("    • Use 'mnemos process --text <text>' for quick extraction")
-	fmt.Println("    • Use 'mnemos query <question>' to ask about your knowledge")
-	fmt.Println("    • Use '--run <id>' with query to scope to a specific run")
+	bulb := icon("💡", "*")
+	fmt.Printf("  %s Tips:\n", bulb)
+	fmt.Println("    - Use 'mnemos process --text <text>' for quick extraction")
+	fmt.Println("    - Use 'mnemos query <question>' to query your knowledge")
+	fmt.Println("    - Use '--run <id>' with query to scope to a specific run")
 	fmt.Println("")
 }
 
@@ -96,12 +121,12 @@ func printClaimPreview(claims []domain.Claim, maxDisplay int) {
 	fmt.Println("  Recent Claims:")
 	for i := 0; i < len(claims) && i < maxDisplay; i++ {
 		c := claims[i]
-		typeIcon := "•"
+		typeIcon := icon("•", "-")
 		switch c.Type {
 		case domain.ClaimTypeDecision:
-			typeIcon = "✓"
+			typeIcon = icon("✓", "+")
 		case domain.ClaimTypeHypothesis:
-			typeIcon = "?"
+			typeIcon = icon("?", "?")
 		}
 		status := ""
 		if c.Status == domain.ClaimStatusContested {

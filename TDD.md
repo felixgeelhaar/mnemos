@@ -151,17 +151,17 @@ Responsibilities: extract claims, assign type, assign confidence, map evidence. 
 
 ## 4.7 Workflow Orchestration
 
-Use statekit. Extraction states: pending, loading, extracting, saving, relating, completed, failed.
+Use `github.com/felixgeelhaar/statekit` to model workflow states and transitions. The current runner lifecycle is `pending -> running -> loading -> extracting -> saving -> relating -> embedding -> completed|failed`, and should be expressed as a state machine rather than ad hoc string transitions.
 
 # 5\. Implementation Concerns
 
 ## 5.1 Error Handling
 
-Use fortify. Rules: retry LLM calls (max 2), timeout external calls, mark job failed on error, no partial inconsistent writes.
+Use `github.com/felixgeelhaar/fortify` for retry, timeout, and resilience around external calls. CLI-facing failures still map into `MnemosError` exit codes, but networked LLM and embedding operations should be guarded by Fortify policies. Rules: retry LLM calls (max 2), timeout external calls, mark job failed on error, no partial inconsistent writes.
 
 ## 5.2 Observability
 
-Use bolt logging. Fields: job\_id, event\_id, claim\_id, duration, outcome, error.
+Use `github.com/felixgeelhaar/bolt` for structured logging. Fields: job\_id, kind, stage, attempt, duration\_ms, error, and provider/model metadata for LLM and embedding operations.
 
 ## 5.3 Concurrency
 
@@ -212,4 +212,3 @@ SQLite: simple, local-first. Relational DB: easier MVP. Batch processing: simple
 40. claim quality thresholds  
 41. contradiction detection accuracy  
 42. when to add governance
-

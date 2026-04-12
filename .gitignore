@@ -16,3 +16,6 @@ coverage.txt
 
 # Local databases
 *.db
+
+# Local extraction cache
+data/cache/

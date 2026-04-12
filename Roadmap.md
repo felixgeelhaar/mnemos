@@ -29,17 +29,27 @@
 ## Phase 2: Team Knowledge Engine
 
 **Status:** Planned (v0.2)
-**Goal:** Expand to auditable, traceable institutional memory for knowledge workers.
+**Goal:** Enable non-technical knowledge workers to get value from Mnemos without CLI proficiency.
 
-### Milestones
+### Outcomes
 
-- [ ] Web interface for non-technical users
-- [ ] Human-readable query output mode
-- [ ] Team collaboration (shared knowledge bases)
-- [ ] Cloud document ingestion (Drive, Notion, Confluence)
-- [ ] Decision tracking with status workflows
-- [ ] Evidence review and approval UI
-- [ ] Programmatic REST API
+- **Outcome 1: Accessible querying** — Non-technical users can query knowledge without JSON knowledge
+  - [ ] Web interface for non-technical users
+  - [ ] Human-readable query output mode
+- **Outcome 2: Team knowledge retention** — Knowledge persists across project lifecycles and team changes
+  - [ ] Team collaboration (shared knowledge bases)
+  - [ ] Decision tracking with status workflows
+- **Outcome 3: Zero-friction ingestion** — Users can connect existing document sources
+  - [ ] Cloud document ingestion (Drive, Notion, Confluence)
+- **Outcome 4: Trust and governance** — Teams can verify and approve extracted knowledge
+  - [ ] Evidence review and approval UI
+  - [ ] Programmatic REST API
+
+### Success Metrics
+
+- Time-to-first-query for non-technical users < 2 minutes
+- 50% reduction in "when did we decide X?" questions within teams
+- 80% of ingested documents produce actionable claims
 
 ---
 

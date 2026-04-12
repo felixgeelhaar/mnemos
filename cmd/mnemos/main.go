@@ -5,10 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/felixgeelhaar/fortify/retry"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/embedding"
 	"github.com/felixgeelhaar/mnemos/internal/extract"
@@ -23,6 +26,10 @@ import (
 )
 
 const defaultDBPath = "data/mnemos.db"
+
+func printProgress(format string, args ...any) {
+	_, _ = fmt.Fprintf(os.Stderr, format+"\n", args...)
+}
 
 // extractor wraps either the rule-based or LLM-powered extraction engine,
 // presenting a uniform interface to command handlers.
@@ -69,6 +76,10 @@ func main() {
 		printUsage()
 		os.Exit(int(ExitSuccess))
 	}
+	if flags.Version {
+		fmt.Printf("mnemos %s (commit %s, built %s)\n", version, commit, buildDate)
+		os.Exit(int(ExitSuccess))
+	}
 
 	command := args[0]
 	args = args[1:]
@@ -84,6 +95,8 @@ func main() {
 		handleProcess(args, flags)
 	case "query":
 		handleQuery(args, flags)
+	case "metrics":
+		handleMetrics(flags)
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command %q\n\n", command)
 		printUsage()
@@ -206,6 +219,7 @@ func handleQuery(args []string, f Flags) {
 		)
 
 		if f.Embed {
+			printProgress("semantic search: preparing query embeddings")
 			embCfg, err := embedding.ConfigFromEnv()
 			if err == nil {
 				embClient, err := embedding.NewClient(embCfg)
@@ -284,10 +298,24 @@ func printHumanReadableAnswer(question string, answer domain.Answer) {
 	}
 
 	if len(answer.Contradictions) > 0 {
-		fmt.Println("  ⚠️  Contradictions detected:")
+		// Build claim text lookup for human-readable contradiction output.
+		claimText := make(map[string]string, len(answer.Claims))
+		for _, c := range answer.Claims {
+			claimText[c.ID] = c.Text
+		}
+
+		fmt.Println("  Contradictions detected:")
 		for i, rel := range answer.Contradictions {
 			if rel.Type == domain.RelationshipTypeContradicts {
-				fmt.Printf("  %d. %s contradicts %s\n", i+1, rel.FromClaimID, rel.ToClaimID)
+				from := claimText[rel.FromClaimID]
+				if from == "" {
+					from = rel.FromClaimID
+				}
+				to := claimText[rel.ToClaimID]
+				if to == "" {
+					to = rel.ToClaimID
+				}
+				fmt.Printf("  %d. \"%s\" contradicts \"%s\"\n", i+1, from, to)
 			}
 		}
 		fmt.Println("")
@@ -328,6 +356,9 @@ func handleExtract(args []string, f Flags) {
 		if err := job.SetStatus("extracting", ""); err != nil {
 			return err
 		}
+		if f.LLM {
+			printProgress("llm extraction: sending content to %s", os.Getenv("MNEMOS_LLM_PROVIDER"))
+		}
 		ext, err := newExtractor(f.LLM)
 		if err != nil {
 			return err
@@ -335,6 +366,9 @@ func handleExtract(args []string, f Flags) {
 		claims, links, err := ext.extract(events)
 		if err != nil {
 			return NewSystemError(err, "extraction failed")
+		}
+		if f.LLM {
+			printProgress("llm extraction: extracted %d claims", len(claims))
 		}
 
 		if err := job.SetStatus("saving", ""); err != nil {
@@ -458,9 +492,15 @@ func handleProcess(args []string, f Flags) {
 		if err != nil {
 			return err
 		}
+		if f.LLM {
+			printProgress("llm extraction: sending content to %s", os.Getenv("MNEMOS_LLM_PROVIDER"))
+		}
 		claims, links, err := ext.extract(events)
 		if err != nil {
 			return NewSystemError(err, "claim extraction failed")
+		}
+		if f.LLM {
+			printProgress("llm extraction: extracted %d claims", len(claims))
 		}
 
 		if err := job.SetStatus("relating", ""); err != nil {
@@ -483,14 +523,15 @@ func handleProcess(args []string, f Flags) {
 			if err := job.SetStatus("embedding", ""); err != nil {
 				return err
 			}
+			printProgress("embedding: generating vectors with %s", os.Getenv("MNEMOS_EMBED_PROVIDER"))
 			if err := generateEmbeddings(db, events); err != nil {
 				// Embedding failure is non-fatal; log and continue.
 				fmt.Fprintf(os.Stderr, "warning: embedding generation failed: %v\n", err)
 			}
 		}
 
-		fmt.Printf("Session: %s\n", job.ID())
-		fmt.Printf("Processed: %d events → %d claims\n", len(events), len(claims))
+		fmt.Printf("Run ID: %s\n", job.ID())
+		fmt.Printf("Processed %d event(s) into %d claim(s).\n", len(events), len(claims))
 
 		printExtractionSummary(claims, rels)
 		if len(claims) > 0 {
@@ -500,6 +541,73 @@ func handleProcess(args []string, f Flags) {
 		return nil
 	})
 	exitWithMnemosError(f.Verbose, err)
+}
+
+func handleMetrics(f Flags) {
+	err := runJob("metrics", map[string]string{}, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
+		if err := job.SetStatus("loading", ""); err != nil {
+			return err
+		}
+
+		metrics := map[string]any{
+			"runs":                countValue(db, `SELECT COUNT(DISTINCT run_id) FROM events WHERE run_id <> ''`),
+			"events":              countValue(db, `SELECT COUNT(*) FROM events`),
+			"claims":              countValue(db, `SELECT COUNT(*) FROM claims`),
+			"contested_claims":    countValue(db, `SELECT COUNT(*) FROM claims WHERE status = 'contested'`),
+			"relationships":       countValue(db, `SELECT COUNT(*) FROM relationships`),
+			"contradictions":      countValue(db, `SELECT COUNT(*) FROM relationships WHERE type = 'contradicts'`),
+			"embeddings":          countValue(db, `SELECT COUNT(*) FROM embeddings`),
+			"llm_cache_entries":   cacheEntryCount(),
+			"prompt_version":      extract.PromptVersion,
+			"eval_cases":          78,
+			"llm_eval_configured": strings.TrimSpace(os.Getenv("MNEMOS_LLM_PROVIDER")) != "",
+		}
+
+		if f.Human {
+			fmt.Println("Mnemos Metrics")
+			fmt.Printf("Runs: %v\n", metrics["runs"])
+			fmt.Printf("Events: %v\n", metrics["events"])
+			fmt.Printf("Claims: %v\n", metrics["claims"])
+			fmt.Printf("Contested claims: %v\n", metrics["contested_claims"])
+			fmt.Printf("Relationships: %v\n", metrics["relationships"])
+			fmt.Printf("Contradictions: %v\n", metrics["contradictions"])
+			fmt.Printf("Embeddings: %v\n", metrics["embeddings"])
+			fmt.Printf("LLM cache entries: %v\n", metrics["llm_cache_entries"])
+			fmt.Printf("Eval cases: %v\n", metrics["eval_cases"])
+			fmt.Printf("Prompt version: %v\n", metrics["prompt_version"])
+			return nil
+		}
+
+		encoded, err := json.MarshalIndent(metrics, "", "  ")
+		if err != nil {
+			return NewSystemError(err, "failed to encode metrics")
+		}
+		fmt.Println(string(encoded))
+		return nil
+	})
+	exitWithMnemosError(f.Verbose, err)
+}
+
+func countValue(db *sql.DB, query string) int64 {
+	var value int64
+	if err := db.QueryRow(query).Scan(&value); err != nil {
+		return 0
+	}
+	return value
+}
+
+func cacheEntryCount() int {
+	entries, err := os.ReadDir(filepath.Join("data", "cache", "llm-extraction"))
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
+			count++
+		}
+	}
+	return count
 }
 
 func persistProcessArtifacts(db *sql.DB, events []domain.Event, claims []domain.Claim, links []domain.ClaimEvidence, relationships []domain.Relationship) error {
@@ -592,11 +700,14 @@ func printUsage() {
 	fmt.Println("  mnemos process --llm <path>           (LLM-powered extraction)")
 	fmt.Println("  mnemos process --llm --embed <path>   (LLM extraction + embeddings)")
 	fmt.Println("  mnemos query [--run <run-id>] [--human] <question>")
+	fmt.Println("  mnemos metrics [--human]")
 	fmt.Println("")
 	fmt.Println("Flags:")
 	fmt.Println("  -h, --help     show this help message")
+	fmt.Println("  --version      print version and exit")
 	fmt.Println("  -v, --verbose  show detailed error output")
 	fmt.Println("  --human        human-readable output (default: JSON)")
+	fmt.Println("  --json         force JSON output (default for non-query commands)")
 	fmt.Println("  --llm          use LLM-powered extraction (requires MNEMOS_LLM_PROVIDER)")
 	fmt.Println("  --embed        generate embeddings for semantic search (requires MNEMOS_EMBED_PROVIDER or MNEMOS_LLM_PROVIDER)")
 	fmt.Println("")
@@ -684,7 +795,18 @@ func generateEmbeddings(db *sql.DB, events []domain.Event) error {
 		texts = append(texts, ev.Content)
 	}
 
-	vectors, err := client.Embed(context.Background(), texts)
+	retrier := retry.New[[][]float32](retry.Config{
+		MaxAttempts:   3,
+		InitialDelay:  200 * time.Millisecond,
+		MaxDelay:      time.Second,
+		BackoffPolicy: retry.BackoffExponential,
+		Jitter:        true,
+		Logger:        slog.New(slog.NewJSONHandler(os.Stderr, nil)),
+	})
+
+	vectors, err := retrier.Do(context.Background(), func(ctx context.Context) ([][]float32, error) {
+		return client.Embed(ctx, texts)
+	})
 	if err != nil {
 		return fmt.Errorf("embed events: %w", err)
 	}

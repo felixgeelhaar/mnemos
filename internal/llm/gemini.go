@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // GeminiClient calls the Google Gemini GenerateContent API.
@@ -43,7 +44,8 @@ type geminiPart struct {
 }
 
 type geminiGenerationConfig struct {
-	MaxOutputTokens int `json:"maxOutputTokens"`
+	MaxOutputTokens  int    `json:"maxOutputTokens"`
+	ResponseMimeType string `json:"responseMimeType,omitempty"`
 }
 
 type geminiResponse struct {
@@ -87,10 +89,20 @@ func (c *GeminiClient) Complete(ctx context.Context, messages []Message) (Respon
 		})
 	}
 
+	genConfig := geminiGenerationConfig{MaxOutputTokens: 4096}
+
+	// Enable JSON mode when the system prompt asks for JSON output.
+	for _, m := range messages {
+		if m.Role == RoleSystem && strings.Contains(m.Content, "JSON") {
+			genConfig.ResponseMimeType = "application/json"
+			break
+		}
+	}
+
 	reqBody := geminiRequest{
 		Contents:          contents,
 		SystemInstruction: system,
-		GenerationConfig:  geminiGenerationConfig{MaxOutputTokens: 4096},
+		GenerationConfig:  genConfig,
 	}
 
 	body, err := json.Marshal(reqBody)

@@ -31,13 +31,19 @@ func NewOpenAIClient(baseURL, apiKey, model string) *OpenAIClient {
 }
 
 type openAIRequest struct {
-	Model    string          `json:"model"`
-	Messages []openAIMessage `json:"messages"`
+	Model          string             `json:"model"`
+	Messages       []openAIMessage    `json:"messages"`
+	ResponseFormat *openAIResponseFmt `json:"response_format,omitempty"`
 }
 
 type openAIMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+}
+
+// openAIResponseFmt enables JSON mode when the system prompt requests JSON.
+type openAIResponseFmt struct {
+	Type string `json:"type"`
 }
 
 type openAIResponse struct {
@@ -70,6 +76,14 @@ func (c *OpenAIClient) Complete(ctx context.Context, messages []Message) (Respon
 	reqBody := openAIRequest{
 		Model:    c.model,
 		Messages: apiMsgs,
+	}
+
+	// Enable JSON mode when the system prompt asks for JSON output.
+	for _, m := range messages {
+		if m.Role == RoleSystem && strings.Contains(m.Content, "JSON") {
+			reqBody.ResponseFormat = &openAIResponseFmt{Type: "json_object"}
+			break
+		}
 	}
 
 	body, err := json.Marshal(reqBody)

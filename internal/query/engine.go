@@ -155,7 +155,10 @@ func (e Engine) rankEventsByCosine(question string, events []domain.Event, limit
 		if !ok {
 			continue
 		}
-		sim := embedding.CosineSimilarity(qVec, vec)
+		sim, err := embedding.CosineSimilarity(qVec, vec)
+		if err != nil {
+			continue // dimension mismatch — skip this event
+		}
 		scoredEvents = append(scoredEvents, scored{event: ev, score: sim})
 	}
 

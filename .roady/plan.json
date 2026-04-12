@@ -1,0 +1,90 @@
+{
+  "id": "plan-Mnemos-1775984589",
+  "spec_id": "Mnemos",
+  "tasks": [
+    {
+      "id": "task-core-foundation",
+      "title": "Implement Core Foundation",
+      "description": "Implement the feature: Core Foundation. The essential building blocks of the project.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "core-foundation"
+    },
+    {
+      "id": "task-documentation-ingestion-pipeline",
+      "title": "Implement Documentation Ingestion Pipeline",
+      "description": "Implement the feature: Documentation Ingestion Pipeline. Create a documentation ingestion pipeline that accepts PRD/TDD and related project docs, normalizes and chunks content, stores metadata for traceability, and produces a searchable structured knowledge base used to drive Mnemos implementation planning.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "documentation-ingestion-pipeline"
+    },
+    {
+      "id": "task-multi-format-input-service",
+      "title": "Implement Multi-Format Input Service",
+      "description": "Implement the feature: Multi-Format Input Service. Support ingestion of raw text and file-based inputs (TXT, MD, JSON, CSV), preserving source metadata and timestamps for downstream traceability.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "multi-format-input-service"
+    },
+    {
+      "id": "task-parser-and-event-normalization",
+      "title": "Implement Parser and Event Normalization",
+      "description": "Implement the feature: Parser and Event Normalization. Normalize heterogeneous inputs into immutable events with schema versioning and source linkage, forming the canonical Input -\u003e Event transformation.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "parser-and-event-normalization"
+    },
+    {
+      "id": "task-append-only-event-store",
+      "title": "Implement Append-Only Event Store",
+      "description": "Implement the feature: Append-Only Event Store. Implement a local-first SQLite-backed append-only event store with indexes for timestamp and source input ID to support reliable replay and query foundations.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "append-only-event-store"
+    },
+    {
+      "id": "task-claim-extraction-engine",
+      "title": "Implement Claim Extraction Engine",
+      "description": "Implement the feature: Claim Extraction Engine. Derive structured claims (fact, hypothesis, decision) from events, enforce validation rules, and map each claim to at least one evidence event.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "claim-extraction-engine"
+    },
+    {
+      "id": "task-relationship-detection-engine",
+      "title": "Implement Relationship Detection Engine",
+      "description": "Implement the feature: Relationship Detection Engine. Detect support and contradiction relationships between claims within scoped comparisons and persist relationship edges for truth evolution analysis.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "relationship-detection-engine"
+    },
+    {
+      "id": "task-cli-query-interface",
+      "title": "Implement CLI Query Interface",
+      "description": "Implement the feature: CLI Query Interface. Provide a CLI query interface that returns structured answers with claims, surfaced contradictions, and an evidence-backed timeline.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "cli-query-interface"
+    },
+    {
+      "id": "task-workflow-orchestration-and-observability",
+      "title": "Implement Workflow Orchestration and Observability",
+      "description": "Implement the feature: Workflow Orchestration and Observability. Track ingestion/extraction/relationship jobs through explicit workflow states with structured logging, retries, timeouts, and failure handling.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "workflow-orchestration-and-observability"
+    }
+  ],
+  "approval_status": "approved",
+  "created_at": "2026-04-12T11:03:09.397775+02:00",
+  "updated_at": "2026-04-12T11:19:08.857177+02:00"
+}

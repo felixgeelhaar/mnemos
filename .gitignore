@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# Local tool caches
+.ruff_cache/
+
+data/ingestion/*
+!data/ingestion/.gitkeep
+
+# Build artifacts
+bin/
+
+# Coverage and test outputs
+*.out
+coverage.txt
+
+# Local databases
+*.db

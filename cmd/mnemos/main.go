@@ -1,0 +1,301 @@
+package main
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/extract"
+	"github.com/felixgeelhaar/mnemos/internal/ingest"
+	"github.com/felixgeelhaar/mnemos/internal/parser"
+	"github.com/felixgeelhaar/mnemos/internal/query"
+	"github.com/felixgeelhaar/mnemos/internal/relate"
+	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
+	"github.com/felixgeelhaar/mnemos/internal/workflow"
+)
+
+const defaultDBPath = "data/mnemos.db"
+
+func main() {
+	if len(os.Args) < 2 {
+		printUsage()
+		os.Exit(1)
+	}
+
+	command := os.Args[1]
+	switch command {
+	case "ingest":
+		handleIngest(os.Args[2:])
+	case "extract":
+		handleExtract(os.Args[2:])
+	case "relate":
+		handleRelate(os.Args[2:])
+	case "query":
+		handleQuery(os.Args[2:])
+	default:
+		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", command)
+		printUsage()
+		os.Exit(1)
+	}
+}
+
+func handleIngest(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "ingest expects a file path or --text <content>")
+		os.Exit(1)
+	}
+
+	service := ingest.NewService()
+	normalizer := parser.NewNormalizer()
+
+	if args[0] == "--text" {
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "ingest --text expects content")
+			os.Exit(1)
+		}
+
+		contentArg := strings.Join(args[1:], " ")
+		err := runJob("ingest", map[string]string{"source": "raw_text"}, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
+			if err := job.SetStatus("loading", ""); err != nil {
+				return err
+			}
+			input, content, err := service.IngestText(contentArg, nil)
+			if err != nil {
+				return err
+			}
+			if err := job.SetStatus("extracting", ""); err != nil {
+				return err
+			}
+			events, err := normalizer.Normalize(input, content)
+			if err != nil {
+				return err
+			}
+			if err := job.SetStatus("saving", ""); err != nil {
+				return err
+			}
+			repo := sqlite.NewEventRepository(db)
+			for _, event := range events {
+				if err := repo.Append(event); err != nil {
+					return err
+				}
+			}
+			fmt.Printf("input=%s type=%s format=%s bytes=%d events=%d db=%s source=%s\n", input.ID, input.Type, input.Format, len(content), len(events), defaultDBPath, input.Metadata["source"])
+			return nil
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ingest job error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "ingest expects exactly one path argument")
+		os.Exit(1)
+	}
+
+	path := args[0]
+	err := runJob("ingest", map[string]string{"path": path}, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
+		if err := job.SetStatus("loading", ""); err != nil {
+			return err
+		}
+		input, content, err := service.IngestFile(path)
+		if err != nil {
+			return err
+		}
+		if err := job.SetStatus("extracting", ""); err != nil {
+			return err
+		}
+		events, err := normalizer.Normalize(input, content)
+		if err != nil {
+			return err
+		}
+		if err := job.SetStatus("saving", ""); err != nil {
+			return err
+		}
+		repo := sqlite.NewEventRepository(db)
+		for _, event := range events {
+			if err := repo.Append(event); err != nil {
+				return err
+			}
+		}
+		fmt.Printf("input=%s type=%s format=%s bytes=%d events=%d db=%s source=%s\n", input.ID, input.Type, input.Format, len(content), len(events), defaultDBPath, input.Metadata["source_path"])
+		return nil
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ingest job error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func handleQuery(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "query expects a question")
+		os.Exit(1)
+	}
+
+	question := strings.Join(args, " ")
+
+	err := runJob("query", map[string]string{"question": question}, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
+		if err := job.SetStatus("loading", ""); err != nil {
+			return err
+		}
+		engine := query.NewEngine(
+			sqlite.NewEventRepository(db),
+			sqlite.NewClaimRepository(db),
+			sqlite.NewRelationshipRepository(db),
+		)
+		if err := job.SetStatus("querying", ""); err != nil {
+			return err
+		}
+		answer, err := engine.Answer(question)
+		if err != nil {
+			return err
+		}
+
+		response := map[string]any{
+			"answer":         answer.AnswerText,
+			"claims":         answer.Claims,
+			"contradictions": answer.Contradictions,
+			"timeline":       answer.TimelineEventIDs,
+		}
+		encoded, err := json.MarshalIndent(response, "", "  ")
+		if err != nil {
+			return err
+		}
+
+		fmt.Println(string(encoded))
+		return nil
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "query job error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func handleExtract(args []string) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "extract expects one or more event IDs")
+		os.Exit(1)
+	}
+
+	err := runJob("extract", map[string]string{"event_ids": strings.Join(args, ",")}, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
+		if err := job.SetStatus("loading", ""); err != nil {
+			return err
+		}
+		eventRepo := sqlite.NewEventRepository(db)
+		events, err := eventRepo.ListByIDs(args)
+		if err != nil {
+			return err
+		}
+		if len(events) == 0 {
+			return fmt.Errorf("no events found for provided IDs")
+		}
+
+		if err := job.SetStatus("extracting", ""); err != nil {
+			return err
+		}
+		engine := extract.NewEngine()
+		claims, links, err := engine.Extract(events)
+		if err != nil {
+			return err
+		}
+
+		if err := job.SetStatus("saving", ""); err != nil {
+			return err
+		}
+		claimRepo := sqlite.NewClaimRepository(db)
+		if err := claimRepo.Upsert(claims); err != nil {
+			return err
+		}
+		if err := claimRepo.UpsertEvidence(links); err != nil {
+			return err
+		}
+
+		fmt.Printf("events=%d claims=%d evidence_links=%d db=%s\n", len(events), len(claims), len(links), defaultDBPath)
+		return nil
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "extract job error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func handleRelate(args []string) {
+	err := runJob("relate", map[string]string{"event_ids": strings.Join(args, ",")}, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
+		if err := job.SetStatus("loading", ""); err != nil {
+			return err
+		}
+		claimRepo := sqlite.NewClaimRepository(db)
+		relRepo := sqlite.NewRelationshipRepository(db)
+
+		var claims []domain.Claim
+		var err error
+		if len(args) == 0 {
+			claims, err = claimRepo.ListAll()
+		} else {
+			claims, err = claimRepo.ListByEventIDs(args)
+		}
+		if err != nil {
+			return err
+		}
+		if len(claims) < 2 {
+			return fmt.Errorf("need at least two claims to detect relationships")
+		}
+
+		if err := job.SetStatus("relating", ""); err != nil {
+			return err
+		}
+		engine := relate.NewEngine()
+		rels, err := engine.Detect(claims)
+		if err != nil {
+			return err
+		}
+		if err := job.SetStatus("saving", ""); err != nil {
+			return err
+		}
+		if err := relRepo.Upsert(rels); err != nil {
+			return err
+		}
+
+		fmt.Printf("claims=%d relationships=%d db=%s\n", len(claims), len(rels), defaultDBPath)
+		return nil
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "relate job error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func printUsage() {
+	fmt.Println("Mnemos CLI")
+	fmt.Println("")
+	fmt.Println("Usage:")
+	fmt.Println("  mnemos ingest <path>")
+	fmt.Println("  mnemos ingest --text <content>")
+	fmt.Println("  mnemos extract <event-id> [event-id ...]")
+	fmt.Println("  mnemos relate [event-id ...]")
+	fmt.Println("  mnemos query <question>")
+}
+
+func runJob(kind string, scope map[string]string, fn func(context.Context, *workflow.Job, *sql.DB) error) error {
+	db, err := sqlite.Open(defaultDBPath)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	runner := workflow.NewRunner(sqlite.NewCompilationJobRepository(db))
+	runner.Timeout = 20 * time.Second
+	runner.MaxRetries = 1
+
+	jobErr := runner.Run(kind, scope, func(ctx context.Context, job *workflow.Job) error {
+		return fn(ctx, job, db)
+	})
+	return jobErr
+}

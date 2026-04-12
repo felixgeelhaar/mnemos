@@ -1,0 +1,106 @@
+{
+  "project_id": "Mnemos",
+  "version": 21,
+  "task_states": {
+    "task-append-only-event-store": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Implemented SQLite append-only event store with schema/indexes and EventRepository (Append/GetByID/ListByIDs), wired CLI ingest to persist normalized events to data/mnemos.db, added store tests, and verified via go mod tidy + make check"
+      ],
+      "started_at": "2026-04-12T11:34:43.933278+02:00",
+      "completed_at": "2026-04-12T11:37:07.875432+02:00",
+      "elapsed_minutes": 2
+    },
+    "task-claim-extraction-engine": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Implemented claim extraction engine with claim-type/confidence inference and one-to-one event evidence mapping; added SQLite claims + claim_evidence schema and ClaimRepository (upsert/list); added CLI extract command and tests; verified with make check"
+      ],
+      "started_at": "2026-04-12T11:42:36.912208+02:00",
+      "completed_at": "2026-04-12T11:45:12.031532+02:00",
+      "elapsed_minutes": 2
+    },
+    "task-cli-query-interface": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Implemented CLI query interface with query engine ranking relevant events, loading claims and contradictions, and returning structured JSON output; added query package tests and repository support (event ListAll); updated README flow; verified with make check"
+      ],
+      "started_at": "2026-04-12T13:04:03.273488+02:00",
+      "completed_at": "2026-04-12T13:06:33.280868+02:00",
+      "elapsed_minutes": 2
+    },
+    "task-core-foundation": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Scaffolded Go core foundation (go.mod, cmd/mnemos, internal/domain, internal/ports), added GitHub CI/templates/dependabot/CODEOWNERS, and verified with make check"
+      ],
+      "started_at": "2026-04-12T11:22:34.08053+02:00",
+      "completed_at": "2026-04-12T11:25:48.965828+02:00",
+      "elapsed_minutes": 3
+    },
+    "task-documentation-ingestion-pipeline": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Added scripts/ingest_docs.py, docs/source/README.md, and verified with python3 scripts/ingest_docs.py"
+      ],
+      "started_at": "2026-04-12T11:05:47.064027+02:00",
+      "completed_at": "2026-04-12T11:05:51.209434+02:00",
+      "elapsed_minutes": 0
+    },
+    "task-multi-format-input-service": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Implemented multi-format input service with TXT/MD/JSON/CSV + raw text ingestion, added ingestion tests, wired CLI ingest command, removed GitHub CI workflow, and verified with make check"
+      ],
+      "started_at": "2026-04-12T11:26:58.711501+02:00",
+      "completed_at": "2026-04-12T11:28:55.835793+02:00",
+      "elapsed_minutes": 1
+    },
+    "task-parser-and-event-normalization": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Implemented parser/event normalization for text, markdown, csv, and json inputs; wired CLI ingest to normalize into events; added parser unit tests; verified with make check"
+      ],
+      "started_at": "2026-04-12T11:29:37.866304+02:00",
+      "completed_at": "2026-04-12T11:31:59.45509+02:00",
+      "elapsed_minutes": 2
+    },
+    "task-relationship-detection-engine": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Implemented relationship detection engine with supports/contradicts inference, added SQLite relationships schema and RelationshipRepository, added relate CLI command (all claims or scoped by event IDs), added relationship tests, and verified with make check"
+      ],
+      "started_at": "2026-04-12T11:47:58.552857+02:00",
+      "completed_at": "2026-04-12T11:50:40.489501+02:00",
+      "elapsed_minutes": 2
+    },
+    "task-workflow-orchestration-and-observability": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Implemented workflow orchestration with job lifecycle persistence (compilation_jobs table/repository), structured JSON logging, retries and timeouts via internal/workflow runner, integrated all CLI commands (ingest/extract/relate/query) with staged statuses and failure handling, added workflow and job repository tests, and verified with make check"
+      ],
+      "started_at": "2026-04-12T13:08:36.337185+02:00",
+      "completed_at": "2026-04-12T13:12:47.248521+02:00",
+      "elapsed_minutes": 4
+    }
+  },
+  "updated_at": "2026-04-12T13:12:47.248522+02:00"
+}

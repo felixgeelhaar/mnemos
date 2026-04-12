@@ -1,0 +1,144 @@
+package workflow
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"log"
+	"os"
+	"time"
+
+	"github.com/felixgeelhaar/mnemos/internal/domain"
+)
+
+type jobStore interface {
+	Upsert(domain.CompilationJob) error
+}
+
+type Runner struct {
+	Store      jobStore
+	Timeout    time.Duration
+	MaxRetries int
+	now        func() time.Time
+	nextID     func() (string, error)
+	logger     *log.Logger
+}
+
+type Job struct {
+	id     string
+	runner *Runner
+	data   domain.CompilationJob
+}
+
+func NewRunner(store jobStore) Runner {
+	return Runner{
+		Store:      store,
+		Timeout:    10 * time.Second,
+		MaxRetries: 2,
+		now:        time.Now,
+		nextID:     newJobID,
+		logger:     log.New(os.Stdout, "", 0),
+	}
+}
+
+func (r Runner) Run(kind string, scope map[string]string, fn func(context.Context, *Job) error) error {
+	jobID, err := r.nextID()
+	if err != nil {
+		return fmt.Errorf("generate job id: %w", err)
+	}
+	now := r.now().UTC()
+	jobData := domain.CompilationJob{
+		ID:        jobID,
+		Kind:      kind,
+		Status:    "pending",
+		Scope:     scope,
+		StartedAt: now,
+		UpdatedAt: now,
+		Error:     "",
+	}
+	if err := r.Store.Upsert(jobData); err != nil {
+		return fmt.Errorf("create job: %w", err)
+	}
+
+	job := &Job{id: jobID, runner: &r, data: jobData}
+	job.log("started", map[string]any{"attempt": 0})
+
+	var lastErr error
+	for attempt := 1; attempt <= r.MaxRetries+1; attempt++ {
+		if err := job.SetStatus("running", ""); err != nil {
+			return err
+		}
+		job.log("attempt", map[string]any{"attempt": attempt})
+
+		ctx, cancel := context.WithTimeout(context.Background(), r.Timeout)
+		start := r.now()
+		err := fn(ctx, job)
+		cancel()
+
+		duration := r.now().Sub(start).Milliseconds()
+		if err == nil {
+			if err := job.SetStatus("completed", ""); err != nil {
+				return err
+			}
+			job.log("completed", map[string]any{"attempt": attempt, "duration_ms": duration})
+			return nil
+		}
+
+		lastErr = err
+		job.log("attempt_failed", map[string]any{"attempt": attempt, "duration_ms": duration, "error": err.Error()})
+		if attempt <= r.MaxRetries {
+			if err := job.SetStatus("retrying", err.Error()); err != nil {
+				return err
+			}
+			continue
+		}
+	}
+
+	if err := job.SetStatus("failed", lastErr.Error()); err != nil {
+		return err
+	}
+	job.log("failed", map[string]any{"error": lastErr.Error()})
+	return lastErr
+}
+
+func (j *Job) ID() string {
+	return j.id
+}
+
+func (j *Job) SetStatus(status, errMsg string) error {
+	j.data.Status = status
+	j.data.Error = errMsg
+	j.data.UpdatedAt = j.runner.now().UTC()
+	if err := j.runner.Store.Upsert(j.data); err != nil {
+		return fmt.Errorf("update job %s status %s: %w", j.id, status, err)
+	}
+	return nil
+}
+
+func (j *Job) log(stage string, fields map[string]any) {
+	payload := map[string]any{
+		"ts":     j.runner.now().UTC().Format(time.RFC3339Nano),
+		"job_id": j.id,
+		"kind":   j.data.Kind,
+		"stage":  stage,
+	}
+	for k, v := range fields {
+		payload[k] = v
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		j.runner.logger.Printf("job=%s stage=%s log_marshal_error=%v", j.id, stage, err)
+		return
+	}
+	j.runner.logger.Println(string(encoded))
+}
+
+func newJobID() (string, error) {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return "job_" + hex.EncodeToString(buf), nil
+}

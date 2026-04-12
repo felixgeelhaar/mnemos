@@ -21,7 +21,7 @@
 - [x] SQLC typed data access
 - [x] 68 eval test cases
 - [x] First-run UX polish
-- [ ] LLM-powered extraction
+- [x] LLM-powered extraction
 - [ ] Embeddings for semantic search
 
 ---

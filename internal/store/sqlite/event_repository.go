@@ -13,15 +13,18 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
 )
 
+// EventRepository provides SQLite-backed storage for domain events.
 type EventRepository struct {
 	db *sql.DB
 	q  *sqlcgen.Queries
 }
 
+// NewEventRepository returns an EventRepository backed by the given database.
 func NewEventRepository(db *sql.DB) EventRepository {
 	return EventRepository{db: db, q: sqlcgen.New(db)}
 }
 
+// Append persists a single domain event to the database.
 func (r EventRepository) Append(event domain.Event) error {
 	metadata, err := json.Marshal(event.Metadata)
 	if err != nil {
@@ -45,6 +48,7 @@ func (r EventRepository) Append(event domain.Event) error {
 	return nil
 }
 
+// GetByID retrieves a single event by its unique identifier.
 func (r EventRepository) GetByID(id string) (domain.Event, error) {
 	row, err := r.q.GetEventByID(context.Background(), id)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -61,6 +65,7 @@ func (r EventRepository) GetByID(id string) (domain.Event, error) {
 	return event, nil
 }
 
+// ListByIDs returns events matching the given IDs, preserving the input order.
 func (r EventRepository) ListByIDs(ids []string) ([]domain.Event, error) {
 	if len(ids) == 0 {
 		return []domain.Event{}, nil
@@ -76,13 +81,13 @@ func (r EventRepository) ListByIDs(ids []string) ([]domain.Event, error) {
 	query := fmt.Sprintf(`
 SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at
 FROM events
-WHERE id IN (%s)`, strings.Join(placeholders, ","))
+WHERE id IN (%s)`, strings.Join(placeholders, ",")) //nolint:gosec // G201: placeholders are literal "?" strings, not user input
 
 	rows, err := r.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query events by ids: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer closeRows(rows)
 
 	byID := map[string]domain.Event{}
 	for rows.Next() {
@@ -108,6 +113,7 @@ WHERE id IN (%s)`, strings.Join(placeholders, ","))
 	return ordered, nil
 }
 
+// ListAll returns every event stored in the database.
 func (r EventRepository) ListAll() ([]domain.Event, error) {
 	rows, err := r.q.ListAllEvents(context.Background())
 	if err != nil {
@@ -126,6 +132,7 @@ func (r EventRepository) ListAll() ([]domain.Event, error) {
 	return events, nil
 }
 
+// ListByRunID returns all events that belong to the specified run.
 func (r EventRepository) ListByRunID(runID string) ([]domain.Event, error) {
 	rows, err := r.q.ListEventsByRunID(context.Background(), runID)
 	if err != nil {

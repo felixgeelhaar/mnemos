@@ -95,7 +95,7 @@ func (c *AnthropicClient) Complete(ctx context.Context, messages []Message) (Res
 	if err != nil {
 		return Response{}, fmt.Errorf("anthropic request failed: %w", err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer closeBody(resp.Body)
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

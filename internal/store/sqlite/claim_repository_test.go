@@ -9,7 +9,7 @@ import (
 
 func TestClaimRepositoryUpsertAndListByEventIDs(t *testing.T) {
 	db := openTestDB(t)
-	defer db.Close() //nolint:errcheck
+	defer closeDB(db)
 
 	eventRepo := NewEventRepository(db)
 	claimRepo := NewClaimRepository(db)

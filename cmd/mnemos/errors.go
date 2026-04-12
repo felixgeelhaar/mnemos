@@ -5,8 +5,10 @@ import (
 	"os"
 )
 
+// ExitCode represents a process exit status returned by the CLI.
 type ExitCode int
 
+// Exit codes used by the mnemos CLI.
 const (
 	ExitSuccess  ExitCode = 0
 	ExitError    ExitCode = 1
@@ -14,6 +16,7 @@ const (
 	ExitNotFound ExitCode = 3
 )
 
+// MnemosError is a structured error carrying an exit code, user message, and optional hint.
 type MnemosError struct {
 	Code    ExitCode
 	Message string
@@ -28,6 +31,7 @@ func (e *MnemosError) Error() string {
 	return e.Message
 }
 
+// FullMessage returns the error message followed by the hint, if present.
 func (e *MnemosError) FullMessage() string {
 	msg := e.Error()
 	if e.Hint != "" {
@@ -36,22 +40,27 @@ func (e *MnemosError) FullMessage() string {
 	return msg
 }
 
+// Unwrap returns the underlying cause, implementing the errors.Unwrap interface.
 func (e *MnemosError) Unwrap() error {
 	return e.Cause
 }
 
+// NewUserError returns a usage error with ExitUsage and a help hint.
 func NewUserError(format string, args ...any) *MnemosError {
 	return &MnemosError{Code: ExitUsage, Message: fmt.Sprintf(format, args...), Hint: "See 'mnemos --help' for usage"}
 }
 
+// NewNotFoundError returns a not-found error with ExitNotFound and an ingest hint.
 func NewNotFoundError(format string, args ...any) *MnemosError {
 	return &MnemosError{Code: ExitNotFound, Message: fmt.Sprintf(format, args...), Hint: "Tip: Run 'mnemos ingest' first to add content"}
 }
 
+// NewSystemError returns an internal error wrapping the given cause.
 func NewSystemError(cause error, format string, args ...any) *MnemosError {
 	return &MnemosError{Code: ExitError, Message: fmt.Sprintf(format, args...), Cause: cause}
 }
 
+// WrapError wraps a cause into a MnemosError with the given exit code and message.
 func WrapError(code ExitCode, format string, cause error) *MnemosError {
 	return &MnemosError{Code: code, Message: format, Cause: cause}
 }

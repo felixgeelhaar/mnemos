@@ -9,11 +9,13 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 )
 
+// Engine detects relationships between claims using token-overlap heuristics.
 type Engine struct {
 	now    func() time.Time
 	nextID func() (string, error)
 }
 
+// NewEngine returns an Engine with default clock and ID generation.
 func NewEngine() Engine {
 	return Engine{
 		now:    time.Now,
@@ -21,6 +23,7 @@ func NewEngine() Engine {
 	}
 }
 
+// Detect compares all claim pairs and returns inferred relationships.
 func (e Engine) Detect(claims []domain.Claim) ([]domain.Relationship, error) {
 	rels := make([]domain.Relationship, 0)
 	now := e.now().UTC()

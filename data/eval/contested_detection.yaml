@@ -47,17 +47,17 @@ test_cases:
     not_expected_claims: []
 
   - id: contest-004
-    description: "Contradictory decisions - same polarity not detected as contested"
+    description: "Same-polarity competing decisions detected as contested"
     tags: [contested_detection, decisions]
     input: "We will use React framework. We will use Vue framework."
     expected_claims:
       - text: "We will use React framework"
         type: decision
-        status: active
+        status: contested
         min_confidence: 0.75
       - text: "We will use Vue framework"
         type: decision
-        status: active
+        status: contested
         min_confidence: 0.75
     not_expected_claims: []
 

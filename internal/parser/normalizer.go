@@ -17,11 +17,13 @@ import (
 
 const schemaVersionV1 = "v1"
 
+// Normalizer converts raw input content into one or more domain events.
 type Normalizer struct {
 	now    func() time.Time
 	nextID func() (string, error)
 }
 
+// NewNormalizer returns a Normalizer with default clock and ID generation.
 func NewNormalizer() Normalizer {
 	return Normalizer{
 		now:    time.Now,
@@ -29,6 +31,7 @@ func NewNormalizer() Normalizer {
 	}
 }
 
+// Normalize parses the content according to the input type and returns chunked domain events.
 func (n Normalizer) Normalize(input domain.Input, content string) ([]domain.Event, error) {
 	if strings.TrimSpace(input.ID) == "" {
 		return nil, errors.New("input id is required")

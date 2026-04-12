@@ -96,7 +96,7 @@ func (c *OpenAIClient) Complete(ctx context.Context, messages []Message) (Respon
 	if err != nil {
 		return Response{}, fmt.Errorf("openai request failed: %w", err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer closeBody(resp.Body)
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -17,6 +17,7 @@ type jobStore interface {
 	Upsert(domain.CompilationJob) error
 }
 
+// Runner executes compilation jobs with timeout, retry, and status tracking.
 type Runner struct {
 	Store      jobStore
 	Timeout    time.Duration
@@ -26,12 +27,14 @@ type Runner struct {
 	logger     *log.Logger
 }
 
+// Job represents a single in-flight compilation job managed by a Runner.
 type Job struct {
 	id     string
 	runner *Runner
 	data   domain.CompilationJob
 }
 
+// NewRunner returns a Runner with sensible defaults for timeout and retries.
 func NewRunner(store jobStore) Runner {
 	return Runner{
 		Store:      store,
@@ -43,6 +46,7 @@ func NewRunner(store jobStore) Runner {
 	}
 }
 
+// Run creates a job of the given kind and executes fn with retry and timeout handling.
 func (r Runner) Run(kind string, scope map[string]string, fn func(context.Context, *Job) error) error {
 	jobID, err := r.nextID()
 	if err != nil {
@@ -103,10 +107,12 @@ func (r Runner) Run(kind string, scope map[string]string, fn func(context.Contex
 	return lastErr
 }
 
+// ID returns the unique identifier of the job.
 func (j *Job) ID() string {
 	return j.id
 }
 
+// SetStatus transitions the job to the given status and persists the change.
 func (j *Job) SetStatus(status, errMsg string) error {
 	j.data.Status = status
 	j.data.Error = errMsg

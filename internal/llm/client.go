@@ -15,6 +15,7 @@ import (
 // Role represents a message role in a conversation.
 type Role string
 
+// Conversation roles for LLM messages.
 const (
 	RoleSystem    Role = "system"
 	RoleUser      Role = "user"
@@ -44,6 +45,7 @@ type Client interface {
 // Provider identifies a supported LLM provider.
 type Provider string
 
+// Supported LLM providers.
 const (
 	ProviderAnthropic    Provider = "anthropic"
 	ProviderOpenAI       Provider = "openai"

@@ -2,6 +2,7 @@ package extract
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -81,6 +82,54 @@ func TestEngineExtractMarksContestedClaims(t *testing.T) {
 	events := []domain.Event{
 		{ID: "ev_1", Content: "Revenue decreased after launch."},
 		{ID: "ev_2", Content: "Revenue did not decrease after launch."},
+	}
+
+	claims, _, err := engine.Extract(events)
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if len(claims) != 2 {
+		t.Fatalf("Extract() claims len = %d, want 2", len(claims))
+	}
+	if claims[0].Status != domain.ClaimStatusContested {
+		t.Fatalf("claims[0] status = %q, want contested", claims[0].Status)
+	}
+	if claims[1].Status != domain.ClaimStatusContested {
+		t.Fatalf("claims[1] status = %q, want contested", claims[1].Status)
+	}
+}
+
+func TestEngineExtractPreservesDecimalsInSentenceSplit(t *testing.T) {
+	engine := Engine{
+		now:    func() time.Time { return time.Date(2026, 4, 12, 13, 15, 0, 0, time.UTC) },
+		nextID: seqClaimIDs(),
+	}
+
+	events := []domain.Event{
+		{ID: "ev_1", Content: "Revenue grew 3.5% in Q3."},
+	}
+
+	claims, _, err := engine.Extract(events)
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if len(claims) != 1 {
+		t.Fatalf("Extract() claims len = %d, want 1", len(claims))
+	}
+	if !strings.Contains(claims[0].Text, "3.5%") {
+		t.Fatalf("claim text = %q, want it to contain '3.5%%'", claims[0].Text)
+	}
+}
+
+func TestEngineExtractMarksSamePolarityContradictions(t *testing.T) {
+	engine := Engine{
+		now:    func() time.Time { return time.Date(2026, 4, 12, 13, 20, 0, 0, time.UTC) },
+		nextID: seqClaimIDs(),
+	}
+
+	events := []domain.Event{
+		{ID: "ev_1", Content: "We will use React for the frontend."},
+		{ID: "ev_2", Content: "We will use Vue for the frontend."},
 	}
 
 	claims, _, err := engine.Extract(events)

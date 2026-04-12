@@ -15,16 +15,20 @@ type eventLister interface {
 	ListByRunID(runID string) ([]domain.Event, error)
 }
 
+// Engine answers natural-language questions by ranking events, resolving claims,
+// and detecting contradictions.
 type Engine struct {
 	events        eventLister
 	claims        ports.ClaimRepository
 	relationships ports.RelationshipRepository
 }
 
+// NewEngine returns an Engine wired to the given event, claim, and relationship stores.
 func NewEngine(events eventLister, claims ports.ClaimRepository, relationships ports.RelationshipRepository) Engine {
 	return Engine{events: events, claims: claims, relationships: relationships}
 }
 
+// Answer searches all stored events for the best answer to the given question.
 func (e Engine) Answer(question string) (domain.Answer, error) {
 	allEvents, err := e.events.ListAll()
 	if err != nil {
@@ -33,6 +37,7 @@ func (e Engine) Answer(question string) (domain.Answer, error) {
 	return e.answerWithEvents(question, allEvents)
 }
 
+// AnswerForRun searches events belonging to the specified run for the best answer.
 func (e Engine) AnswerForRun(question, runID string) (domain.Answer, error) {
 	if strings.TrimSpace(runID) == "" {
 		return domain.Answer{}, fmt.Errorf("run id is required")

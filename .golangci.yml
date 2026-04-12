@@ -1,0 +1,35 @@
+version: "2"
+
+run:
+  timeout: 2m
+
+linters:
+  enable:
+    - errcheck
+    - gosec
+    - revive
+    - govet
+
+  settings:
+    revive:
+      rules:
+        - name: exported
+          severity: warning
+          arguments:
+            - checkPrivateReceivers
+    gosec:
+      excludes:
+        - G115 # integer overflow conversion — not applicable in this codebase
+
+  exclusions:
+    rules:
+      # Ignore gosec in test files (test handlers legitimately ignore encode errors)
+      - linters: [gosec]
+        path: _test\.go
+      # Ignore gosec inline nolint directives
+      - linters: [gosec]
+        text: "G201"
+      - linters: [gosec]
+        text: "G304"
+    paths:
+      - data/eval

@@ -482,8 +482,7 @@ func persistProcessArtifacts(db *sql.DB, events []domain.Event, claims []domain.
 	if err != nil {
 		return NewSystemError(err, "database transaction failed")
 	}
-	//nolint:errcheck
-	defer tx.Rollback()
+	defer rollbackTx(tx)
 
 	q := sqlcgen.New(tx)
 	ctx := context.Background()
@@ -622,8 +621,7 @@ func runJob(kind string, scope map[string]string, fn func(context.Context, *work
 	if err != nil {
 		return NewSystemError(err, "failed to open database at %q", defaultDBPath)
 	}
-	//nolint:errcheck
-	defer db.Close()
+	defer closeDB(db)
 
 	runner := workflow.NewRunner(sqlite.NewCompilationJobRepository(db))
 	runner.Timeout = 20 * time.Second

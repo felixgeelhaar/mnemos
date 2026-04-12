@@ -10,6 +10,7 @@ type Flags struct {
 	LLM     bool
 }
 
+// ParseFlags extracts known CLI flags from args and returns the remaining positional arguments.
 func ParseFlags(args []string) (Flags, []string) {
 	var f Flags
 	filtered := make([]string, 0, len(args))

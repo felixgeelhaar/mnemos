@@ -6,8 +6,10 @@ import (
 	"time"
 )
 
+// InputType represents the format classification of an ingested input.
 type InputType string
 
+// Supported InputType values.
 const (
 	InputTypeText       InputType = "text"
 	InputTypeJSON       InputType = "json"
@@ -16,29 +18,36 @@ const (
 	InputTypeTranscript InputType = "transcript"
 )
 
+// ClaimType categorises a claim as a fact, hypothesis, or decision.
 type ClaimType string
 
+// Supported ClaimType values.
 const (
 	ClaimTypeFact       ClaimType = "fact"
 	ClaimTypeHypothesis ClaimType = "hypothesis"
 	ClaimTypeDecision   ClaimType = "decision"
 )
 
+// ClaimStatus represents the lifecycle state of a claim.
 type ClaimStatus string
 
+// Supported ClaimStatus values.
 const (
 	ClaimStatusActive     ClaimStatus = "active"
 	ClaimStatusContested  ClaimStatus = "contested"
 	ClaimStatusDeprecated ClaimStatus = "deprecated"
 )
 
+// RelationshipType describes how two claims are related.
 type RelationshipType string
 
+// Supported RelationshipType values.
 const (
 	RelationshipTypeSupports    RelationshipType = "supports"
 	RelationshipTypeContradicts RelationshipType = "contradicts"
 )
 
+// Input represents a raw document or data source submitted for ingestion.
 type Input struct {
 	ID        string
 	Type      InputType
@@ -47,6 +56,7 @@ type Input struct {
 	CreatedAt time.Time
 }
 
+// Event represents a single timestamped piece of knowledge extracted from an input.
 type Event struct {
 	ID            string
 	RunID         string
@@ -58,6 +68,8 @@ type Event struct {
 	IngestedAt    time.Time
 }
 
+// Claim represents an assertion derived from one or more events,
+// carrying a type, confidence score, and lifecycle status.
 type Claim struct {
 	ID         string
 	Text       string
@@ -67,11 +79,13 @@ type Claim struct {
 	CreatedAt  time.Time
 }
 
+// ClaimEvidence links a Claim to the Event that supports it.
 type ClaimEvidence struct {
 	ClaimID string
 	EventID string
 }
 
+// Relationship represents a directed edge between two claims.
 type Relationship struct {
 	ID          string
 	Type        RelationshipType
@@ -80,6 +94,7 @@ type Relationship struct {
 	CreatedAt   time.Time
 }
 
+// CompilationJob tracks the state of an asynchronous compilation task.
 type CompilationJob struct {
 	ID        string
 	Kind      string
@@ -90,6 +105,7 @@ type CompilationJob struct {
 	Error     string
 }
 
+// Answer holds the result of a query, including supporting claims and contradictions.
 type Answer struct {
 	AnswerText       string
 	Claims           []Claim
@@ -97,6 +113,8 @@ type Answer struct {
 	TimelineEventIDs []string
 }
 
+// Validate checks that the Claim has a non-empty ID and text, a confidence
+// between 0 and 1, and a valid type and status.
 func (c Claim) Validate() error {
 	if strings.TrimSpace(c.ID) == "" {
 		return errors.New("claim id is required")
@@ -120,6 +138,7 @@ func (c Claim) Validate() error {
 	return nil
 }
 
+// Validate checks that both ClaimID and EventID are non-empty.
 func (e ClaimEvidence) Validate() error {
 	if strings.TrimSpace(e.ClaimID) == "" {
 		return errors.New("claim evidence claim_id is required")

@@ -11,15 +11,18 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
 )
 
+// ClaimRepository provides SQLite-backed storage for claims and claim evidence.
 type ClaimRepository struct {
 	db *sql.DB
 	q  *sqlcgen.Queries
 }
 
+// NewClaimRepository returns a ClaimRepository backed by the given database.
 func NewClaimRepository(db *sql.DB) ClaimRepository {
 	return ClaimRepository{db: db, q: sqlcgen.New(db)}
 }
 
+// Upsert inserts or updates the given claims in a single transaction.
 func (r ClaimRepository) Upsert(claims []domain.Claim) error {
 	if len(claims) == 0 {
 		return nil
@@ -29,7 +32,7 @@ func (r ClaimRepository) Upsert(claims []domain.Claim) error {
 	if err != nil {
 		return fmt.Errorf("begin claim upsert tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer rollbackTx(tx)
 
 	qtx := r.q.WithTx(tx)
 
@@ -57,6 +60,7 @@ func (r ClaimRepository) Upsert(claims []domain.Claim) error {
 	return nil
 }
 
+// UpsertEvidence inserts or updates claim-to-event evidence links in a single transaction.
 func (r ClaimRepository) UpsertEvidence(links []domain.ClaimEvidence) error {
 	if len(links) == 0 {
 		return nil
@@ -66,7 +70,7 @@ func (r ClaimRepository) UpsertEvidence(links []domain.ClaimEvidence) error {
 	if err != nil {
 		return fmt.Errorf("begin claim evidence tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer rollbackTx(tx)
 
 	qtx := r.q.WithTx(tx)
 
@@ -90,6 +94,7 @@ func (r ClaimRepository) UpsertEvidence(links []domain.ClaimEvidence) error {
 	return nil
 }
 
+// ListByEventIDs returns all claims linked to the given event IDs via claim evidence.
 func (r ClaimRepository) ListByEventIDs(eventIDs []string) ([]domain.Claim, error) {
 	if len(eventIDs) == 0 {
 		return []domain.Claim{}, nil
@@ -107,13 +112,13 @@ SELECT DISTINCT c.id, c.text, c.type, c.confidence, c.status, c.created_at
 FROM claims c
 JOIN claim_evidence ce ON ce.claim_id = c.id
 WHERE ce.event_id IN (%s)
-ORDER BY c.created_at ASC`, strings.Join(placeholders, ","))
+ORDER BY c.created_at ASC`, strings.Join(placeholders, ",")) //nolint:gosec // G201: placeholders are literal "?" strings, not user input
 
 	rows, err := r.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list claims by event ids: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer closeRows(rows)
 
 	claims := make([]domain.Claim, 0)
 	for rows.Next() {
@@ -130,6 +135,7 @@ ORDER BY c.created_at ASC`, strings.Join(placeholders, ","))
 	return claims, nil
 }
 
+// ListAll returns every claim stored in the database.
 func (r ClaimRepository) ListAll() ([]domain.Claim, error) {
 	rows, err := r.q.ListAllClaims(context.Background())
 	if err != nil {

@@ -10,15 +10,18 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
 )
 
+// RelationshipRepository provides SQLite-backed storage for claim relationships.
 type RelationshipRepository struct {
 	db *sql.DB
 	q  *sqlcgen.Queries
 }
 
+// NewRelationshipRepository returns a RelationshipRepository backed by the given database.
 func NewRelationshipRepository(db *sql.DB) RelationshipRepository {
 	return RelationshipRepository{db: db, q: sqlcgen.New(db)}
 }
 
+// Upsert inserts or updates the given relationships in a single transaction.
 func (r RelationshipRepository) Upsert(relationships []domain.Relationship) error {
 	if len(relationships) == 0 {
 		return nil
@@ -28,7 +31,7 @@ func (r RelationshipRepository) Upsert(relationships []domain.Relationship) erro
 	if err != nil {
 		return fmt.Errorf("begin relationship upsert tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer rollbackTx(tx)
 
 	qtx := r.q.WithTx(tx)
 
@@ -52,6 +55,7 @@ func (r RelationshipRepository) Upsert(relationships []domain.Relationship) erro
 	return nil
 }
 
+// ListByClaim returns all relationships where the given claim is either the source or target.
 func (r RelationshipRepository) ListByClaim(claimID string) ([]domain.Relationship, error) {
 	rows, err := r.q.ListRelationshipsByClaim(context.Background(), sqlcgen.ListRelationshipsByClaimParams{
 		FromClaimID: claimID,

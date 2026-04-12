@@ -54,10 +54,10 @@ test_cases:
     tags: [deduplication, false_negatives]
     input: "We shipped version 1.0. We shipped version 2.0."
     expected_claims:
-      - text: "We shipped version 1"
+      - text: "We shipped version 1.0"
         type: fact
         min_confidence: 0.75
-      - text: "We shipped version 2"
+      - text: "We shipped version 2.0"
         type: fact
         min_confidence: 0.75
     expected_count: 2

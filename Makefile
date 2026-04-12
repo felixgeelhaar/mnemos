@@ -9,6 +9,7 @@ fmt:
 
 lint:
 	$(GO) vet ./...
+	golangci-lint run
 
 test:
 	$(GO) test ./...

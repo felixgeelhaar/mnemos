@@ -12,13 +12,20 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 )
 
+// Engine extracts claims from domain events using heuristic NLP.
 type Engine struct {
 	now    func() time.Time
 	nextID func() (string, error)
 }
 
-var sentenceSplitRE = regexp.MustCompile(`[.!?\n]+`)
+// sentenceSplitRE splits text on sentence boundaries without breaking decimal
+// numbers, version strings, or percentages like "3.5%". It splits on:
+//   - ! or ? or newline (always)
+//   - . followed by whitespace (sentence boundary)
+//   - . at end of string
+var sentenceSplitRE = regexp.MustCompile(`[!?\n]+|\.\s+|\.\s*$`)
 
+// NewEngine returns an Engine with default ID generation and time source.
 func NewEngine() Engine {
 	return Engine{
 		now:    time.Now,
@@ -26,6 +33,7 @@ func NewEngine() Engine {
 	}
 }
 
+// Extract derives deduplicated claims and their evidence links from the given events.
 func (e Engine) Extract(events []domain.Event) ([]domain.Claim, []domain.ClaimEvidence, error) {
 	claims := make([]domain.Claim, 0, len(events))
 	evidence := make([]domain.ClaimEvidence, 0, len(events))
@@ -81,6 +89,7 @@ func (e Engine) Extract(events []domain.Event) ([]domain.Claim, []domain.ClaimEv
 	return claims, evidence, nil
 }
 
+// ExtractClaims is a convenience wrapper around Extract that returns only the claims.
 func (e Engine) ExtractClaims(events []domain.Event) ([]domain.Claim, error) {
 	claims, _, err := e.Extract(events)
 	if err != nil {
@@ -137,6 +146,7 @@ func splitCandidates(content string) []string {
 	out := make([]string, 0, len(raw))
 	for _, piece := range raw {
 		candidate := strings.TrimSpace(piece)
+		candidate = strings.TrimRight(candidate, ".")
 		if len(candidate) < 4 {
 			continue
 		}
@@ -177,6 +187,23 @@ func markContestedClaims(claims []domain.Claim) {
 				continue
 			}
 			if negs[i] == negs[j] {
+				// Same polarity: detect value-divergence contradictions.
+				// E.g. "We will use React" vs "We will use Vue" share most
+				// tokens but differ on the key value word.
+				overlap := tokenOverlap(cores[i], cores[j])
+				if overlap < 2 {
+					continue
+				}
+				tokensI := len(strings.Fields(cores[i]))
+				tokensJ := len(strings.Fields(cores[j]))
+				minLen := tokensI
+				if tokensJ < minLen {
+					minLen = tokensJ
+				}
+				if minLen >= 4 && overlap >= minLen-1 {
+					claims[i].Status = domain.ClaimStatusContested
+					claims[j].Status = domain.ClaimStatusContested
+				}
 				continue
 			}
 			if tokenOverlap(cores[i], cores[j]) < 2 {

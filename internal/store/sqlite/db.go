@@ -9,12 +9,14 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// Open creates or opens a SQLite database at the given path, ensuring the
+// parent directory and schema exist.
 func Open(path string) (*sql.DB, error) {
 	if path == "" {
 		return nil, fmt.Errorf("database path is required")
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return nil, fmt.Errorf("create database directory: %w", err)
 	}
 
@@ -113,7 +115,7 @@ func ensureEventsRunIDColumn(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("read events table info: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer closeRows(rows)
 
 	hasRunID := false
 	for rows.Next() {

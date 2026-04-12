@@ -11,15 +11,18 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
 )
 
+// CompilationJobRepository provides SQLite-backed storage for compilation jobs.
 type CompilationJobRepository struct {
 	db *sql.DB
 	q  *sqlcgen.Queries
 }
 
+// NewCompilationJobRepository returns a CompilationJobRepository backed by the given database.
 func NewCompilationJobRepository(db *sql.DB) CompilationJobRepository {
 	return CompilationJobRepository{db: db, q: sqlcgen.New(db)}
 }
 
+// Upsert inserts or updates a compilation job record.
 func (r CompilationJobRepository) Upsert(job domain.CompilationJob) error {
 	scopeJSON, err := json.Marshal(job.Scope)
 	if err != nil {
@@ -42,6 +45,7 @@ func (r CompilationJobRepository) Upsert(job domain.CompilationJob) error {
 	return nil
 }
 
+// GetByID retrieves a compilation job by its unique identifier.
 func (r CompilationJobRepository) GetByID(id string) (domain.CompilationJob, error) {
 	row, err := r.q.GetCompilationJobByID(context.Background(), id)
 	if err != nil {

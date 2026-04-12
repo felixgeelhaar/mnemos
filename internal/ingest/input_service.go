@@ -16,11 +16,13 @@ import (
 
 var errEmptyContent = errors.New("input content must not be empty")
 
+// Service handles ingestion of raw input sources into domain inputs.
 type Service struct {
 	now    func() time.Time
 	nextID func() (string, error)
 }
 
+// NewService returns a Service with default clock and ID generation.
 func NewService() Service {
 	return Service{
 		now:    time.Now,
@@ -28,12 +30,13 @@ func NewService() Service {
 	}
 }
 
+// IngestFile reads a file at the given path and returns a domain input, its text content, and any error.
 func (s Service) IngestFile(path string) (domain.Input, string, error) {
 	if strings.TrimSpace(path) == "" {
 		return domain.Input{}, "", errors.New("path is required")
 	}
 
-	contentBytes, err := os.ReadFile(path)
+	contentBytes, err := os.ReadFile(path) //nolint:gosec // G304: CLI tool reads user-specified files by design
 	if err != nil {
 		return domain.Input{}, "", fmt.Errorf("read input file: %w", err)
 	}
@@ -80,6 +83,7 @@ func (s Service) IngestFile(path string) (domain.Input, string, error) {
 	}, content, nil
 }
 
+// IngestText creates a domain input from raw text and optional metadata.
 func (s Service) IngestText(text string, metadata map[string]string) (domain.Input, string, error) {
 	content := strings.TrimSpace(text)
 	if content == "" {

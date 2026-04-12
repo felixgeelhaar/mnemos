@@ -25,32 +25,42 @@ const defaultDBPath = "data/mnemos.db"
 func main() {
 	if len(os.Args) < 2 {
 		printUsage()
-		os.Exit(1)
+		os.Exit(int(ExitUsage))
 	}
 
-	command := os.Args[1]
+	flags, args := ParseFlags(os.Args[1:])
+	if flags.Help {
+		printUsage()
+		os.Exit(int(ExitSuccess))
+	}
+
+	command := args[0]
+	args = args[1:]
+
 	switch command {
 	case "ingest":
-		handleIngest(os.Args[2:])
+		handleIngest(args, flags)
 	case "extract":
-		handleExtract(os.Args[2:])
+		handleExtract(args, flags)
 	case "relate":
-		handleRelate(os.Args[2:])
+		handleRelate(args, flags)
 	case "process":
-		handleProcess(os.Args[2:])
+		handleProcess(args, flags)
 	case "query":
-		handleQuery(os.Args[2:])
+		handleQuery(args, flags)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n\n", command)
+		fmt.Fprintf(os.Stderr, "error: unknown command %q\n\n", command)
 		printUsage()
-		os.Exit(1)
+		os.Exit(int(ExitUsage))
 	}
 }
 
-func handleIngest(args []string) {
+func handleIngest(args []string, f Flags) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "ingest expects a file path or --text <content>")
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, "error: ingest requires a file path or --text flag")
+		fmt.Fprintln(os.Stderr, "  mnemos ingest <path>")
+		fmt.Fprintln(os.Stderr, "  mnemos ingest --text <content>")
+		os.Exit(int(ExitUsage))
 	}
 
 	service := ingest.NewService()
@@ -58,8 +68,9 @@ func handleIngest(args []string) {
 
 	if args[0] == "--text" {
 		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "ingest --text expects content")
-			os.Exit(1)
+			fmt.Fprintln(os.Stderr, "error: --text flag requires content after it")
+			fmt.Fprintln(os.Stderr, "  mnemos ingest --text <content>")
+			os.Exit(int(ExitUsage))
 		}
 
 		contentArg := strings.Join(args[1:], " ")
@@ -69,14 +80,14 @@ func handleIngest(args []string) {
 			}
 			input, content, err := service.IngestText(contentArg, nil)
 			if err != nil {
-				return err
+				return NewSystemError(err, "failed to ingest text")
 			}
 			if err := job.SetStatus("extracting", ""); err != nil {
 				return err
 			}
 			events, err := normalizer.Normalize(input, content)
 			if err != nil {
-				return err
+				return NewSystemError(err, "failed to normalize text")
 			}
 			for i := range events {
 				events[i].RunID = job.ID()
@@ -87,22 +98,20 @@ func handleIngest(args []string) {
 			repo := sqlite.NewEventRepository(db)
 			for _, event := range events {
 				if err := repo.Append(event); err != nil {
-					return err
+					return NewSystemError(err, "failed to persist event %s", event.ID)
 				}
 			}
 			fmt.Printf("run_id=%s input=%s type=%s format=%s bytes=%d events=%d db=%s source=%s\n", job.ID(), input.ID, input.Type, input.Format, len(content), len(events), defaultDBPath, input.Metadata["source"])
 			return nil
 		})
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "ingest job error: %v\n", err)
-			os.Exit(1)
-		}
+		exitWithMnemosError(f.Verbose, err)
 		return
 	}
 
 	if len(args) != 1 {
-		fmt.Fprintln(os.Stderr, "ingest expects exactly one path argument")
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, "error: ingest accepts exactly one path argument")
+		fmt.Fprintln(os.Stderr, "  mnemos ingest <path>")
+		os.Exit(int(ExitUsage))
 	}
 
 	path := args[0]
@@ -112,14 +121,14 @@ func handleIngest(args []string) {
 		}
 		input, content, err := service.IngestFile(path)
 		if err != nil {
-			return err
+			return NewSystemError(err, "failed to read file %q", path)
 		}
 		if err := job.SetStatus("extracting", ""); err != nil {
 			return err
 		}
 		events, err := normalizer.Normalize(input, content)
 		if err != nil {
-			return err
+			return NewSystemError(err, "failed to normalize content")
 		}
 		for i := range events {
 			events[i].RunID = job.ID()
@@ -130,23 +139,19 @@ func handleIngest(args []string) {
 		repo := sqlite.NewEventRepository(db)
 		for _, event := range events {
 			if err := repo.Append(event); err != nil {
-				return err
+				return NewSystemError(err, "failed to persist event %s", event.ID)
 			}
 		}
 		fmt.Printf("run_id=%s input=%s type=%s format=%s bytes=%d events=%d db=%s source=%s\n", job.ID(), input.ID, input.Type, input.Format, len(content), len(events), defaultDBPath, input.Metadata["source_path"])
 		return nil
 	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ingest job error: %v\n", err)
-		os.Exit(1)
-	}
+	exitWithMnemosError(f.Verbose, err)
 }
 
-func handleQuery(args []string) {
+func handleQuery(args []string, f Flags) {
 	question, runID, err := parseQueryArgs(args)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "query error: %v\n", err)
-		os.Exit(1)
+		exitWithMnemosError(f.Verbose, err)
 	}
 
 	scope := map[string]string{"question": question}
@@ -174,7 +179,7 @@ func handleQuery(args []string) {
 			answer, err = engine.Answer(question)
 		}
 		if err != nil {
-			return err
+			return NewSystemError(err, "query engine failed")
 		}
 
 		response := map[string]any{
@@ -185,22 +190,21 @@ func handleQuery(args []string) {
 		}
 		encoded, err := json.MarshalIndent(response, "", "  ")
 		if err != nil {
-			return err
+			return NewSystemError(err, "failed to encode response")
 		}
 
 		fmt.Println(string(encoded))
 		return nil
 	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "query job error: %v\n", err)
-		os.Exit(1)
-	}
+	exitWithMnemosError(f.Verbose, err)
 }
 
-func handleExtract(args []string) {
+func handleExtract(args []string, f Flags) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "extract expects one or more event IDs")
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, "error: extract requires one or more event IDs")
+		fmt.Fprintln(os.Stderr, "  mnemos extract <event-id> [event-id ...]")
+		fmt.Fprintln(os.Stderr, "  mnemos extract ev_abc123 ev_def456")
+		os.Exit(int(ExitUsage))
 	}
 
 	err := runJob("extract", map[string]string{"event_ids": strings.Join(args, ",")}, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
@@ -210,10 +214,10 @@ func handleExtract(args []string) {
 		eventRepo := sqlite.NewEventRepository(db)
 		events, err := eventRepo.ListByIDs(args)
 		if err != nil {
-			return err
+			return NewSystemError(err, "database lookup failed")
 		}
 		if len(events) == 0 {
-			return fmt.Errorf("no events found for provided IDs")
+			return NewNotFoundError("no events found for the provided IDs (%d given)", len(args))
 		}
 
 		if err := job.SetStatus("extracting", ""); err != nil {
@@ -222,7 +226,7 @@ func handleExtract(args []string) {
 		engine := extract.NewEngine()
 		claims, links, err := engine.Extract(events)
 		if err != nil {
-			return err
+			return NewSystemError(err, "extraction failed")
 		}
 
 		if err := job.SetStatus("saving", ""); err != nil {
@@ -230,22 +234,19 @@ func handleExtract(args []string) {
 		}
 		claimRepo := sqlite.NewClaimRepository(db)
 		if err := claimRepo.Upsert(claims); err != nil {
-			return err
+			return NewSystemError(err, "failed to persist claims")
 		}
 		if err := claimRepo.UpsertEvidence(links); err != nil {
-			return err
+			return NewSystemError(err, "failed to persist claim evidence links")
 		}
 
 		fmt.Printf("events=%d claims=%d evidence_links=%d db=%s\n", len(events), len(claims), len(links), defaultDBPath)
 		return nil
 	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "extract job error: %v\n", err)
-		os.Exit(1)
-	}
+	exitWithMnemosError(f.Verbose, err)
 }
 
-func handleRelate(args []string) {
+func handleRelate(args []string, f Flags) {
 	err := runJob("relate", map[string]string{"event_ids": strings.Join(args, ",")}, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
@@ -261,10 +262,10 @@ func handleRelate(args []string) {
 			claims, err = claimRepo.ListByEventIDs(args)
 		}
 		if err != nil {
-			return err
+			return NewSystemError(err, "database lookup failed")
 		}
 		if len(claims) < 2 {
-			return fmt.Errorf("need at least two claims to detect relationships")
+			return NewUserError("need at least 2 claims to detect relationships (found %d)", len(claims))
 		}
 
 		if err := job.SetStatus("relating", ""); err != nil {
@@ -273,28 +274,27 @@ func handleRelate(args []string) {
 		engine := relate.NewEngine()
 		rels, err := engine.Detect(claims)
 		if err != nil {
-			return err
+			return NewSystemError(err, "relationship detection failed")
 		}
 		if err := job.SetStatus("saving", ""); err != nil {
 			return err
 		}
 		if err := relRepo.Upsert(rels); err != nil {
-			return err
+			return NewSystemError(err, "failed to persist relationships")
 		}
 
 		fmt.Printf("claims=%d relationships=%d db=%s\n", len(claims), len(rels), defaultDBPath)
 		return nil
 	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "relate job error: %v\n", err)
-		os.Exit(1)
-	}
+	exitWithMnemosError(f.Verbose, err)
 }
 
-func handleProcess(args []string) {
+func handleProcess(args []string, f Flags) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "process expects a file path or --text <content>")
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, "error: process requires a file path or --text flag")
+		fmt.Fprintln(os.Stderr, "  mnemos process <path>")
+		fmt.Fprintln(os.Stderr, "  mnemos process --text <content>")
+		os.Exit(int(ExitUsage))
 	}
 
 	service := ingest.NewService()
@@ -318,17 +318,17 @@ func handleProcess(args []string) {
 
 		if args[0] == "--text" {
 			if len(args) < 2 {
-				return fmt.Errorf("process --text expects content")
+				return NewUserError("--text flag requires content after it")
 			}
 			input, content, err = service.IngestText(strings.Join(args[1:], " "), nil)
 		} else {
 			if len(args) != 1 {
-				return fmt.Errorf("process expects exactly one path argument")
+				return NewUserError("process accepts exactly one path argument")
 			}
 			input, content, err = service.IngestFile(args[0])
 		}
 		if err != nil {
-			return err
+			return NewSystemError(err, "failed to read input")
 		}
 
 		if err := job.SetStatus("extracting", ""); err != nil {
@@ -336,7 +336,7 @@ func handleProcess(args []string) {
 		}
 		events, err := normalizer.Normalize(input, content)
 		if err != nil {
-			return err
+			return NewSystemError(err, "normalization failed")
 		}
 		for i := range events {
 			events[i].RunID = job.ID()
@@ -345,7 +345,7 @@ func handleProcess(args []string) {
 		engine := extract.NewEngine()
 		claims, links, err := engine.Extract(events)
 		if err != nil {
-			return err
+			return NewSystemError(err, "claim extraction failed")
 		}
 
 		if err := job.SetStatus("relating", ""); err != nil {
@@ -354,7 +354,7 @@ func handleProcess(args []string) {
 		relEngine := relate.NewEngine()
 		rels, err := relEngine.Detect(claims)
 		if err != nil {
-			return err
+			return NewSystemError(err, "relationship detection failed")
 		}
 
 		if err := job.SetStatus("saving", ""); err != nil {
@@ -372,17 +372,15 @@ func handleProcess(args []string) {
 		fmt.Printf("run_id=%s input=%s events=%d claims=%d relationships=%d event_ids=%s db=%s\n", job.ID(), input.ID, len(events), len(claims), len(rels), strings.Join(eventIDs, ","), defaultDBPath)
 		return nil
 	})
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "process job error: %v\n", err)
-		os.Exit(1)
-	}
+	exitWithMnemosError(f.Verbose, err)
 }
 
 func persistProcessArtifacts(db *sql.DB, events []domain.Event, claims []domain.Claim, links []domain.ClaimEvidence, relationships []domain.Relationship) error {
 	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("begin process transaction: %w", err)
+		return NewSystemError(err, "database transaction failed")
 	}
+	//nolint:errcheck
 	defer tx.Rollback()
 
 	q := sqlcgen.New(tx)
@@ -391,7 +389,7 @@ func persistProcessArtifacts(db *sql.DB, events []domain.Event, claims []domain.
 	for _, event := range events {
 		metadata, err := json.Marshal(event.Metadata)
 		if err != nil {
-			return fmt.Errorf("marshal event metadata: %w", err)
+			return NewSystemError(err, "internal error marshaling event metadata")
 		}
 		err = q.CreateEvent(ctx, sqlcgen.CreateEventParams{
 			ID:            event.ID,
@@ -404,13 +402,13 @@ func persistProcessArtifacts(db *sql.DB, events []domain.Event, claims []domain.
 			IngestedAt:    event.IngestedAt.UTC().Format(time.RFC3339Nano),
 		})
 		if err != nil {
-			return fmt.Errorf("insert event %s: %w", event.ID, err)
+			return NewSystemError(err, "failed to insert event %s", event.ID)
 		}
 	}
 
 	for _, claim := range claims {
 		if err := claim.Validate(); err != nil {
-			return fmt.Errorf("invalid claim %s: %w", claim.ID, err)
+			return NewSystemError(err, "internal: invalid claim %s", claim.ID)
 		}
 		err = q.UpsertClaim(ctx, sqlcgen.UpsertClaimParams{
 			ID:         claim.ID,
@@ -421,17 +419,17 @@ func persistProcessArtifacts(db *sql.DB, events []domain.Event, claims []domain.
 			CreatedAt:  claim.CreatedAt.UTC().Format(time.RFC3339Nano),
 		})
 		if err != nil {
-			return fmt.Errorf("upsert claim %s: %w", claim.ID, err)
+			return NewSystemError(err, "failed to upsert claim %s", claim.ID)
 		}
 	}
 
 	for _, link := range links {
 		if err := link.Validate(); err != nil {
-			return fmt.Errorf("invalid claim evidence: %w", err)
+			return NewSystemError(err, "internal: invalid claim evidence")
 		}
 		err = q.UpsertClaimEvidence(ctx, sqlcgen.UpsertClaimEvidenceParams{ClaimID: link.ClaimID, EventID: link.EventID})
 		if err != nil {
-			return fmt.Errorf("upsert claim evidence (%s,%s): %w", link.ClaimID, link.EventID, err)
+			return NewSystemError(err, "failed to upsert claim evidence (%s,%s)", link.ClaimID, link.EventID)
 		}
 	}
 
@@ -444,12 +442,12 @@ func persistProcessArtifacts(db *sql.DB, events []domain.Event, claims []domain.
 			CreatedAt:   rel.CreatedAt.UTC().Format(time.RFC3339Nano),
 		})
 		if err != nil {
-			return fmt.Errorf("upsert relationship %s: %w", rel.ID, err)
+			return NewSystemError(err, "failed to upsert relationship %s", rel.ID)
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit process transaction: %w", err)
+		return NewSystemError(err, "failed to commit transaction")
 	}
 
 	return nil
@@ -466,29 +464,33 @@ func printUsage() {
 	fmt.Println("  mnemos process <path>")
 	fmt.Println("  mnemos process --text <content>")
 	fmt.Println("  mnemos query [--run <run-id>] <question>")
+	fmt.Println("")
+	fmt.Println("Flags:")
+	fmt.Println("  -h, --help     show this help message")
+	fmt.Println("  -v, --verbose   show detailed error output")
 }
 
 func parseQueryArgs(args []string) (string, string, error) {
 	if len(args) == 0 {
-		return "", "", fmt.Errorf("query expects a question")
+		return "", "", NewUserError("query requires a question")
 	}
 
 	runID := ""
 	questionArgs := args
 	if args[0] == "--run" {
 		if len(args) < 3 {
-			return "", "", fmt.Errorf("query --run expects <run-id> and question")
+			return "", "", NewUserError("--run flag requires <run-id> followed by a question")
 		}
 		runID = strings.TrimSpace(args[1])
 		if runID == "" {
-			return "", "", fmt.Errorf("query --run requires a non-empty run id")
+			return "", "", NewUserError("--run flag requires a non-empty run-id")
 		}
 		questionArgs = args[2:]
 	}
 
 	question := strings.TrimSpace(strings.Join(questionArgs, " "))
 	if question == "" {
-		return "", "", fmt.Errorf("query expects a question")
+		return "", "", NewUserError("query requires a question")
 	}
 
 	return question, runID, nil
@@ -497,8 +499,9 @@ func parseQueryArgs(args []string) (string, string, error) {
 func runJob(kind string, scope map[string]string, fn func(context.Context, *workflow.Job, *sql.DB) error) error {
 	db, err := sqlite.Open(defaultDBPath)
 	if err != nil {
-		return err
+		return NewSystemError(err, "failed to open database at %q", defaultDBPath)
 	}
+	//nolint:errcheck
 	defer db.Close()
 
 	runner := workflow.NewRunner(sqlite.NewCompilationJobRepository(db))

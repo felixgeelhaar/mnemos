@@ -15,7 +15,7 @@ Thank you for your interest in contributing to Mnemos!
 
 ### Prerequisites
 
-- Go 1.22+
+- Go 1.25+
 - Make
 
 ### Running Tests

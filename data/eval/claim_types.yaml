@@ -1,0 +1,108 @@
+# Claim Type Classification Tests
+
+test_cases:
+  - id: type-001
+    description: "Simple factual statement should be classified as fact"
+    tags: [claim_types, facts]
+    input: "The project deadline is March 15, 2026."
+    expected_claims:
+      - text: "The project deadline is March 15, 2026"
+        type: fact
+        min_confidence: 0.75
+    not_expected_claims: []
+
+  - id: type-002
+    description: "Statement with 'we will' indicates a decision"
+    tags: [claim_types, decisions]
+    input: "We will use PostgreSQL as our primary database."
+    expected_claims:
+      - text: "We will use PostgreSQL as our primary database"
+        type: decision
+        min_confidence: 0.80
+    not_expected_claims: []
+
+  - id: type-003
+    description: "Statement with 'decide' indicates a decision"
+    tags: [claim_types, decisions]
+    input: "The team decided to migrate to a microservices architecture."
+    expected_claims:
+      - text: "The team decided to migrate to a microservices architecture"
+        type: decision
+        min_confidence: 0.80
+    not_expected_claims: []
+
+  - id: type-004
+    description: "Statement with 'approved' indicates a decision"
+    tags: [claim_types, decisions]
+    input: "The budget was approved for Q2 expansion."
+    expected_claims:
+      - text: "The budget was approved for Q2 expansion"
+        type: decision
+        min_confidence: 0.80
+    not_expected_claims: []
+
+  - id: type-005
+    description: "Hypothesis with 'might' keyword"
+    tags: [claim_types, hypotheses]
+    input: "We might launch the feature in the next sprint."
+    expected_claims:
+      - text: "We might launch the feature in the next sprint"
+        type: hypothesis
+        min_confidence: 0.50
+    not_expected_claims: []
+
+  - id: type-006
+    description: "Hypothesis with 'could' keyword"
+    tags: [claim_types, hypotheses]
+    input: "This approach could reduce latency by 40%."
+    expected_claims:
+      - text: "This approach could reduce latency by 40%"
+        type: hypothesis
+        min_confidence: 0.50
+    not_expected_claims: []
+
+  - id: type-007
+    description: "Hypothesis with 'expected' keyword"
+    tags: [claim_types, hypotheses]
+    input: "Revenue is expected to grow 20% next quarter."
+    expected_claims:
+      - text: "Revenue is expected to grow 20% next quarter"
+        type: hypothesis
+        min_confidence: 0.50
+    not_expected_claims: []
+
+  - id: type-008
+    description: "Multiple claims of different types in one document"
+    tags: [claim_types, mixed]
+    input: "The server response time is 150ms. We will implement caching. Users might see improved performance."
+    expected_claims:
+      - text: "The server response time is 150ms"
+        type: fact
+        min_confidence: 0.75
+      - text: "We will implement caching"
+        type: decision
+        min_confidence: 0.80
+      - text: "Users might see improved performance"
+        type: hypothesis
+        min_confidence: 0.50
+    not_expected_claims: []
+
+  - id: type-009
+    description: "Statement with 'plan is' indicates a decision"
+    tags: [claim_types, decisions]
+    input: "The plan is to ship by end of month."
+    expected_claims:
+      - text: "The plan is to ship by end of month"
+        type: decision
+        min_confidence: 0.80
+    not_expected_claims: []
+
+  - id: type-010
+    description: "'Chosen' indicates a decision"
+    tags: [claim_types, decisions]
+    input: "React was chosen as the frontend framework."
+    expected_claims:
+      - text: "React was chosen as the frontend framework"
+        type: decision
+        min_confidence: 0.80
+    not_expected_claims: []

@@ -1,0 +1,83 @@
+# Confidence Scoring Tests
+
+test_cases:
+  - id: conf-001
+    description: "Facts with digits should have higher confidence"
+    tags: [confidence_scoring, facts]
+    input: "The conversion rate is 4 percent."
+    expected_claims:
+      - text: "The conversion rate is 4 percent"
+        type: fact
+        min_confidence: 0.80
+    not_expected_claims: []
+
+  - id: conf-002
+    description: "Facts with uncertain words should have lower confidence"
+    tags: [confidence_scoring, uncertainty]
+    input: "The release date is approximately next month."
+    expected_claims:
+      - text: "The release date is approximately next month"
+        type: fact
+        min_confidence: 0.60
+    not_expected_claims: []
+
+  - id: conf-003
+    description: "Facts with confirmed/observed should have higher confidence"
+    tags: [confidence_scoring, evidence]
+    input: "We have confirmed the bug in production."
+    expected_claims:
+      - text: "We have confirmed the bug in production"
+        type: fact
+        min_confidence: 0.80
+    not_expected_claims: []
+
+  - id: conf-004
+    description: "Hypotheses should have lower base confidence than facts"
+    tags: [confidence_scoring, hypotheses]
+    input: "This might solve the performance issue."
+    expected_claims:
+      - text: "This might solve the performance issue"
+        type: hypothesis
+        min_confidence: 0.50
+    not_expected_claims: []
+
+  - id: conf-005
+    description: "Decisions should have higher confidence than hypotheses"
+    tags: [confidence_scoring, decisions]
+    input: "We decided to use Redis for caching."
+    expected_claims:
+      - text: "We decided to use Redis for caching"
+        type: decision
+        min_confidence: 0.80
+    not_expected_claims: []
+
+  - id: conf-006
+    description: "Facts without modifiers should have standard confidence"
+    tags: [confidence_scoring, baseline]
+    input: "The application uses REST APIs."
+    expected_claims:
+      - text: "The application uses REST APIs"
+        type: fact
+        min_confidence: 0.75
+    not_expected_claims: []
+
+  - id: conf-007
+    description: "Multiple uncertainty modifiers should compound"
+    tags: [confidence_scoring, compound]
+    input: "The cost might be around maybe."
+    expected_claims:
+      - text: "The cost might be around maybe"
+        type: hypothesis
+        min_confidence: 0.50
+    not_expected_claims: []
+
+  - id: conf-008
+    description: "Confidence should be clamped between 0.5 and 0.95"
+    tags: [confidence_scoring, bounds]
+    input: "This definitely works maybe perhaps possibly."
+    expected_claims:
+      - text: "This definitely works maybe perhaps possibly"
+        type: hypothesis
+        min_confidence: 0.50
+        max_confidence: 0.95
+    not_expected_claims: []

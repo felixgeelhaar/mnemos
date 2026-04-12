@@ -1,0 +1,215 @@
+# Real-World Document Tests
+
+test_cases:
+  - id: real-001
+    description: "Meeting notes with multiple claim types"
+    tags: [real_world, meeting_notes]
+    input: "Q3 Planning Meeting scheduled for March 1 2026. Attendees include Product Engineering and Design. Key decisions were made. We will prioritize mobile app over web dashboard. Budget approved for 2 additional engineers. API v2 launch scheduled for April 15. Discussion points covered. Current DAU is 15,000. User retention might improve with push notifications. Conversion rate approximately 3.5 percent. Engineering to complete security audit by March 20"
+    expected_claims:
+      - text: "We will prioritize mobile app over web dashboard"
+        type: decision
+        min_confidence: 0.80
+      - text: "Budget approved for 2 additional engineers"
+        type: decision
+        min_confidence: 0.80
+      - text: "API v2 launch scheduled for April 15"
+        type: fact
+        min_confidence: 0.80
+      - text: "Current DAU is 15,000"
+        type: fact
+        min_confidence: 0.80
+      - text: "User retention might improve with push notifications"
+        type: hypothesis
+        min_confidence: 0.50
+      - text: "Engineering to complete security audit by March 20"
+        type: fact
+        min_confidence: 0.75
+    expected_min_count: 4
+    not_expected_claims: []
+
+  - id: real-002
+    description: "Technical PRD excerpt"
+    tags: [real_world, prd]
+    input: "Feature: User Authentication. Users must authenticate via OAuth. JWT tokens expire after 24 hours. Refresh tokens are valid for 30 days. Architecture decisions made. We will use Auth0 as the identity provider. Sessions stored in Redis with 24h TTL. Passwords must be at least 12 characters. MFA might be required for admin accounts"
+    expected_claims:
+      - text: "Users must authenticate via OAuth"
+        type: fact
+        min_confidence: 0.75
+      - text: "JWT tokens expire after 24 hours"
+        type: fact
+        min_confidence: 0.80
+      - text: "Refresh tokens are valid for 30 days"
+        type: fact
+        min_confidence: 0.80
+      - text: "We will use Auth0 as the identity provider"
+        type: decision
+        min_confidence: 0.80
+      - text: "Sessions stored in Redis"
+        type: fact
+        min_confidence: 0.75
+      - text: "Passwords must be at least 12 characters"
+        type: fact
+        min_confidence: 0.75
+      - text: "MFA might be required for admin accounts"
+        type: hypothesis
+        min_confidence: 0.50
+    expected_min_count: 5
+    not_expected_claims: []
+
+  - id: real-003
+    description: "Bug report with facts and hypotheses"
+    tags: [real_world, bug_report]
+    input: "Bug: Slow API Responses. Severity: High. Average response time is 2 seconds. Database queries are the bottleneck. We observed N+1 query pattern in user service. Adding indexes might reduce latency. We decided to implement connection pooling. Fix will be deployed by end of week"
+    expected_claims:
+      - text: "Average response time is 2"
+        type: fact
+        min_confidence: 0.70
+      - text: "Database queries are the bottleneck"
+        type: fact
+        min_confidence: 0.75
+      - text: "We observed N+1 query pattern in user service"
+        type: fact
+        min_confidence: 0.75
+      - text: "Adding indexes might reduce latency"
+        type: hypothesis
+        min_confidence: 0.50
+      - text: "We decided to implement connection pooling"
+        type: decision
+        min_confidence: 0.80
+      - text: "Fix will be deployed by end of week"
+        type: fact
+        min_confidence: 0.75
+    expected_min_count: 4
+    not_expected_claims: []
+
+  - id: real-004
+    description: "OKR document"
+    tags: [real_world, okr]
+    input: "Q2 OKRs. Objective 1: Improve Platform Reliability. Achieve 99 percent uptime. Currently at 99 percent. Reduce P1 incidents to less than 2 per month. Response time should be under 200ms at P95. Objective 2: Grow User Base. DAU might reach 25,000 by end of quarter. We will launch referral program. Conversion rate target is 5 percent"
+    expected_claims:
+      - text: "Achieve 99 percent uptime"
+        type: fact
+        min_confidence: 0.70
+      - text: "Reduce P1 incidents to less than 2 per month"
+        type: fact
+        min_confidence: 0.75
+      - text: "Response time should be under 200ms"
+        type: fact
+        min_confidence: 0.75
+      - text: "DAU might reach 25,000 by end of quarter"
+        type: hypothesis
+        min_confidence: 0.50
+      - text: "We will launch referral program"
+        type: decision
+        min_confidence: 0.80
+      - text: "Conversion rate target is 5 percent"
+        type: fact
+        min_confidence: 0.75
+    expected_min_count: 4
+    not_expected_claims: []
+
+  - id: real-005
+    description: "Architecture decision record"
+    tags: [real_world, adr]
+    input: "ADR-001: Choose Message Queue. Status: Accepted. System handles 100K messages per day. We need at-least-once delivery guarantees. We will use Apache Kafka for message streaming. Redis Streams chosen for caching layer. Team needs Kafka training. Operational complexity will increase"
+    expected_claims:
+      - text: "System handles 100K messages per day"
+        type: fact
+        min_confidence: 0.80
+      - text: "We need at-least-once delivery guarantees"
+        type: fact
+        min_confidence: 0.75
+      - text: "We will use Apache Kafka for message streaming"
+        type: decision
+        min_confidence: 0.80
+      - text: "Redis Streams chosen for caching layer"
+        type: decision
+        min_confidence: 0.80
+      - text: "Team needs Kafka training"
+        type: fact
+        min_confidence: 0.75
+      - text: "Operational complexity will increase"
+        type: fact
+        min_confidence: 0.75
+    expected_min_count: 4
+    not_expected_claims: []
+
+  - id: real-006
+    description: "Retrospective with conflicting data"
+    tags: [real_world, retrospective, contested]
+    input: "Sprint 24 Retrospective. What went well. We shipped 12 features. Team velocity is 42 story points. What didn't go well. We didn't meet the Q4 target. We met the Q4 target. Learnings. User research might have prevented the rework. We decided to add dedicated QA"
+    expected_claims:
+      - text: "We shipped 12 features"
+        type: fact
+        min_confidence: 0.80
+      - text: "Team velocity is 42 story points"
+        type: fact
+        min_confidence: 0.80
+      - text: "We didn't meet the Q4 target"
+        type: fact
+        status: contested
+        min_confidence: 0.70
+      - text: "We met the Q4 target"
+        type: fact
+        status: contested
+        min_confidence: 0.70
+      - text: "User research might have prevented the rework"
+        type: hypothesis
+        min_confidence: 0.50
+      - text: "We decided to add dedicated QA"
+        type: decision
+        min_confidence: 0.80
+    expected_min_count: 4
+    not_expected_claims: []
+
+  - id: real-007
+    description: "Technical design document excerpt"
+    tags: [real_world, technical_design]
+    input: "Database Schema Design. Tables. Users table has 1M plus rows. We will use PostgreSQL 15. Partitioning strategy chosen for scalability. Performance. Read latency is 5ms on average. Write latency might increase with partitioning. All data encrypted at rest. PII fields marked for GDPR compliance"
+    expected_claims:
+      - text: "Users table has 1M plus rows"
+        type: fact
+        min_confidence: 0.80
+      - text: "We will use PostgreSQL 15"
+        type: decision
+        min_confidence: 0.80
+      - text: "Partitioning strategy chosen for scalability"
+        type: decision
+        min_confidence: 0.80
+      - text: "Read latency is 5ms on average"
+        type: fact
+        min_confidence: 0.80
+      - text: "Write latency might increase with partitioning"
+        type: hypothesis
+        min_confidence: 0.50
+      - text: "All data encrypted at rest"
+        type: fact
+        min_confidence: 0.75
+      - text: "PII fields marked for GDPR compliance"
+        type: fact
+        min_confidence: 0.75
+    expected_min_count: 5
+    not_expected_claims: []
+
+  - id: real-008
+    description: "Product requirements with metrics"
+    tags: [real_world, requirements]
+    input: "Performance Requirements. API Endpoints. GET /users must respond within 100ms. POST /orders must handle 1000 req per s. Cache hit rate should be above 80 percent. Scalability. System can handle 10K concurrent users. Database might need sharding at 100M rows"
+    expected_claims:
+      - text: "GET /users must respond within 100ms"
+        type: fact
+        min_confidence: 0.75
+      - text: "POST /orders must handle 1000 req"
+        type: fact
+        min_confidence: 0.75
+      - text: "Cache hit rate should be above 80 percent"
+        type: fact
+        min_confidence: 0.75
+      - text: "System can handle 10K concurrent users"
+        type: fact
+        min_confidence: 0.75
+      - text: "Database might need sharding at 100M rows"
+        type: hypothesis
+        min_confidence: 0.50
+    expected_min_count: 4
+    not_expected_claims: []

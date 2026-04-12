@@ -1,0 +1,59 @@
+version: "1.0"
+description: "Mnemos extraction engine evaluation dataset"
+created: "2026-04-12"
+total_cases: 50
+
+categories:
+  - id: claim_types
+    name: "Claim Type Classification"
+    description: "Tests for correct classification of facts, decisions, and hypotheses"
+  - id: deduplication
+    name: "Deduplication"
+    description: "Tests for removing near-identical duplicate claims"
+  - id: contested_detection
+    name: "Contested Claim Detection"
+    description: "Tests for identifying contradictory claims"
+  - id: confidence_scoring
+    name: "Confidence Scoring"
+    description: "Tests for appropriate confidence score assignment"
+  - id: edge_cases
+    name: "Edge Cases"
+    description: "Tests for boundary conditions and unusual inputs"
+  - id: real_world
+    name: "Real-World Documents"
+    description: "Tests with realistic multi-paragraph documents"
+
+format:
+  input:
+    - field: id
+      type: string
+      description: "Unique test case identifier (e.g., 'type-001')"
+    - field: description
+      type: string
+      description: "Human-readable description of what this tests"
+    - field: tags
+      type: array[string]
+      description: "Category tags for filtering"
+    - field: input
+      type: string
+      description: "Document text to extract claims from"
+    - field: expected_claims
+      type: array[claim]
+      description: "Claims that should be extracted"
+    - field: not_expected_claims
+      type: array[string]
+      description: "Claim texts that should NOT be extracted"
+
+  claim:
+    - field: text
+      type: string
+      description: "Expected claim text (exact match or pattern)"
+    - field: type
+      type: enum[fact, hypothesis, decision]
+      description: "Expected claim type"
+    - field: status
+      type: enum[active, contested]
+      description: "Expected claim status (default: active)"
+    - field: min_confidence
+      type: float
+      description: "Minimum expected confidence score"

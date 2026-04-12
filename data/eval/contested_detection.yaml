@@ -1,0 +1,152 @@
+# Contested Claim Detection Tests
+
+test_cases:
+  - id: contest-001
+    description: "Direct contradictions should be marked as contested"
+    tags: [contested_detection, direct_contradiction]
+    input: "The feature is complete. The feature is not complete."
+    expected_claims:
+      - text: "The feature is complete"
+        type: fact
+        status: contested
+        min_confidence: 0.70
+      - text: "The feature is not complete"
+        type: fact
+        status: contested
+        min_confidence: 0.70
+    not_expected_claims: []
+
+  - id: contest-002
+    description: "Contradiction with 'never' vs 'sometimes'"
+    tags: [contested_detection, negation]
+    input: "The API never fails. The API sometimes fails under load."
+    expected_claims:
+      - text: "The API never fails"
+        type: fact
+        status: contested
+        min_confidence: 0.70
+      - text: "The API sometimes fails under load"
+        type: fact
+        status: contested
+        min_confidence: 0.50
+    not_expected_claims: []
+
+  - id: contest-003
+    description: "Different magnitudes - single core word needs 2-token overlap threshold"
+    tags: [contested_detection, magnitude]
+    input: "The latency is 100ms. The latency is 500ms."
+    expected_claims:
+      - text: "The latency is 100ms"
+        type: fact
+        status: active
+        min_confidence: 0.70
+      - text: "The latency is 500ms"
+        type: fact
+        status: active
+        min_confidence: 0.70
+    not_expected_claims: []
+
+  - id: contest-004
+    description: "Contradictory decisions - same polarity not detected as contested"
+    tags: [contested_detection, decisions]
+    input: "We will use React framework. We will use Vue framework."
+    expected_claims:
+      - text: "We will use React framework"
+        type: decision
+        status: active
+        min_confidence: 0.75
+      - text: "We will use Vue framework"
+        type: decision
+        status: active
+        min_confidence: 0.75
+    not_expected_claims: []
+
+  - id: contest-005
+    description: "Unrelated claims should NOT be marked contested"
+    tags: [contested_detection, false_positives]
+    input: "The server runs on AWS. The database uses PostgreSQL."
+    expected_claims:
+      - text: "The server runs on AWS"
+        type: fact
+        status: active
+        min_confidence: 0.75
+      - text: "The database uses PostgreSQL"
+        type: fact
+        status: active
+        min_confidence: 0.75
+    not_expected_claims: []
+
+  - id: contest-006
+    description: "Claims with insufficient overlap should NOT be contested"
+    tags: [contested_detection, false_positives]
+    input: "The frontend uses TypeScript. The backend uses Go."
+    expected_claims:
+      - text: "The frontend uses TypeScript"
+        type: fact
+        status: active
+        min_confidence: 0.75
+      - text: "The backend uses Go"
+        type: fact
+        status: active
+        min_confidence: 0.75
+    not_expected_claims: []
+
+  - id: contest-007
+    description: "Same-polarity claims should NOT be contested even with similar core"
+    tags: [contested_detection, false_positives]
+    input: "The system uses authentication. The system uses authorization."
+    expected_claims:
+      - text: "The system uses authentication"
+        type: fact
+        status: active
+        min_confidence: 0.75
+      - text: "The system uses authorization"
+        type: fact
+        status: active
+        min_confidence: 0.75
+    not_expected_claims: []
+
+  - id: contest-008
+    description: "Contradiction with 'cannot' vs 'can'"
+    tags: [contested_detection, capability]
+    input: "The system cannot handle 10K requests. The system can handle 10K requests."
+    expected_claims:
+      - text: "The system cannot handle 10K requests"
+        type: fact
+        status: contested
+        min_confidence: 0.70
+      - text: "The system can handle 10K requests"
+        type: fact
+        status: contested
+        min_confidence: 0.70
+    not_expected_claims: []
+
+  - id: contest-009
+    description: "Multiple claims with one contradiction pair"
+    tags: [contested_detection, complex]
+    input: "The project has 5 engineers. We hired 2 more. The project has 5 engineers."
+    expected_claims:
+      - text: "The project has 5 engineers"
+        type: fact
+        status: active
+        min_confidence: 0.75
+      - text: "We hired 2 more"
+        type: fact
+        status: active
+        min_confidence: 0.75
+    not_expected_claims: []
+
+  - id: contest-010
+    description: "Hypothesis vs decision - same polarity not detected as contested"
+    tags: [contested_detection, mixed_types]
+    input: "The feature might be ready by Friday. We will ship by Friday."
+    expected_claims:
+      - text: "The feature might be ready by Friday"
+        type: hypothesis
+        status: active
+        min_confidence: 0.50
+      - text: "We will ship by Friday"
+        type: decision
+        status: active
+        min_confidence: 0.75
+    not_expected_claims: []

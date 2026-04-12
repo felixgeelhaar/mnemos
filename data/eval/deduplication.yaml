@@ -1,0 +1,102 @@
+# Deduplication Tests
+
+test_cases:
+  - id: dedup-001
+    description: "Identical claims with different punctuation should be deduplicated"
+    tags: [deduplication, punctuation]
+    input: "The API response time is 200ms. The API response time is 200ms!"
+    expected_claims:
+      - text: "The API response time is 200ms"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 1
+    not_expected_claims:
+      - "The API response time is 200ms"
+
+  - id: dedup-002
+    description: "Identical claims with different case should be deduplicated"
+    tags: [deduplication, case_sensitivity]
+    input: "The project uses Go language. The project uses GO language."
+    expected_claims:
+      - text: "The project uses Go language"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 1
+    not_expected_claims: []
+
+  - id: dedup-003
+    description: "Claims with trailing whitespace variations should be deduplicated"
+    tags: [deduplication, whitespace]
+    input: "Our team has 12 members.   Our team has 12 members.  "
+    expected_claims:
+      - text: "Our team has 12 members"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 1
+    not_expected_claims: []
+
+  - id: dedup-004
+    description: "Semantically different claims should NOT be deduplicated"
+    tags: [deduplication, false_positives]
+    input: "The user login takes 2 seconds. The file upload takes 2 seconds."
+    expected_claims:
+      - text: "The user login takes 2 seconds"
+        type: fact
+        min_confidence: 0.75
+      - text: "The file upload takes 2 seconds"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 2
+    not_expected_claims: []
+
+  - id: dedup-005
+    description: "Claims with minor word differences should NOT be deduplicated"
+    tags: [deduplication, false_negatives]
+    input: "We shipped version 1.0. We shipped version 2.0."
+    expected_claims:
+      - text: "We shipped version 1"
+        type: fact
+        min_confidence: 0.75
+      - text: "We shipped version 2"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 2
+    not_expected_claims: []
+
+  - id: dedup-006
+    description: "Claims differing only by stopwords - same after normalization"
+    tags: [deduplication, stopwords]
+    input: "The system is deployed to production. The system is deployed to production."
+    expected_claims:
+      - text: "The system is deployed to production"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 1
+    not_expected_claims: []
+
+  - id: dedup-007
+    description: "Claims differing by negation should NOT be deduplicated"
+    tags: [deduplication, negation]
+    input: "The system supports JSON format. The system does not support JSON format."
+    expected_claims:
+      - text: "The system supports JSON format"
+        type: fact
+        status: contested
+        min_confidence: 0.70
+      - text: "The system does not support JSON format"
+        type: fact
+        status: contested
+        min_confidence: 0.70
+    expected_count: 2
+    not_expected_claims: []
+
+  - id: dedup-008
+    description: "Multiple duplicates should all be deduplicated"
+    tags: [deduplication, multiple]
+    input: "Annual revenue is $1M. Annual revenue is $1M. Annual revenue is $1M. Annual revenue is $1M."
+    expected_claims:
+      - text: "Annual revenue is $1M"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 1
+    not_expected_claims: []

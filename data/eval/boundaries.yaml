@@ -1,0 +1,171 @@
+# Additional Edge Cases and Boundary Tests
+
+test_cases:
+  - id: boundary-001
+    description: "Four-character minimum claim length - exact boundary"
+    tags: [edge_cases, boundary]
+    input: "Go!"
+    expected_claims:
+      - text: "Go"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 1
+    not_expected_claims: []
+
+  - id: boundary-002
+    description: "Three-character minimum - words under 4 chars filtered"
+    tags: [edge_cases, boundary]
+    input: "Yes. No. Maybe."
+    expected_claims:
+      - text: "Maybe"
+        type: hypothesis
+        min_confidence: 0.50
+    expected_count: 1
+    not_expected_claims: []
+
+  - id: boundary-003
+    description: "Mixed language content"
+    tags: [edge_cases, internationalization]
+    input: "The feature is ready. The release is tomorrow."
+    expected_claims:
+      - text: "The feature is ready"
+        type: fact
+        min_confidence: 0.75
+      - text: "The release is tomorrow"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 2
+    not_expected_claims: []
+
+  - id: boundary-004
+    description: "Code-like content should not break extraction"
+    tags: [edge_cases, code]
+    input: "function process returns data. The function processes records per second."
+    expected_claims:
+      - text: "function process returns data"
+        type: fact
+        min_confidence: 0.75
+      - text: "The function processes records per second"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 2
+    not_expected_claims: []
+
+  - id: boundary-005
+    description: "Bullet points should be treated as sentences"
+    tags: [edge_cases, formatting]
+    input: "We decided to use TypeScript. Budget is fifty thousand dollars. Timeline might be 3 months."
+    expected_claims:
+      - text: "We decided to use TypeScript"
+        type: decision
+        min_confidence: 0.80
+      - text: "Budget is fifty thousand dollars"
+        type: fact
+        min_confidence: 0.80
+      - text: "Timeline might be 3 months"
+        type: hypothesis
+        min_confidence: 0.50
+    expected_count: 3
+    not_expected_claims: []
+
+  - id: boundary-006
+    description: "Quotes and attributed statements - 'we will' triggers decision type"
+    tags: [edge_cases, attribution]
+    input: "According to the CEO we will achieve profitability by Q4. The CFO confirmed this."
+    expected_claims:
+      - text: "According to the CEO we will achieve profitability by Q4"
+        type: decision
+        min_confidence: 0.80
+      - text: "The CFO confirmed this"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 2
+    not_expected_claims: []
+
+  - id: boundary-007
+    description: "Date and time references"
+    tags: [edge_cases, temporal]
+    input: "Meeting scheduled for March 15 at 2 PM. Standup is every weekday at 9 AM."
+    expected_claims:
+      - text: "Meeting scheduled for March 15 at 2 PM"
+        type: fact
+        min_confidence: 0.80
+      - text: "Standup is every weekday at 9 AM"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 2
+    not_expected_claims: []
+
+  - id: boundary-008
+    description: "Comparative claims"
+    tags: [edge_cases, comparison]
+    input: "Our solution is faster than competitors. We have more features than before."
+    expected_claims:
+      - text: "Our solution is faster than competitors"
+        type: fact
+        min_confidence: 0.75
+      - text: "We have more features than before"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 2
+    not_expected_claims: []
+
+  - id: boundary-009
+    description: "Conditional statements"
+    tags: [edge_cases, conditionals]
+    input: "If we launch on time revenue will exceed. When latency drops below user satisfaction increases."
+    expected_claims:
+      - text: "If we launch on time revenue will exceed"
+        type: fact
+        min_confidence: 0.70
+      - text: "When latency drops below user satisfaction increases"
+        type: fact
+        min_confidence: 0.70
+    expected_count: 2
+    not_expected_claims: []
+
+  - id: boundary-010
+    description: "List of items - each item should be a claim"
+    tags: [edge_cases, lists]
+    input: "Supported languages include Python, Go, Rust and TypeScript."
+    expected_claims:
+      - text: "Supported languages include Python, Go, Rust and TypeScript"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 1
+    not_expected_claims: []
+
+  - id: boundary-011
+    description: "Version numbers - decimals split on dot"
+    tags: [edge_cases, versions]
+    input: "Current version is 2. We will upgrade to 3 next quarter. Migration might take 2 weeks."
+    expected_claims:
+      - text: "Current version is 2"
+        type: fact
+        min_confidence: 0.80
+      - text: "We will upgrade to 3 next quarter"
+        type: decision
+        min_confidence: 0.80
+      - text: "Migration might take 2 weeks"
+        type: hypothesis
+        min_confidence: 0.50
+    expected_count: 3
+    not_expected_claims: []
+
+  - id: boundary-012
+    description: "Percentage changes"
+    tags: [edge_cases, metrics]
+    input: "Revenue grew 25 percent last year. Churn increased by 3 percent. NPS improved from 45 to 62."
+    expected_claims:
+      - text: "Revenue grew 25 percent last year"
+        type: fact
+        min_confidence: 0.80
+      - text: "Churn increased by 3 percent"
+        type: fact
+        min_confidence: 0.80
+      - text: "NPS improved from 45 to 62"
+        type: fact
+        min_confidence: 0.80
+    expected_count: 3
+    not_expected_claims: []
+

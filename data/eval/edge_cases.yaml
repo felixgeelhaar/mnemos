@@ -1,0 +1,162 @@
+# Edge Cases Tests
+
+test_cases:
+  - id: edge-001
+    description: "Very short input - minimum length is 4 chars"
+    tags: [edge_cases, short_input]
+    input: "OK."
+    expected_claims:
+      - text: "OK"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 1
+    not_expected_claims: []
+
+  - id: edge-002
+    description: "Single character - fallback behavior returns it despite < 4 char filter"
+    tags: [edge_cases, short_input]
+    input: "A"
+    expected_claims:
+      - text: "A"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 1
+    not_expected_claims: []
+
+  - id: edge-003
+    description: "Empty input should produce no claims"
+    tags: [edge_cases, empty]
+    input: ""
+    expected_claims: []
+    expected_count: 0
+    not_expected_claims: []
+
+  - id: edge-004
+    description: "Whitespace-only input should produce no claims"
+    tags: [edge_cases, whitespace]
+    input: "   \n\n\t\t  "
+    expected_claims: []
+    expected_count: 0
+    not_expected_claims: []
+
+  - id: edge-005
+    description: "Newlines should be treated as sentence separators"
+    tags: [edge_cases, separators]
+    input: "First claim\nSecond claim\nThird claim"
+    expected_claims:
+      - text: "First claim"
+        type: fact
+        min_confidence: 0.75
+      - text: "Second claim"
+        type: fact
+        min_confidence: 0.75
+      - text: "Third claim"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 3
+    not_expected_claims: []
+
+  - id: edge-006
+    description: "Multiple punctuation marks handled as sentence breaks - short words filtered"
+    tags: [edge_cases, punctuation]
+    input: "Wait... Really??? Yes indeed!!!"
+    expected_claims:
+      - text: "Wait"
+        type: fact
+        min_confidence: 0.75
+      - text: "Really"
+        type: fact
+        min_confidence: 0.75
+      - text: "Yes indeed"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 3
+    not_expected_claims: []
+
+  - id: edge-007
+    description: "Very long sentence should be preserved"
+    tags: [edge_cases, long_sentences]
+    input: "The comprehensive analysis of all available data including customer feedback surveys quarterly performance metrics competitive intelligence reports and industry trend analysis conclusively demonstrates that our current market positioning strategy requires fundamental restructuring to maintain competitive advantage in the rapidly evolving technology landscape."
+    expected_claims:
+      - text: "The comprehensive analysis of all available data including customer feedback surveys quarterly performance metrics competitive intelligence reports and industry trend analysis conclusively demonstrates that our current market positioning strategy requires fundamental restructuring to maintain competitive advantage in the rapidly evolving technology landscape"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 1
+    not_expected_claims: []
+
+  - id: edge-008
+    description: "URLs split on dots - documents the current behavior"
+    tags: [edge_cases, technical]
+    input: "Visit example.com for documentation. The endpoint returns 200 status codes."
+    expected_claims:
+      - text: "The endpoint returns 200 status codes"
+        type: fact
+        min_confidence: 0.75
+    expected_min_count: 2
+    not_expected_claims: []
+
+  - id: edge-009
+    description: "Numbers and percentages - decimals split on dot"
+    tags: [edge_cases, numeric]
+    input: "User growth was 150 percent YoY. Churn rate is 2 percent. Revenue hit 10 million ARR."
+    expected_claims:
+      - text: "User growth was 150 percent YoY"
+        type: fact
+        min_confidence: 0.80
+      - text: "Churn rate is 2 percent"
+        type: fact
+        min_confidence: 0.80
+      - text: "Revenue hit 10 million ARR"
+        type: fact
+        min_confidence: 0.80
+    expected_count: 3
+    not_expected_claims: []
+
+  - id: edge-010
+    description: "Special characters should not break extraction"
+    tags: [edge_cases, special_chars]
+    input: "The team discussed mentions and hashtags. Email is test at example dot com. Code has const x equals 1."
+    expected_claims:
+      - text: "The team discussed mentions and hashtags"
+        type: fact
+        min_confidence: 0.75
+      - text: "Email is test at example dot com"
+        type: fact
+        min_confidence: 0.75
+      - text: "Code has const x equals 1"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 3
+    not_expected_claims: []
+
+  - id: edge-011
+    description: "Contractions should be handled"
+    tags: [edge_cases, grammar]
+    input: "We didn't complete the task. It's already done. We can't ship today."
+    expected_claims:
+      - text: "We didn't complete the task"
+        type: fact
+        min_confidence: 0.70
+      - text: "It's already done"
+        type: fact
+        min_confidence: 0.70
+      - text: "We can't ship today"
+        type: fact
+        min_confidence: 0.70
+    expected_count: 3
+    not_expected_claims: []
+
+  - id: edge-012
+    description: "Non-ASCII characters should be preserved"
+    tags: [edge_cases, unicode]
+    input: "The café serves different cocktails. Japan markets are expanding."
+    expected_claims:
+      - text: "The café serves different cocktails"
+        type: fact
+        min_confidence: 0.75
+      - text: "Japan markets are expanding"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 2
+    not_expected_claims: []
+

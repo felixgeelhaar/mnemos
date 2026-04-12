@@ -82,9 +82,27 @@
       "estimate": "",
       "depends_on": [],
       "feature_id": "workflow-orchestration-and-observability"
+    },
+    {
+      "id": "task-claim-extraction-heuristics-v2",
+      "title": "Implement Claim Extraction Heuristics v2",
+      "description": "Implement the feature: Claim Extraction Heuristics v2. Improve claim extraction quality by splitting event text into sentence-level candidate claims, deduplicating near-identical claims, and applying stronger heuristic scoring for fact/decision/hypothesis classification while preserving evidence traceability.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "claim-extraction-heuristics-v2"
+    },
+    {
+      "id": "task-sqlc-typed-data-access",
+      "title": "Implement SQLC Typed Data Access",
+      "description": "Implement the feature: SQLC Typed Data Access. Adopt sqlc for SQLite data-access to replace handwritten SQL in repositories with generated, typed query methods; include schema/queries layout, generation command, and initial migration of core event and claim reads/writes.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "sqlc-typed-data-access"
     }
   ],
   "approval_status": "approved",
   "created_at": "2026-04-12T11:03:09.397775+02:00",
-  "updated_at": "2026-04-12T11:19:08.857177+02:00"
+  "updated_at": "2026-04-12T14:34:15.666929+02:00"
 }

@@ -38,5 +38,13 @@ features:
       title: Workflow Orchestration and Observability
       description: Track ingestion/extraction/relationship jobs through explicit workflow states with structured logging, retries, timeouts, and failure handling.
       requirements: []
+    - id: claim-extraction-heuristics-v2
+      title: Claim Extraction Heuristics v2
+      description: Improve claim extraction quality by splitting event text into sentence-level candidate claims, deduplicating near-identical claims, and applying stronger heuristic scoring for fact/decision/hypothesis classification while preserving evidence traceability.
+      requirements: []
+    - id: sqlc-typed-data-access
+      title: SQLC Typed Data Access
+      description: Adopt sqlc for SQLite data-access to replace handwritten SQL in repositories with generated, typed query methods; include schema/queries layout, generation command, and initial migration of core event and claim reads/writes.
+      requirements: []
 constraints: []
 version: 0.1.0

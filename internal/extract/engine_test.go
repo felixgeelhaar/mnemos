@@ -46,6 +46,58 @@ func TestEngineExtractCreatesClaimAndEvidencePerEvent(t *testing.T) {
 	}
 }
 
+func TestEngineExtractSplitsSentencesAndDedupes(t *testing.T) {
+	engine := Engine{
+		now:    func() time.Time { return time.Date(2026, 4, 12, 13, 5, 0, 0, time.UTC) },
+		nextID: seqClaimIDs(),
+	}
+
+	events := []domain.Event{
+		{ID: "ev_1", Content: "Revenue increased to 10%. Revenue increased to 10%!"},
+		{ID: "ev_2", Content: "We decided to expand EU operations."},
+	}
+
+	claims, evidence, err := engine.Extract(events)
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if len(claims) != 2 {
+		t.Fatalf("Extract() claims len = %d, want 2", len(claims))
+	}
+	if len(evidence) != 2 {
+		t.Fatalf("Extract() evidence len = %d, want 2", len(evidence))
+	}
+	if claims[0].Confidence <= 0.8 {
+		t.Fatalf("claims[0] confidence = %f, expected boosted fact confidence", claims[0].Confidence)
+	}
+}
+
+func TestEngineExtractMarksContestedClaims(t *testing.T) {
+	engine := Engine{
+		now:    func() time.Time { return time.Date(2026, 4, 12, 13, 10, 0, 0, time.UTC) },
+		nextID: seqClaimIDs(),
+	}
+
+	events := []domain.Event{
+		{ID: "ev_1", Content: "Revenue decreased after launch."},
+		{ID: "ev_2", Content: "Revenue did not decrease after launch."},
+	}
+
+	claims, _, err := engine.Extract(events)
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if len(claims) != 2 {
+		t.Fatalf("Extract() claims len = %d, want 2", len(claims))
+	}
+	if claims[0].Status != domain.ClaimStatusContested {
+		t.Fatalf("claims[0] status = %q, want contested", claims[0].Status)
+	}
+	if claims[1].Status != domain.ClaimStatusContested {
+		t.Fatalf("claims[1] status = %q, want contested", claims[1].Status)
+	}
+}
+
 func seqClaimIDs() func() (string, error) {
 	i := 0
 	return func() (string, error) {

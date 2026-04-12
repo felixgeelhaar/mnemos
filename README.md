@@ -13,6 +13,7 @@ This repository is in foundation stage. The current implementation provides:
 - Relationship detection across extracted claims (supports/contradicts)
 - Structured CLI query output (`answer`, `claims`, `contradictions`, `timeline`)
 - Workflow jobs with status transitions, timeout/retry handling, and structured JSON logs
+- SQLC-based typed data-access layer for core SQLite queries
 - Go toolchain setup for format, vet, test, and build
 
 ## Prerequisites
@@ -42,6 +43,7 @@ Typical flow: `ingest -> extract -> relate -> query`.
 - `make lint` - run static checks (`go vet`)
 - `make test` - run unit tests
 - `make build` - build CLI binary to `bin/mnemos`
+- `make sqlc` - regenerate typed query code from `sqlc.yaml`
 - `make check` - `fmt -> lint -> test -> build`
 
 ## Layout
@@ -56,3 +58,4 @@ Typical flow: `ingest -> extract -> relate -> query`.
 - `internal/query` - query assembly and ranking
 - `internal/store/sqlite` - SQLite event store and repository
 - `internal/workflow` - job runner with retries, timeouts, and structured logs
+- `sql/sqlite` - SQL schema and sqlc query definitions

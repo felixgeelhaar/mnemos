@@ -1,20 +1,23 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
 )
 
 type ClaimRepository struct {
 	db *sql.DB
+	q  *sqlcgen.Queries
 }
 
 func NewClaimRepository(db *sql.DB) ClaimRepository {
-	return ClaimRepository{db: db}
+	return ClaimRepository{db: db, q: sqlcgen.New(db)}
 }
 
 func (r ClaimRepository) Upsert(claims []domain.Claim) error {
@@ -22,40 +25,26 @@ func (r ClaimRepository) Upsert(claims []domain.Claim) error {
 		return nil
 	}
 
-	const upsert = `
-INSERT INTO claims (id, text, type, confidence, status, created_at)
-VALUES (?, ?, ?, ?, ?, ?)
-ON CONFLICT(id) DO UPDATE SET
-	text = excluded.text,
-	type = excluded.type,
-	confidence = excluded.confidence,
-	status = excluded.status,
-	created_at = excluded.created_at`
-
 	tx, err := r.db.Begin()
 	if err != nil {
 		return fmt.Errorf("begin claim upsert tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(upsert)
-	if err != nil {
-		return fmt.Errorf("prepare claim upsert: %w", err)
-	}
-	defer stmt.Close()
+	qtx := r.q.WithTx(tx)
 
 	for _, claim := range claims {
 		if err := claim.Validate(); err != nil {
 			return fmt.Errorf("invalid claim %s: %w", claim.ID, err)
 		}
-		_, err := stmt.Exec(
-			claim.ID,
-			claim.Text,
-			string(claim.Type),
-			claim.Confidence,
-			string(claim.Status),
-			claim.CreatedAt.UTC().Format(time.RFC3339Nano),
-		)
+		err := qtx.UpsertClaim(context.Background(), sqlcgen.UpsertClaimParams{
+			ID:         claim.ID,
+			Text:       claim.Text,
+			Type:       string(claim.Type),
+			Confidence: claim.Confidence,
+			Status:     string(claim.Status),
+			CreatedAt:  claim.CreatedAt.UTC().Format(time.RFC3339Nano),
+		})
 		if err != nil {
 			return fmt.Errorf("upsert claim %s: %w", claim.ID, err)
 		}
@@ -73,28 +62,22 @@ func (r ClaimRepository) UpsertEvidence(links []domain.ClaimEvidence) error {
 		return nil
 	}
 
-	const upsert = `
-INSERT INTO claim_evidence (claim_id, event_id)
-VALUES (?, ?)
-ON CONFLICT(claim_id, event_id) DO NOTHING`
-
 	tx, err := r.db.Begin()
 	if err != nil {
 		return fmt.Errorf("begin claim evidence tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(upsert)
-	if err != nil {
-		return fmt.Errorf("prepare claim evidence upsert: %w", err)
-	}
-	defer stmt.Close()
+	qtx := r.q.WithTx(tx)
 
 	for _, link := range links {
 		if err := link.Validate(); err != nil {
 			return fmt.Errorf("invalid claim evidence: %w", err)
 		}
-		_, err := stmt.Exec(link.ClaimID, link.EventID)
+		err := qtx.UpsertClaimEvidence(context.Background(), sqlcgen.UpsertClaimEvidenceParams{
+			ClaimID: link.ClaimID,
+			EventID: link.EventID,
+		})
 		if err != nil {
 			return fmt.Errorf("upsert claim evidence (%s,%s): %w", link.ClaimID, link.EventID, err)
 		}
@@ -148,30 +131,43 @@ ORDER BY c.created_at ASC`, strings.Join(placeholders, ","))
 }
 
 func (r ClaimRepository) ListAll() ([]domain.Claim, error) {
-	const query = `
-SELECT id, text, type, confidence, status, created_at
-FROM claims
-ORDER BY created_at ASC`
-
-	rows, err := r.db.Query(query)
+	rows, err := r.q.ListAllClaims(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("list all claims: %w", err)
 	}
-	defer rows.Close()
 
-	claims := make([]domain.Claim, 0)
-	for rows.Next() {
-		claim, err := scanClaim(rows)
+	claims := make([]domain.Claim, 0, len(rows))
+	for _, row := range rows {
+		claim, err := mapSQLClaim(row)
 		if err != nil {
 			return nil, err
 		}
 		claims = append(claims, claim)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate all claims rows: %w", err)
-	}
 
 	return claims, nil
+}
+
+func mapSQLClaim(row sqlcgen.Claim) (domain.Claim, error) {
+	claim := domain.Claim{
+		ID:         row.ID,
+		Text:       row.Text,
+		Type:       domain.ClaimType(row.Type),
+		Confidence: row.Confidence,
+		Status:     domain.ClaimStatus(row.Status),
+	}
+
+	t, err := time.Parse(time.RFC3339Nano, row.CreatedAt)
+	if err != nil {
+		return domain.Claim{}, fmt.Errorf("parse claim created_at: %w", err)
+	}
+	claim.CreatedAt = t
+
+	if err := claim.Validate(); err != nil {
+		return domain.Claim{}, fmt.Errorf("validate persisted claim %s: %w", claim.ID, err)
+	}
+
+	return claim, nil
 }
 
 type claimRowScanner interface {

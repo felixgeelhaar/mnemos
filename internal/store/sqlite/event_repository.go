@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -9,14 +10,16 @@ import (
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
 )
 
 type EventRepository struct {
 	db *sql.DB
+	q  *sqlcgen.Queries
 }
 
 func NewEventRepository(db *sql.DB) EventRepository {
-	return EventRepository{db: db}
+	return EventRepository{db: db, q: sqlcgen.New(db)}
 }
 
 func (r EventRepository) Append(event domain.Event) error {
@@ -25,20 +28,15 @@ func (r EventRepository) Append(event domain.Event) error {
 		return fmt.Errorf("marshal event metadata: %w", err)
 	}
 
-	const insert = `
-INSERT INTO events (id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)`
-
-	_, err = r.db.Exec(
-		insert,
-		event.ID,
-		event.SchemaVersion,
-		event.Content,
-		event.SourceInputID,
-		event.Timestamp.UTC().Format(time.RFC3339Nano),
-		string(metadata),
-		event.IngestedAt.UTC().Format(time.RFC3339Nano),
-	)
+	err = r.q.CreateEvent(context.Background(), sqlcgen.CreateEventParams{
+		ID:            event.ID,
+		SchemaVersion: event.SchemaVersion,
+		Content:       event.Content,
+		SourceInputID: event.SourceInputID,
+		Timestamp:     event.Timestamp.UTC().Format(time.RFC3339Nano),
+		MetadataJson:  string(metadata),
+		IngestedAt:    event.IngestedAt.UTC().Format(time.RFC3339Nano),
+	})
 	if err != nil {
 		return fmt.Errorf("insert event: %w", err)
 	}
@@ -47,12 +45,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`
 }
 
 func (r EventRepository) GetByID(id string) (domain.Event, error) {
-	const query = `
-SELECT id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at
-FROM events
-WHERE id = ?`
-
-	event, err := scanEvent(r.db.QueryRow(query, id))
+	row, err := r.q.GetEventByID(context.Background(), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Event{}, fmt.Errorf("event %s not found", id)
 	}
@@ -60,6 +53,10 @@ WHERE id = ?`
 		return domain.Event{}, err
 	}
 
+	event, err := mapSQLEvent(row)
+	if err != nil {
+		return domain.Event{}, err
+	}
 	return event, nil
 }
 
@@ -111,30 +108,46 @@ WHERE id IN (%s)`, strings.Join(placeholders, ","))
 }
 
 func (r EventRepository) ListAll() ([]domain.Event, error) {
-	const query = `
-SELECT id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at
-FROM events
-ORDER BY timestamp ASC`
-
-	rows, err := r.db.Query(query)
+	rows, err := r.q.ListAllEvents(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("list all events: %w", err)
 	}
-	defer rows.Close()
 
-	events := make([]domain.Event, 0)
-	for rows.Next() {
-		event, err := scanEvent(rows)
+	events := make([]domain.Event, 0, len(rows))
+	for _, row := range rows {
+		event, err := mapSQLEvent(row)
 		if err != nil {
 			return nil, err
 		}
 		events = append(events, event)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate all events rows: %w", err)
-	}
 
 	return events, nil
+}
+
+func mapSQLEvent(row sqlcgen.Event) (domain.Event, error) {
+	eventTimestamp, err := time.Parse(time.RFC3339Nano, row.Timestamp)
+	if err != nil {
+		return domain.Event{}, fmt.Errorf("parse event timestamp: %w", err)
+	}
+	eventIngestedAt, err := time.Parse(time.RFC3339Nano, row.IngestedAt)
+	if err != nil {
+		return domain.Event{}, fmt.Errorf("parse event ingested_at: %w", err)
+	}
+	metadata := map[string]string{}
+	if err := json.Unmarshal([]byte(row.MetadataJson), &metadata); err != nil {
+		return domain.Event{}, fmt.Errorf("unmarshal event metadata: %w", err)
+	}
+
+	return domain.Event{
+		ID:            row.ID,
+		SchemaVersion: row.SchemaVersion,
+		Content:       row.Content,
+		SourceInputID: row.SourceInputID,
+		Timestamp:     eventTimestamp,
+		Metadata:      metadata,
+		IngestedAt:    eventIngestedAt,
+	}, nil
 }
 
 type eventRowScanner interface {

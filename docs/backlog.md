@@ -40,3 +40,15 @@ Provide a CLI query interface that returns structured answers with claims, surfa
 Track ingestion/extraction/relationship jobs through explicit workflow states with structured logging, retries, timeouts, and failure handling.
 
 ---
+
+## Claim Extraction Heuristics v2
+
+Improve claim extraction quality by splitting event text into sentence-level candidate claims, deduplicating near-identical claims, and applying stronger heuristic scoring for fact/decision/hypothesis classification while preserving evidence traceability.
+
+---
+
+## SQLC Typed Data Access
+
+Adopt sqlc for SQLite data-access to replace handwritten SQL in repositories with generated, typed query methods; include schema/queries layout, generation command, and initial migration of core event and claim reads/writes.
+
+---

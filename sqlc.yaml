@@ -1,0 +1,14 @@
+version: "2"
+sql:
+  - engine: "sqlite"
+    schema: "sql/sqlite/schema.sql"
+    queries:
+      - "sql/sqlite/query/events.sql"
+      - "sql/sqlite/query/claims.sql"
+    gen:
+      go:
+        package: "sqlcgen"
+        out: "internal/store/sqlite/sqlcgen"
+        sql_package: "database/sql"
+        emit_interface: false
+        emit_json_tags: true

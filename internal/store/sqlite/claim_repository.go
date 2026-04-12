@@ -29,7 +29,7 @@ func (r ClaimRepository) Upsert(claims []domain.Claim) error {
 	if err != nil {
 		return fmt.Errorf("begin claim upsert tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer tx.Rollback() //nolint:errcheck
 
 	qtx := r.q.WithTx(tx)
 
@@ -66,7 +66,7 @@ func (r ClaimRepository) UpsertEvidence(links []domain.ClaimEvidence) error {
 	if err != nil {
 		return fmt.Errorf("begin claim evidence tx: %w", err)
 	}
-	defer tx.Rollback()
+	defer tx.Rollback() //nolint:errcheck
 
 	qtx := r.q.WithTx(tx)
 
@@ -113,7 +113,7 @@ ORDER BY c.created_at ASC`, strings.Join(placeholders, ","))
 	if err != nil {
 		return nil, fmt.Errorf("list claims by event ids: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	claims := make([]domain.Claim, 0)
 	for rows.Next() {

@@ -88,23 +88,6 @@ func isFirstRun(dbPath string) bool {
 	return false
 }
 
-func formatHint(cmd string) string {
-	hints := map[string]string{
-		"ingest":    "Tip: After ingest, run 'mnemos extract <event-id>' to extract claims",
-		"extract":   "Tip: After extract, run 'mnemos relate' to detect relationships",
-		"relate":    "Tip: After relate, run 'mnemos query <question>' to get answers",
-		"process":   "Tip: Run 'mnemos query --run <session-id> <question>' to query this session",
-		"query":     "Tip: Use 'mnemos process --text <text>' to add more knowledge",
-		"no_claims": "Tip: Try a longer text with more complete sentences",
-		"need_more": "Tip: Need at least 2 claims to detect contradictions",
-		"not_found": "Tip: Run 'mnemos ingest' first to add content",
-	}
-	if hint, ok := hints[cmd]; ok {
-		return fmt.Sprintf("\n  %s\n", hint)
-	}
-	return ""
-}
-
 func printClaimPreview(claims []domain.Claim, maxDisplay int) {
 	if len(claims) == 0 {
 		return

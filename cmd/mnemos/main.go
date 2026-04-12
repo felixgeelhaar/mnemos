@@ -12,6 +12,7 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/extract"
 	"github.com/felixgeelhaar/mnemos/internal/ingest"
+	"github.com/felixgeelhaar/mnemos/internal/llm"
 	"github.com/felixgeelhaar/mnemos/internal/parser"
 	"github.com/felixgeelhaar/mnemos/internal/query"
 	"github.com/felixgeelhaar/mnemos/internal/relate"
@@ -21,6 +22,40 @@ import (
 )
 
 const defaultDBPath = "data/mnemos.db"
+
+// extractor wraps either the rule-based or LLM-powered extraction engine,
+// presenting a uniform interface to command handlers.
+type extractor struct {
+	extract func([]domain.Event) ([]domain.Claim, []domain.ClaimEvidence, error)
+}
+
+// newExtractor builds the appropriate extraction engine based on the --llm
+// flag. When --llm is set, it reads provider config from environment variables
+// (MNEMOS_LLM_PROVIDER, MNEMOS_LLM_API_KEY, etc.) and falls back to the
+// rule-based engine on LLM failure.
+func newExtractor(useLLM bool) (*extractor, error) {
+	if !useLLM {
+		engine := extract.NewEngine()
+		return &extractor{extract: engine.Extract}, nil
+	}
+
+	cfg, err := llm.ConfigFromEnv()
+	if err != nil {
+		return nil, &MnemosError{
+			Code:    ExitUsage,
+			Message: fmt.Sprintf("LLM configuration error: %s", err),
+			Hint:    "Set MNEMOS_LLM_PROVIDER and MNEMOS_LLM_API_KEY environment variables\n  Providers: anthropic, openai, gemini, ollama, openai-compat",
+		}
+	}
+
+	client, err := llm.NewClient(cfg)
+	if err != nil {
+		return nil, NewSystemError(err, "failed to create LLM client")
+	}
+
+	engine := extract.NewLLMEngine(client)
+	return &extractor{extract: engine.Extract}, nil
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -278,8 +313,11 @@ func handleExtract(args []string, f Flags) {
 		if err := job.SetStatus("extracting", ""); err != nil {
 			return err
 		}
-		engine := extract.NewEngine()
-		claims, links, err := engine.Extract(events)
+		ext, err := newExtractor(f.LLM)
+		if err != nil {
+			return err
+		}
+		claims, links, err := ext.extract(events)
 		if err != nil {
 			return NewSystemError(err, "extraction failed")
 		}
@@ -401,8 +439,11 @@ func handleProcess(args []string, f Flags) {
 			events[i].RunID = job.ID()
 		}
 
-		engine := extract.NewEngine()
-		claims, links, err := engine.Extract(events)
+		ext, err := newExtractor(f.LLM)
+		if err != nil {
+			return err
+		}
+		claims, links, err := ext.extract(events)
 		if err != nil {
 			return NewSystemError(err, "claim extraction failed")
 		}
@@ -421,11 +462,6 @@ func handleProcess(args []string, f Flags) {
 		}
 		if err := persistProcessArtifacts(db, events, claims, links, rels); err != nil {
 			return err
-		}
-
-		eventIDs := make([]string, 0, len(events))
-		for _, event := range events {
-			eventIDs = append(eventIDs, event.ID)
 		}
 
 		fmt.Printf("Session: %s\n", job.ID())
@@ -529,12 +565,20 @@ func printUsage() {
 	fmt.Println("  mnemos relate [event-id ...]")
 	fmt.Println("  mnemos process <path>")
 	fmt.Println("  mnemos process --text <content>")
+	fmt.Println("  mnemos process --llm <path>           (LLM-powered extraction)")
 	fmt.Println("  mnemos query [--run <run-id>] [--human] <question>")
 	fmt.Println("")
 	fmt.Println("Flags:")
 	fmt.Println("  -h, --help     show this help message")
 	fmt.Println("  -v, --verbose  show detailed error output")
 	fmt.Println("  --human        human-readable output (default: JSON)")
+	fmt.Println("  --llm          use LLM-powered extraction (requires MNEMOS_LLM_PROVIDER)")
+	fmt.Println("")
+	fmt.Println("LLM Environment Variables:")
+	fmt.Println("  MNEMOS_LLM_PROVIDER   anthropic, openai, gemini, ollama, openai-compat")
+	fmt.Println("  MNEMOS_LLM_API_KEY    API key (required for cloud providers)")
+	fmt.Println("  MNEMOS_LLM_MODEL      model override (optional)")
+	fmt.Println("  MNEMOS_LLM_BASE_URL   custom endpoint (required for openai-compat)")
 	fmt.Println("")
 	fmt.Println("Quick Start:")
 	fmt.Println("  mnemos process --text \"Your text here\"")

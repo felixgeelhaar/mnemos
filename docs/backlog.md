@@ -70,3 +70,9 @@ Add a CLI `process` command that runs ingest, extract, and relate in one workflo
 Add run-scoped processing and querying so each process/ingest flow emits a run_id and query can restrict retrieval to a specific run, preventing cross-run context contamination in answers.
 
 ---
+
+## LLM-Powered Claim Extraction
+
+Replace/augment rule-based extraction with LLM-powered claim extraction. Supports Anthropic, OpenAI, Google Gemini, Ollama, and any OpenAI-compatible provider. Activated via --llm flag with env var configuration. Falls back to rule-based extraction on LLM failure.
+
+---

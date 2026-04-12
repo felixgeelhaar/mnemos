@@ -108,7 +108,7 @@ func inferClaimType(text string) domain.ClaimType {
 
 func inferConfidence(text string, claimType domain.ClaimType) float64 {
 	lower := strings.ToLower(text)
-	value := 0.75
+	var value float64
 
 	switch claimType {
 	case domain.ClaimTypeDecision:

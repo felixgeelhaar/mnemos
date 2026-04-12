@@ -2,10 +2,12 @@ package main
 
 import "strings"
 
+// Flags holds parsed CLI flags.
 type Flags struct {
 	Help    bool
 	Verbose bool
 	Human   bool
+	LLM     bool
 }
 
 func ParseFlags(args []string) (Flags, []string) {
@@ -20,6 +22,8 @@ func ParseFlags(args []string) (Flags, []string) {
 			f.Verbose = true
 		case "--human", "-o", "text":
 			f.Human = true
+		case "--llm":
+			f.LLM = true
 		default:
 			filtered = append(filtered, arg)
 		}

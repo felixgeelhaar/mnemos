@@ -113,7 +113,7 @@ func ensureEventsRunIDColumn(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("read events table info: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	hasRunID := false
 	for rows.Next() {

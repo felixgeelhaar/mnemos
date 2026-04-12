@@ -82,7 +82,7 @@ WHERE id IN (%s)`, strings.Join(placeholders, ","))
 	if err != nil {
 		return nil, fmt.Errorf("query events by ids: %w", err)
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	byID := map[string]domain.Event{}
 	for rows.Next() {

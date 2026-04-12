@@ -49,6 +49,7 @@ type Input struct {
 
 type Event struct {
 	ID            string
+	RunID         string
 	SchemaVersion string
 	Content       string
 	SourceInputID string

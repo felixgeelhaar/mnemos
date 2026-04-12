@@ -10,12 +10,13 @@ import (
 )
 
 const createEvent = `-- name: CreateEvent :exec
-INSERT INTO events (id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO events (id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateEventParams struct {
 	ID            string `json:"id"`
+	RunID         string `json:"run_id"`
 	SchemaVersion string `json:"schema_version"`
 	Content       string `json:"content"`
 	SourceInputID string `json:"source_input_id"`
@@ -27,6 +28,7 @@ type CreateEventParams struct {
 func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) error {
 	_, err := q.db.ExecContext(ctx, createEvent,
 		arg.ID,
+		arg.RunID,
 		arg.SchemaVersion,
 		arg.Content,
 		arg.SourceInputID,
@@ -38,7 +40,7 @@ func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) error 
 }
 
 const getEventByID = `-- name: GetEventByID :one
-SELECT id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at
+SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at
 FROM events
 WHERE id = ?
 `
@@ -48,6 +50,7 @@ func (q *Queries) GetEventByID(ctx context.Context, id string) (Event, error) {
 	var i Event
 	err := row.Scan(
 		&i.ID,
+		&i.RunID,
 		&i.SchemaVersion,
 		&i.Content,
 		&i.SourceInputID,
@@ -59,7 +62,7 @@ func (q *Queries) GetEventByID(ctx context.Context, id string) (Event, error) {
 }
 
 const listAllEvents = `-- name: ListAllEvents :many
-SELECT id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at
+SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at
 FROM events
 ORDER BY timestamp ASC
 `
@@ -75,6 +78,46 @@ func (q *Queries) ListAllEvents(ctx context.Context) ([]Event, error) {
 		var i Event
 		if err := rows.Scan(
 			&i.ID,
+			&i.RunID,
+			&i.SchemaVersion,
+			&i.Content,
+			&i.SourceInputID,
+			&i.Timestamp,
+			&i.MetadataJson,
+			&i.IngestedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEventsByRunID = `-- name: ListEventsByRunID :many
+SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at
+FROM events
+WHERE run_id = ?
+ORDER BY timestamp ASC
+`
+
+func (q *Queries) ListEventsByRunID(ctx context.Context, runID string) ([]Event, error) {
+	rows, err := q.db.QueryContext(ctx, listEventsByRunID, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Event
+	for rows.Next() {
+		var i Event
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
 			&i.SchemaVersion,
 			&i.Content,
 			&i.SourceInputID,

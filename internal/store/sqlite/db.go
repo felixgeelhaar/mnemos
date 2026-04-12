@@ -35,6 +35,7 @@ func ensureSchema(db *sql.DB) error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS events (
 	id TEXT PRIMARY KEY,
+	run_id TEXT NOT NULL,
 	schema_version TEXT NOT NULL,
 	content TEXT NOT NULL,
 	source_input_id TEXT NOT NULL,
@@ -95,6 +96,53 @@ CREATE INDEX IF NOT EXISTS idx_compilation_jobs_status ON compilation_jobs(statu
 
 	if _, err := db.Exec(schema); err != nil {
 		return fmt.Errorf("ensure events schema: %w", err)
+	}
+
+	if err := ensureEventsRunIDColumn(db); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_events_run_id ON events(run_id);`); err != nil {
+		return fmt.Errorf("ensure run_id event index: %w", err)
+	}
+
+	return nil
+}
+
+func ensureEventsRunIDColumn(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(events);`)
+	if err != nil {
+		return fmt.Errorf("read events table info: %w", err)
+	}
+	defer rows.Close()
+
+	hasRunID := false
+	for rows.Next() {
+		var (
+			cid       int
+			name      string
+			typeName  string
+			notNull   int
+			defaultV  sql.NullString
+			primaryPK int
+		)
+		if err := rows.Scan(&cid, &name, &typeName, &notNull, &defaultV, &primaryPK); err != nil {
+			return fmt.Errorf("scan events table info: %w", err)
+		}
+		if name == "run_id" {
+			hasRunID = true
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate events table info: %w", err)
+	}
+
+	if hasRunID {
+		return nil
+	}
+
+	if _, err := db.Exec(`ALTER TABLE events ADD COLUMN run_id TEXT NOT NULL DEFAULT '';`); err != nil {
+		return fmt.Errorf("add events.run_id column: %w", err)
 	}
 
 	return nil

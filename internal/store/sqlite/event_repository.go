@@ -30,6 +30,7 @@ func (r EventRepository) Append(event domain.Event) error {
 
 	err = r.q.CreateEvent(context.Background(), sqlcgen.CreateEventParams{
 		ID:            event.ID,
+		RunID:         event.RunID,
 		SchemaVersion: event.SchemaVersion,
 		Content:       event.Content,
 		SourceInputID: event.SourceInputID,
@@ -73,7 +74,7 @@ func (r EventRepository) ListByIDs(ids []string) ([]domain.Event, error) {
 	}
 
 	query := fmt.Sprintf(`
-SELECT id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at
+SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at
 FROM events
 WHERE id IN (%s)`, strings.Join(placeholders, ","))
 
@@ -125,6 +126,24 @@ func (r EventRepository) ListAll() ([]domain.Event, error) {
 	return events, nil
 }
 
+func (r EventRepository) ListByRunID(runID string) ([]domain.Event, error) {
+	rows, err := r.q.ListEventsByRunID(context.Background(), runID)
+	if err != nil {
+		return nil, fmt.Errorf("list events by run id: %w", err)
+	}
+
+	events := make([]domain.Event, 0, len(rows))
+	for _, row := range rows {
+		event, err := mapSQLEvent(row)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+
+	return events, nil
+}
+
 func mapSQLEvent(row sqlcgen.Event) (domain.Event, error) {
 	eventTimestamp, err := time.Parse(time.RFC3339Nano, row.Timestamp)
 	if err != nil {
@@ -141,6 +160,7 @@ func mapSQLEvent(row sqlcgen.Event) (domain.Event, error) {
 
 	return domain.Event{
 		ID:            row.ID,
+		RunID:         row.RunID,
 		SchemaVersion: row.SchemaVersion,
 		Content:       row.Content,
 		SourceInputID: row.SourceInputID,
@@ -160,10 +180,12 @@ func scanEvent(scanner eventRowScanner) (domain.Event, error) {
 		timestamp   string
 		ingestedAt  string
 		metadataRaw string
+		runID       string
 	)
 
 	if err := scanner.Scan(
 		&event.ID,
+		&runID,
 		&event.SchemaVersion,
 		&event.Content,
 		&event.SourceInputID,
@@ -191,6 +213,7 @@ func scanEvent(scanner eventRowScanner) (domain.Event, error) {
 		return domain.Event{}, fmt.Errorf("unmarshal event metadata: %w", err)
 	}
 	event.Metadata = metadata
+	event.RunID = runID
 
 	return event, nil
 }

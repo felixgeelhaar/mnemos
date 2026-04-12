@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS events (
   id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
   schema_version TEXT NOT NULL,
   content TEXT NOT NULL,
   source_input_id TEXT NOT NULL,
@@ -10,6 +11,7 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_source_input_id ON events(source_input_id);
+CREATE INDEX IF NOT EXISTS idx_events_run_id ON events(run_id);
 
 CREATE TABLE IF NOT EXISTS claims (
   id TEXT PRIMARY KEY,

@@ -30,6 +30,7 @@ type CompilationJob struct {
 
 type Event struct {
 	ID            string `json:"id"`
+	RunID         string `json:"run_id"`
 	SchemaVersion string `json:"schema_version"`
 	Content       string `json:"content"`
 	SourceInputID string `json:"source_input_id"`

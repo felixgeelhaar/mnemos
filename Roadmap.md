@@ -4,9 +4,9 @@
 
 ---
 
-## Phase 1: Developer Primitive (CURRENT)
+## Phase 1: Developer Primitive (COMPLETE)
 
-**Status:** In Progress (v0.1)
+**Status:** Complete (v0.1)
 **Goal:** Establish Mnemos as a local-first, open-source knowledge engine for AI agents and developer tooling.
 
 ### Milestones
@@ -51,7 +51,7 @@
 ### Milestones
 
 - [ ] GraphRAG integration (multi-hop queries)
-- [ ] Semantic search with embeddings
+- [x] Semantic search with embeddings (shipped in Phase 1)
 - [ ] Multi-agent pipeline orchestration
 - [ ] Governance and bias detection
 - [ ] Enterprise integrations (Slack, Teams, Jira)

@@ -22,7 +22,7 @@
 - [x] 68 eval test cases
 - [x] First-run UX polish
 - [x] LLM-powered extraction
-- [ ] Embeddings for semantic search
+- [x] Embeddings for semantic search
 
 ---
 

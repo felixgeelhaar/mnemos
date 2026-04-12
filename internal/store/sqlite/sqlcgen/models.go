@@ -28,6 +28,15 @@ type CompilationJob struct {
 	Error     string `json:"error"`
 }
 
+type Embedding struct {
+	EntityID   string `json:"entity_id"`
+	EntityType string `json:"entity_type"`
+	Vector     []byte `json:"vector"`
+	Model      string `json:"model"`
+	Dimensions int64  `json:"dimensions"`
+	CreatedAt  string `json:"created_at"`
+}
+
 type Event struct {
 	ID            string `json:"id"`
 	RunID         string `json:"run_id"`

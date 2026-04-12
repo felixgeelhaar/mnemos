@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/embedding"
 	"github.com/felixgeelhaar/mnemos/internal/extract"
 	"github.com/felixgeelhaar/mnemos/internal/ingest"
 	"github.com/felixgeelhaar/mnemos/internal/llm"
@@ -203,6 +204,20 @@ func handleQuery(args []string, f Flags) {
 			sqlite.NewClaimRepository(db),
 			sqlite.NewRelationshipRepository(db),
 		)
+
+		if f.Embed {
+			embCfg, err := embedding.ConfigFromEnv()
+			if err == nil {
+				embClient, err := embedding.NewClient(embCfg)
+				if err == nil {
+					engine = engine.WithEmbeddings(
+						sqlite.NewEmbeddingRepository(db),
+						embClient,
+					)
+				}
+			}
+		}
+
 		if err := job.SetStatus("querying", ""); err != nil {
 			return err
 		}
@@ -464,6 +479,16 @@ func handleProcess(args []string, f Flags) {
 			return err
 		}
 
+		if f.Embed {
+			if err := job.SetStatus("embedding", ""); err != nil {
+				return err
+			}
+			if err := generateEmbeddings(db, events); err != nil {
+				// Embedding failure is non-fatal; log and continue.
+				fmt.Fprintf(os.Stderr, "warning: embedding generation failed: %v\n", err)
+			}
+		}
+
 		fmt.Printf("Session: %s\n", job.ID())
 		fmt.Printf("Processed: %d events → %d claims\n", len(events), len(claims))
 
@@ -565,6 +590,7 @@ func printUsage() {
 	fmt.Println("  mnemos process <path>")
 	fmt.Println("  mnemos process --text <content>")
 	fmt.Println("  mnemos process --llm <path>           (LLM-powered extraction)")
+	fmt.Println("  mnemos process --llm --embed <path>   (LLM extraction + embeddings)")
 	fmt.Println("  mnemos query [--run <run-id>] [--human] <question>")
 	fmt.Println("")
 	fmt.Println("Flags:")
@@ -572,12 +598,19 @@ func printUsage() {
 	fmt.Println("  -v, --verbose  show detailed error output")
 	fmt.Println("  --human        human-readable output (default: JSON)")
 	fmt.Println("  --llm          use LLM-powered extraction (requires MNEMOS_LLM_PROVIDER)")
+	fmt.Println("  --embed        generate embeddings for semantic search (requires MNEMOS_EMBED_PROVIDER or MNEMOS_LLM_PROVIDER)")
 	fmt.Println("")
 	fmt.Println("LLM Environment Variables:")
 	fmt.Println("  MNEMOS_LLM_PROVIDER   anthropic, openai, gemini, ollama, openai-compat")
 	fmt.Println("  MNEMOS_LLM_API_KEY    API key (required for cloud providers)")
 	fmt.Println("  MNEMOS_LLM_MODEL      model override (optional)")
 	fmt.Println("  MNEMOS_LLM_BASE_URL   custom endpoint (required for openai-compat)")
+	fmt.Println("")
+	fmt.Println("Embedding Environment Variables:")
+	fmt.Println("  MNEMOS_EMBED_PROVIDER  openai, gemini, ollama, openai-compat (falls back to LLM provider)")
+	fmt.Println("  MNEMOS_EMBED_API_KEY   API key (falls back to MNEMOS_LLM_API_KEY)")
+	fmt.Println("  MNEMOS_EMBED_MODEL     model override (optional)")
+	fmt.Println("  MNEMOS_EMBED_BASE_URL  custom endpoint (optional)")
 	fmt.Println("")
 	fmt.Println("Quick Start:")
 	fmt.Println("  mnemos process --text \"Your text here\"")
@@ -631,4 +664,42 @@ func runJob(kind string, scope map[string]string, fn func(context.Context, *work
 		return fn(ctx, job, db)
 	})
 	return jobErr
+}
+
+// generateEmbeddings creates vector embeddings for the given events and stores
+// them in the database. It reads embedding provider config from env vars.
+func generateEmbeddings(db *sql.DB, events []domain.Event) error {
+	cfg, err := embedding.ConfigFromEnv()
+	if err != nil {
+		return fmt.Errorf("embedding config: %w", err)
+	}
+
+	client, err := embedding.NewClient(cfg)
+	if err != nil {
+		return fmt.Errorf("create embedding client: %w", err)
+	}
+
+	texts := make([]string, 0, len(events))
+	for _, ev := range events {
+		texts = append(texts, ev.Content)
+	}
+
+	vectors, err := client.Embed(context.Background(), texts)
+	if err != nil {
+		return fmt.Errorf("embed events: %w", err)
+	}
+
+	repo := sqlite.NewEmbeddingRepository(db)
+	model := cfg.Model
+	for i, ev := range events {
+		if i >= len(vectors) {
+			break
+		}
+		if err := repo.Upsert(ev.ID, "event", vectors[i], model); err != nil {
+			return fmt.Errorf("store embedding for event %s: %w", ev.ID, err)
+		}
+	}
+
+	fmt.Printf("Embedded: %d events (%s / %s)\n", len(vectors), cfg.Provider, model)
+	return nil
 }

@@ -94,6 +94,18 @@ CREATE TABLE IF NOT EXISTS compilation_jobs (
 
 CREATE INDEX IF NOT EXISTS idx_compilation_jobs_kind ON compilation_jobs(kind);
 CREATE INDEX IF NOT EXISTS idx_compilation_jobs_status ON compilation_jobs(status);
+
+CREATE TABLE IF NOT EXISTS embeddings (
+	entity_id TEXT NOT NULL,
+	entity_type TEXT NOT NULL,
+	vector BLOB NOT NULL,
+	model TEXT NOT NULL,
+	dimensions INTEGER NOT NULL,
+	created_at TEXT NOT NULL,
+	PRIMARY KEY (entity_id, entity_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_embeddings_entity_type ON embeddings(entity_type);
 `
 
 	if _, err := db.Exec(schema); err != nil {

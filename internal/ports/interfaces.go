@@ -30,3 +30,18 @@ type ExtractionEngine interface {
 type QueryEngine interface {
 	Answer(query string) (domain.Answer, error)
 }
+
+// EmbeddingRepository persists and retrieves vector embeddings.
+type EmbeddingRepository interface {
+	Upsert(entityID, entityType string, vector []float32, model string) error
+	ListByEntityType(entityType string) ([]EmbeddingRecord, error)
+}
+
+// EmbeddingRecord holds a stored embedding with its metadata.
+type EmbeddingRecord struct {
+	EntityID   string
+	EntityType string
+	Vector     []float32
+	Model      string
+	Dimensions int
+}

@@ -1,11 +1,13 @@
 package query
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/embedding"
 	"github.com/felixgeelhaar/mnemos/internal/ports"
 )
 
@@ -21,11 +23,22 @@ type Engine struct {
 	events        eventLister
 	claims        ports.ClaimRepository
 	relationships ports.RelationshipRepository
+	embeddings    ports.EmbeddingRepository
+	embedClient   embedding.Client
 }
 
 // NewEngine returns an Engine wired to the given event, claim, and relationship stores.
 func NewEngine(events eventLister, claims ports.ClaimRepository, relationships ports.RelationshipRepository) Engine {
 	return Engine{events: events, claims: claims, relationships: relationships}
+}
+
+// WithEmbeddings configures semantic search support on the engine.
+// When both an embedding repository and client are set, queries use cosine
+// similarity against stored event embeddings instead of token overlap.
+func (e Engine) WithEmbeddings(repo ports.EmbeddingRepository, client embedding.Client) Engine {
+	e.embeddings = repo
+	e.embedClient = client
+	return e
 }
 
 // Answer searches all stored events for the best answer to the given question.
@@ -61,7 +74,7 @@ func (e Engine) answerWithEvents(question string, allEvents []domain.Event) (dom
 		return domain.Answer{AnswerText: "No ingested events yet."}, nil
 	}
 
-	topEvents := rankEvents(q, allEvents, 5)
+	topEvents := e.rankEventsWithFallback(q, allEvents, 5)
 	eventIDs := make([]string, 0, len(topEvents))
 	for _, event := range topEvents {
 		eventIDs = append(eventIDs, event.ID)
@@ -84,6 +97,80 @@ func (e Engine) answerWithEvents(question string, allEvents []domain.Event) (dom
 		Contradictions:   contradictions,
 		TimelineEventIDs: eventIDs,
 	}, nil
+}
+
+// rankEventsWithFallback tries cosine similarity first (if embeddings are available),
+// then falls back to token-overlap ranking.
+func (e Engine) rankEventsWithFallback(question string, events []domain.Event, limit int) []domain.Event {
+	if e.embeddings != nil && e.embedClient != nil {
+		result, err := e.rankEventsByCosine(question, events, limit)
+		if err == nil && len(result) > 0 {
+			return result
+		}
+		// Fall through to token overlap on error.
+	}
+	return rankEvents(question, events, limit)
+}
+
+// rankEventsByCosine embeds the question and ranks events by cosine similarity
+// against their stored embeddings.
+func (e Engine) rankEventsByCosine(question string, events []domain.Event, limit int) ([]domain.Event, error) {
+	stored, err := e.embeddings.ListByEntityType("event")
+	if err != nil || len(stored) == 0 {
+		return nil, fmt.Errorf("no embeddings available")
+	}
+
+	// Build lookup from entity_id → vector.
+	vecByID := make(map[string][]float32, len(stored))
+	for _, rec := range stored {
+		vecByID[rec.EntityID] = rec.Vector
+	}
+
+	// Check that at least some of the candidate events have embeddings.
+	hasAny := false
+	for _, ev := range events {
+		if _, ok := vecByID[ev.ID]; ok {
+			hasAny = true
+			break
+		}
+	}
+	if !hasAny {
+		return nil, fmt.Errorf("no matching embeddings for candidate events")
+	}
+
+	// Embed the question.
+	qVectors, err := e.embedClient.Embed(context.Background(), []string{question})
+	if err != nil || len(qVectors) == 0 {
+		return nil, fmt.Errorf("embed question: %w", err)
+	}
+	qVec := qVectors[0]
+
+	type scored struct {
+		event domain.Event
+		score float32
+	}
+	scoredEvents := make([]scored, 0, len(events))
+	for _, ev := range events {
+		vec, ok := vecByID[ev.ID]
+		if !ok {
+			continue
+		}
+		sim := embedding.CosineSimilarity(qVec, vec)
+		scoredEvents = append(scoredEvents, scored{event: ev, score: sim})
+	}
+
+	sort.Slice(scoredEvents, func(i, j int) bool {
+		if scoredEvents[i].score == scoredEvents[j].score {
+			return scoredEvents[i].event.Timestamp.After(scoredEvents[j].event.Timestamp)
+		}
+		return scoredEvents[i].score > scoredEvents[j].score
+	})
+
+	out := make([]domain.Event, 0, min(limit, len(scoredEvents)))
+	for i := 0; i < len(scoredEvents) && i < limit; i++ {
+		out = append(out, scoredEvents[i].event)
+	}
+	return out, nil
 }
 
 func rankEvents(question string, events []domain.Event, limit int) []domain.Event {

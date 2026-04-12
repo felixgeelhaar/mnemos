@@ -8,6 +8,7 @@ type Flags struct {
 	Verbose bool
 	Human   bool
 	LLM     bool
+	Embed   bool
 }
 
 // ParseFlags extracts known CLI flags from args and returns the remaining positional arguments.
@@ -25,6 +26,8 @@ func ParseFlags(args []string) (Flags, []string) {
 			f.Human = true
 		case "--llm":
 			f.LLM = true
+		case "--embed":
+			f.Embed = true
 		default:
 			filtered = append(filtered, arg)
 		}

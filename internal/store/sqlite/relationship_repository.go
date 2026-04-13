@@ -22,12 +22,12 @@ func NewRelationshipRepository(db *sql.DB) RelationshipRepository {
 }
 
 // Upsert inserts or updates the given relationships in a single transaction.
-func (r RelationshipRepository) Upsert(relationships []domain.Relationship) error {
+func (r RelationshipRepository) Upsert(ctx context.Context, relationships []domain.Relationship) error {
 	if len(relationships) == 0 {
 		return nil
 	}
 
-	tx, err := r.db.Begin()
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin relationship upsert tx: %w", err)
 	}
@@ -36,7 +36,7 @@ func (r RelationshipRepository) Upsert(relationships []domain.Relationship) erro
 	qtx := r.q.WithTx(tx)
 
 	for _, rel := range relationships {
-		err := qtx.UpsertRelationship(context.Background(), sqlcgen.UpsertRelationshipParams{
+		err := qtx.UpsertRelationship(ctx, sqlcgen.UpsertRelationshipParams{
 			ID:          rel.ID,
 			Type:        string(rel.Type),
 			FromClaimID: rel.FromClaimID,
@@ -56,8 +56,8 @@ func (r RelationshipRepository) Upsert(relationships []domain.Relationship) erro
 }
 
 // ListByClaim returns all relationships where the given claim is either the source or target.
-func (r RelationshipRepository) ListByClaim(claimID string) ([]domain.Relationship, error) {
-	rows, err := r.q.ListRelationshipsByClaim(context.Background(), sqlcgen.ListRelationshipsByClaimParams{
+func (r RelationshipRepository) ListByClaim(ctx context.Context, claimID string) ([]domain.Relationship, error) {
+	rows, err := r.q.ListRelationshipsByClaim(ctx, sqlcgen.ListRelationshipsByClaimParams{
 		FromClaimID: claimID,
 		ToClaimID:   claimID,
 	})

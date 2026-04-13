@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -23,11 +24,11 @@ func TestCompilationJobRepositoryUpsertAndGetByID(t *testing.T) {
 		Error:     "",
 	}
 
-	if err := repo.Upsert(job); err != nil {
+	if err := repo.Upsert(context.Background(), job); err != nil {
 		t.Fatalf("Upsert() error = %v", err)
 	}
 
-	got, err := repo.GetByID("job_1")
+	got, err := repo.GetByID(context.Background(), "job_1")
 	if err != nil {
 		t.Fatalf("GetByID() error = %v", err)
 	}

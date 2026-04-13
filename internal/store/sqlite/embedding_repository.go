@@ -3,11 +3,12 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/embedding"
-	"github.com/felixgeelhaar/mnemos/internal/ports"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
 )
 
@@ -22,9 +23,9 @@ func NewEmbeddingRepository(db *sql.DB) EmbeddingRepository {
 }
 
 // Upsert stores or updates a vector embedding for the given entity.
-func (r EmbeddingRepository) Upsert(entityID, entityType string, vector []float32, model string) error {
+func (r EmbeddingRepository) Upsert(ctx context.Context, entityID, entityType string, vector []float32, model string) error {
 	blob := embedding.EncodeVector(vector)
-	return r.q.UpsertEmbedding(context.Background(), sqlcgen.UpsertEmbeddingParams{
+	return r.q.UpsertEmbedding(ctx, sqlcgen.UpsertEmbeddingParams{
 		EntityID:   entityID,
 		EntityType: entityType,
 		Vector:     blob,
@@ -35,28 +36,28 @@ func (r EmbeddingRepository) Upsert(entityID, entityType string, vector []float3
 }
 
 // GetByEntityID retrieves a single embedding by entity ID and type.
-func (r EmbeddingRepository) GetByEntityID(entityID, entityType string) (ports.EmbeddingRecord, error) {
-	row, err := r.q.GetEmbeddingByEntityID(context.Background(), sqlcgen.GetEmbeddingByEntityIDParams{
+func (r EmbeddingRepository) GetByEntityID(ctx context.Context, entityID, entityType string) (domain.EmbeddingRecord, error) {
+	row, err := r.q.GetEmbeddingByEntityID(ctx, sqlcgen.GetEmbeddingByEntityIDParams{
 		EntityID:   entityID,
 		EntityType: entityType,
 	})
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return ports.EmbeddingRecord{}, fmt.Errorf("embedding not found for %s/%s", entityID, entityType)
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.EmbeddingRecord{}, fmt.Errorf("embedding not found for %s/%s", entityID, entityType)
 		}
-		return ports.EmbeddingRecord{}, fmt.Errorf("get embedding: %w", err)
+		return domain.EmbeddingRecord{}, fmt.Errorf("get embedding: %w", err)
 	}
 	return mapSQLEmbedding(row)
 }
 
 // ListByEntityType returns all embeddings of the given type (e.g. "event").
-func (r EmbeddingRepository) ListByEntityType(entityType string) ([]ports.EmbeddingRecord, error) {
-	rows, err := r.q.ListEmbeddingsByEntityType(context.Background(), entityType)
+func (r EmbeddingRepository) ListByEntityType(ctx context.Context, entityType string) ([]domain.EmbeddingRecord, error) {
+	rows, err := r.q.ListEmbeddingsByEntityType(ctx, entityType)
 	if err != nil {
 		return nil, fmt.Errorf("list embeddings by type: %w", err)
 	}
 
-	records := make([]ports.EmbeddingRecord, 0, len(rows))
+	records := make([]domain.EmbeddingRecord, 0, len(rows))
 	for _, row := range rows {
 		rec, err := mapSQLEmbedding(row)
 		if err != nil {
@@ -67,17 +68,17 @@ func (r EmbeddingRepository) ListByEntityType(entityType string) ([]ports.Embedd
 	return records, nil
 }
 
-func mapSQLEmbedding(row sqlcgen.Embedding) (ports.EmbeddingRecord, error) {
+func mapSQLEmbedding(row sqlcgen.Embedding) (domain.EmbeddingRecord, error) {
 	vector, err := embedding.DecodeVector(row.Vector)
 	if err != nil {
-		return ports.EmbeddingRecord{}, fmt.Errorf("decode embedding vector: %w", err)
+		return domain.EmbeddingRecord{}, fmt.Errorf("decode embedding vector: %w", err)
 	}
 	createdAt, err := time.Parse(time.RFC3339Nano, row.CreatedAt)
 	if err != nil {
-		return ports.EmbeddingRecord{}, fmt.Errorf("parse embedding created_at: %w", err)
+		return domain.EmbeddingRecord{}, fmt.Errorf("parse embedding created_at: %w", err)
 	}
 	_ = createdAt // stored for future use
-	return ports.EmbeddingRecord{
+	return domain.EmbeddingRecord{
 		EntityID:   row.EntityID,
 		EntityType: row.EntityType,
 		Vector:     vector,

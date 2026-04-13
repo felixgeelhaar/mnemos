@@ -105,6 +105,15 @@ type CompilationJob struct {
 	Error     string
 }
 
+// EmbeddingRecord holds a stored vector embedding with its metadata.
+type EmbeddingRecord struct {
+	EntityID   string
+	EntityType string
+	Vector     []float32
+	Model      string
+	Dimensions int
+}
+
 // Answer holds the result of a query, including supporting claims and contradictions.
 type Answer struct {
 	AnswerText       string

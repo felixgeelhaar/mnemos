@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"database/sql"
+	"errors"
 	"log"
 )
 
@@ -17,7 +18,7 @@ func closeRows(rows *sql.Rows) {
 // caused by the transaction already being committed.
 // Use as: defer rollbackTx(tx)
 func rollbackTx(tx *sql.Tx) {
-	if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+	if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
 		log.Printf("rollback tx: %v", err)
 	}
 }

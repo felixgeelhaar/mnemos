@@ -75,17 +75,17 @@ func printExtractionSummary(claims []domain.Claim, rels []domain.Relationship) {
 
 	fmt.Println("")
 	fmt.Println("  Extraction Summary:")
-	fmt.Println("  ┌─────────────────────────────────────────┐")
-	fmt.Printf("  │ Facts:       %-5d                      │\n", facts)
-	fmt.Printf("  │ Decisions:   %-5d                      │\n", decisions)
-	fmt.Printf("  │ Hypotheses: %-5d                      │\n", hypotheses)
+	fmt.Println("  ┌──────────────────────────────┐")
+	fmt.Printf("  │ Facts:          %-5d        │\n", facts)
+	fmt.Printf("  │ Decisions:      %-5d        │\n", decisions)
+	fmt.Printf("  │ Hypotheses:     %-5d        │\n", hypotheses)
 	if contested > 0 {
-		fmt.Printf("  │ Contested:  %-5d %s                     │\n", contested, warn)
+		fmt.Printf("  │ Contested:      %-5d %s     │\n", contested, warn)
 	}
 	if contradictions > 0 {
-		fmt.Printf("  │ Contradictions: %-3d %s                │\n", contradictions, warn)
+		fmt.Printf("  │ Contradictions: %-5d %s     │\n", contradictions, warn)
 	}
-	fmt.Println("  └─────────────────────────────────────────┘")
+	fmt.Println("  └──────────────────────────────┘")
 	fmt.Println("")
 
 	if contested > 0 || contradictions > 0 {
@@ -100,6 +100,62 @@ func printFirstRunHints() {
 	fmt.Println("    - Use 'mnemos query <question>' to query your knowledge")
 	fmt.Println("    - Use '--run <id>' with query to scope to a specific run")
 	fmt.Println("")
+}
+
+var commands = []string{"ingest", "extract", "relate", "process", "query", "metrics"}
+
+// suggestCommand returns the closest known command to input, or "" if none is close.
+func suggestCommand(input string) string {
+	best := ""
+	bestDist := 3 // max edit distance to suggest
+	for _, cmd := range commands {
+		d := levenshtein(input, cmd)
+		if d < bestDist {
+			bestDist = d
+			best = cmd
+		}
+	}
+	return best
+}
+
+func levenshtein(a, b string) int {
+	la, lb := len(a), len(b)
+	if la == 0 {
+		return lb
+	}
+	if lb == 0 {
+		return la
+	}
+	prev := make([]int, lb+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= la; i++ {
+		curr := make([]int, lb+1)
+		curr[0] = i
+		for j := 1; j <= lb; j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			ins := curr[j-1] + 1
+			del := prev[j] + 1
+			sub := prev[j-1] + cost
+			curr[j] = ins
+			if del < curr[j] {
+				curr[j] = del
+			}
+			if sub < curr[j] {
+				curr[j] = sub
+			}
+		}
+		prev = curr
+	}
+	return prev[lb]
+}
+
+func printIngestHint(runID string) {
+	fmt.Fprintf(os.Stderr, "\nTip: Run 'mnemos extract --run %s' then 'mnemos relate' to make this content queryable,\n     or use 'mnemos process' for all-in-one.\n", runID)
 }
 
 func isFirstRun(dbPath string) bool {

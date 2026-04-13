@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -19,7 +20,7 @@ func TestRelationshipRepositoryUpsertAndListByClaim(t *testing.T) {
 		{ID: "cl_a", Text: "A", Type: domain.ClaimTypeFact, Confidence: 0.8, Status: domain.ClaimStatusActive, CreatedAt: now},
 		{ID: "cl_b", Text: "B", Type: domain.ClaimTypeFact, Confidence: 0.8, Status: domain.ClaimStatusActive, CreatedAt: now},
 	}
-	if err := claimRepo.Upsert(claims); err != nil {
+	if err := claimRepo.Upsert(context.Background(), claims); err != nil {
 		t.Fatalf("Upsert claims error = %v", err)
 	}
 
@@ -30,11 +31,11 @@ func TestRelationshipRepositoryUpsertAndListByClaim(t *testing.T) {
 		ToClaimID:   "cl_b",
 		CreatedAt:   now,
 	}
-	if err := relRepo.Upsert([]domain.Relationship{rel}); err != nil {
+	if err := relRepo.Upsert(context.Background(), []domain.Relationship{rel}); err != nil {
 		t.Fatalf("Upsert relationships error = %v", err)
 	}
 
-	rels, err := relRepo.ListByClaim("cl_a")
+	rels, err := relRepo.ListByClaim(context.Background(), "cl_a")
 	if err != nil {
 		t.Fatalf("ListByClaim error = %v", err)
 	}

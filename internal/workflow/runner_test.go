@@ -13,7 +13,7 @@ type memStore struct {
 	jobs map[string]domain.CompilationJob
 }
 
-func (m *memStore) Upsert(job domain.CompilationJob) error {
+func (m *memStore) Upsert(_ context.Context, job domain.CompilationJob) error {
 	if m.jobs == nil {
 		m.jobs = map[string]domain.CompilationJob{}
 	}

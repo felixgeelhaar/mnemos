@@ -7,7 +7,7 @@ import (
 
 // PromptVersion tracks the extraction prompt revision. Bump when changing
 // the system prompt to invalidate cached results.
-const PromptVersion = "v1.1"
+const PromptVersion = "v1.2"
 
 const systemPrompt = `You are Mnemos, a knowledge extraction engine. Your job is to extract discrete, evidence-backed claims from source text.
 
@@ -24,6 +24,7 @@ Rules:
    - Lower (0.50–0.64) for hedged language, speculation, or hypotheses
 5. Return ONLY valid JSON — no markdown fences, no commentary.
 6. If the text contains no extractable claims, return an empty array: []
+7. Do NOT extract: headers, boilerplate, meta-commentary about the document itself, or section titles.
 
 Output format — a JSON array of objects:
 [
@@ -32,7 +33,28 @@ Output format — a JSON array of objects:
     "type": "fact|decision|hypothesis",
     "confidence": 0.85
   }
-]`
+]
+
+Examples:
+
+Input: "Q2 revenue grew 18%. We will expand to Germany next quarter. Customers might prefer annual billing."
+Output:
+[
+  {"text": "Q2 revenue grew 18%", "type": "fact", "confidence": 0.92},
+  {"text": "We will expand to Germany next quarter", "type": "decision", "confidence": 0.85},
+  {"text": "Customers might prefer annual billing", "type": "hypothesis", "confidence": 0.58}
+]
+
+Input: "The team decided to use PostgreSQL after evaluating three databases. Response times averaged 45ms."
+Output:
+[
+  {"text": "The team decided to use PostgreSQL after evaluating three databases", "type": "decision", "confidence": 0.90},
+  {"text": "Response times averaged 45ms", "type": "fact", "confidence": 0.88}
+]
+
+Input: "Meeting Notes - Q3 Planning\n\nAttendees: Alice, Bob"
+Output:
+[]`
 
 // buildExtractionPrompt creates the user-turn prompt for claim extraction.
 func buildExtractionPrompt(texts []string) string {

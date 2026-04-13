@@ -3,30 +3,40 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"log"
-	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/felixgeelhaar/bolt"
-	"github.com/felixgeelhaar/fortify/retry"
 	mcp "github.com/felixgeelhaar/mcp-go"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
-	"github.com/felixgeelhaar/mnemos/internal/embedding"
-	"github.com/felixgeelhaar/mnemos/internal/extract"
 	"github.com/felixgeelhaar/mnemos/internal/ingest"
-	"github.com/felixgeelhaar/mnemos/internal/llm"
 	"github.com/felixgeelhaar/mnemos/internal/parser"
+	"github.com/felixgeelhaar/mnemos/internal/pipeline"
 	"github.com/felixgeelhaar/mnemos/internal/query"
 	"github.com/felixgeelhaar/mnemos/internal/relate"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
 	"github.com/felixgeelhaar/mnemos/internal/workflow"
 )
 
-const defaultDBPath = "data/mnemos.db"
+// resolveDBPath returns the database path from MNEMOS_DB_PATH or the
+// XDG-compliant default (~/.local/share/mnemos/mnemos.db).
+func resolveDBPath() string {
+	if p := os.Getenv("MNEMOS_DB_PATH"); p != "" {
+		return p
+	}
+	dataHome := os.Getenv("XDG_DATA_HOME")
+	if dataHome == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return filepath.Join("data", "mnemos.db")
+		}
+		dataHome = filepath.Join(home, ".local", "share")
+	}
+	return filepath.Join(dataHome, "mnemos", "mnemos.db")
+}
 
 type boltLogger struct {
 	logger *bolt.Logger
@@ -76,6 +86,16 @@ type processTextOutput struct {
 	UsedEmbeddings bool   `json:"usedEmbeddings"`
 }
 
+type metricsOutput struct {
+	Runs            int64 `json:"runs"`
+	Events          int64 `json:"events"`
+	Claims          int64 `json:"claims"`
+	ContestedClaims int64 `json:"contested_claims"`
+	Relationships   int64 `json:"relationships"`
+	Contradictions  int64 `json:"contradictions"`
+	Embeddings      int64 `json:"embeddings"`
+}
+
 func main() {
 	logger := bolt.New(bolt.NewJSONHandler(os.Stderr))
 	srv := mcp.NewServer(mcp.ServerInfo{
@@ -108,13 +128,20 @@ func main() {
 			return runProcessText(ctx, input)
 		})
 
+	srv.Tool("knowledge_metrics").
+		Description("Return counts and statistics about the Mnemos knowledge base.").
+		OutputSchema(metricsOutput{}).
+		Handler(func(_ context.Context, _ struct{}) (metricsOutput, error) {
+			return runMetrics()
+		})
+
 	if err := mcp.ServeStdio(context.Background(), srv, mcp.WithMiddleware(mcp.DefaultMiddlewareWithTimeout(boltLogger{logger: logger}, 30*time.Second)...)); err != nil {
 		log.Fatal(err)
 	}
 }
 
 func runQuery(_ context.Context, input queryInput) (queryOutput, error) {
-	db, err := sqlite.Open(defaultDBPath)
+	db, err := sqlite.Open(resolveDBPath())
 	if err != nil {
 		return queryOutput{}, err
 	}
@@ -149,7 +176,7 @@ func runProcessText(ctx context.Context, input processTextInput) (processTextOut
 	normalizer := parser.NewNormalizer()
 	progress := mcp.ProgressFromContext(ctx)
 
-	db, err := sqlite.Open(defaultDBPath)
+	db, err := sqlite.Open(resolveDBPath())
 	if err != nil {
 		return processTextOutput{}, err
 	}
@@ -185,11 +212,11 @@ func runProcessText(ctx context.Context, input processTextInput) (processTextOut
 			events[i].RunID = job.ID()
 		}
 
-		ext, err := newExtractor(input.UseLLM)
+		ext, err := pipeline.NewExtractor(input.UseLLM)
 		if err != nil {
 			return err
 		}
-		claims, links, err := ext.extract(events)
+		claims, links, err := ext.ExtractFn(events)
 		if err != nil {
 			return err
 		}
@@ -207,7 +234,7 @@ func runProcessText(ctx context.Context, input processTextInput) (processTextOut
 		if err := job.SetStatus("saving", ""); err != nil {
 			return err
 		}
-		if err := persistArtifacts(db, events, claims, links, rels); err != nil {
+		if err := pipeline.PersistArtifacts(ctx, db, events, claims, links, rels); err != nil {
 			return err
 		}
 
@@ -216,7 +243,7 @@ func runProcessText(ctx context.Context, input processTextInput) (processTextOut
 			if err := job.SetStatus("embedding", ""); err != nil {
 				return err
 			}
-			embeddingCount, err = generateEmbeddings(ctx, db, events)
+			embeddingCount, err = pipeline.GenerateEmbeddings(ctx, db, events)
 			if err != nil {
 				return err
 			}
@@ -241,133 +268,28 @@ func runProcessText(ctx context.Context, input processTextInput) (processTextOut
 	return result, nil
 }
 
-type extractor struct {
-	extract func([]domain.Event) ([]domain.Claim, []domain.ClaimEvidence, error)
+func runMetrics() (metricsOutput, error) {
+	db, err := sqlite.Open(resolveDBPath())
+	if err != nil {
+		return metricsOutput{}, err
+	}
+	defer func() { _ = db.Close() }()
+
+	return metricsOutput{
+		Runs:            countRows(db, `SELECT COUNT(DISTINCT run_id) FROM events WHERE run_id <> ''`),
+		Events:          countRows(db, `SELECT COUNT(*) FROM events`),
+		Claims:          countRows(db, `SELECT COUNT(*) FROM claims`),
+		ContestedClaims: countRows(db, `SELECT COUNT(*) FROM claims WHERE status = 'contested'`),
+		Relationships:   countRows(db, `SELECT COUNT(*) FROM relationships`),
+		Contradictions:  countRows(db, `SELECT COUNT(*) FROM relationships WHERE type = 'contradicts'`),
+		Embeddings:      countRows(db, `SELECT COUNT(*) FROM embeddings`),
+	}, nil
 }
 
-func newExtractor(useLLM bool) (*extractor, error) {
-	if !useLLM {
-		engine := extract.NewEngine()
-		return &extractor{extract: engine.Extract}, nil
+func countRows(db *sql.DB, query string) int64 {
+	var n int64
+	if err := db.QueryRow(query).Scan(&n); err != nil {
+		return 0
 	}
-
-	cfg, err := llm.ConfigFromEnv()
-	if err != nil {
-		return nil, err
-	}
-	client, err := llm.NewClient(cfg)
-	if err != nil {
-		return nil, err
-	}
-	engine := extract.NewLLMEngine(client)
-	return &extractor{extract: engine.Extract}, nil
-}
-
-func persistArtifacts(db *sql.DB, events []domain.Event, claims []domain.Claim, links []domain.ClaimEvidence, relationships []domain.Relationship) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_ = tx.Rollback()
-	}()
-
-	q := sqlcgen.New(tx)
-	ctx := context.Background()
-
-	for _, event := range events {
-		metadata, err := json.Marshal(event.Metadata)
-		if err != nil {
-			return err
-		}
-		if err := q.CreateEvent(ctx, sqlcgen.CreateEventParams{
-			ID:            event.ID,
-			RunID:         event.RunID,
-			SchemaVersion: event.SchemaVersion,
-			Content:       event.Content,
-			SourceInputID: event.SourceInputID,
-			Timestamp:     event.Timestamp.UTC().Format(time.RFC3339Nano),
-			MetadataJson:  string(metadata),
-			IngestedAt:    event.IngestedAt.UTC().Format(time.RFC3339Nano),
-		}); err != nil {
-			return err
-		}
-	}
-
-	for _, claim := range claims {
-		if err := q.UpsertClaim(ctx, sqlcgen.UpsertClaimParams{
-			ID:         claim.ID,
-			Text:       claim.Text,
-			Type:       string(claim.Type),
-			Confidence: claim.Confidence,
-			Status:     string(claim.Status),
-			CreatedAt:  claim.CreatedAt.UTC().Format(time.RFC3339Nano),
-		}); err != nil {
-			return err
-		}
-	}
-
-	for _, link := range links {
-		if err := q.UpsertClaimEvidence(ctx, sqlcgen.UpsertClaimEvidenceParams{ClaimID: link.ClaimID, EventID: link.EventID}); err != nil {
-			return err
-		}
-	}
-
-	for _, rel := range relationships {
-		if err := q.UpsertRelationship(ctx, sqlcgen.UpsertRelationshipParams{
-			ID:          rel.ID,
-			Type:        string(rel.Type),
-			FromClaimID: rel.FromClaimID,
-			ToClaimID:   rel.ToClaimID,
-			CreatedAt:   rel.CreatedAt.UTC().Format(time.RFC3339Nano),
-		}); err != nil {
-			return err
-		}
-	}
-
-	return tx.Commit()
-}
-
-func generateEmbeddings(ctx context.Context, db *sql.DB, events []domain.Event) (int, error) {
-	cfg, err := embedding.ConfigFromEnv()
-	if err != nil {
-		return 0, err
-	}
-	client, err := embedding.NewClient(cfg)
-	if err != nil {
-		return 0, err
-	}
-
-	texts := make([]string, 0, len(events))
-	for _, ev := range events {
-		texts = append(texts, ev.Content)
-	}
-
-	retrier := retry.New[[][]float32](retry.Config{
-		MaxAttempts:   3,
-		InitialDelay:  200 * time.Millisecond,
-		MaxDelay:      time.Second,
-		BackoffPolicy: retry.BackoffExponential,
-		Jitter:        true,
-		Logger:        slog.New(slog.NewJSONHandler(os.Stderr, nil)),
-	})
-
-	vectors, err := retrier.Do(ctx, func(ctx context.Context) ([][]float32, error) {
-		return client.Embed(ctx, texts)
-	})
-	if err != nil {
-		return 0, err
-	}
-
-	repo := sqlite.NewEmbeddingRepository(db)
-	for i, ev := range events {
-		if i >= len(vectors) {
-			break
-		}
-		if err := repo.Upsert(ev.ID, "event", vectors[i], cfg.Model); err != nil {
-			return 0, err
-		}
-	}
-
-	return len(vectors), nil
+	return n
 }

@@ -5,49 +5,47 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/felixgeelhaar/fortify/retry"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/embedding"
 	"github.com/felixgeelhaar/mnemos/internal/extract"
 	"github.com/felixgeelhaar/mnemos/internal/ingest"
-	"github.com/felixgeelhaar/mnemos/internal/llm"
 	"github.com/felixgeelhaar/mnemos/internal/parser"
+	"github.com/felixgeelhaar/mnemos/internal/pipeline"
 	"github.com/felixgeelhaar/mnemos/internal/query"
 	"github.com/felixgeelhaar/mnemos/internal/relate"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
 	"github.com/felixgeelhaar/mnemos/internal/workflow"
 )
 
-const defaultDBPath = "data/mnemos.db"
+// resolveDBPath returns the database path from MNEMOS_DB_PATH or the
+// XDG-compliant default (~/.local/share/mnemos/mnemos.db).
+func resolveDBPath() string {
+	if p := os.Getenv("MNEMOS_DB_PATH"); p != "" {
+		return p
+	}
+	dataHome := os.Getenv("XDG_DATA_HOME")
+	if dataHome == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return filepath.Join("data", "mnemos.db")
+		}
+		dataHome = filepath.Join(home, ".local", "share")
+	}
+	return filepath.Join(dataHome, "mnemos", "mnemos.db")
+}
 
 func printProgress(format string, args ...any) {
 	_, _ = fmt.Fprintf(os.Stderr, format+"\n", args...)
 }
 
-// extractor wraps either the rule-based or LLM-powered extraction engine,
-// presenting a uniform interface to command handlers.
-type extractor struct {
-	extract func([]domain.Event) ([]domain.Claim, []domain.ClaimEvidence, error)
-}
-
-// newExtractor builds the appropriate extraction engine based on the --llm
-// flag. When --llm is set, it reads provider config from environment variables
-// (MNEMOS_LLM_PROVIDER, MNEMOS_LLM_API_KEY, etc.) and falls back to the
-// rule-based engine on LLM failure.
-func newExtractor(useLLM bool) (*extractor, error) {
-	if !useLLM {
-		engine := extract.NewEngine()
-		return &extractor{extract: engine.Extract}, nil
-	}
-
-	cfg, err := llm.ConfigFromEnv()
+// newExtractor builds the appropriate extraction engine based on the --llm flag.
+func newExtractor(useLLM bool) (*pipeline.Extractor, error) {
+	ext, err := pipeline.NewExtractor(useLLM)
 	if err != nil {
 		return nil, &MnemosError{
 			Code:    ExitUsage,
@@ -55,14 +53,7 @@ func newExtractor(useLLM bool) (*extractor, error) {
 			Hint:    "Set MNEMOS_LLM_PROVIDER and MNEMOS_LLM_API_KEY environment variables\n  Providers: anthropic, openai, gemini, ollama, openai-compat",
 		}
 	}
-
-	client, err := llm.NewClient(cfg)
-	if err != nil {
-		return nil, NewSystemError(err, "failed to create LLM client")
-	}
-
-	engine := extract.NewLLMEngine(client)
-	return &extractor{extract: engine.Extract}, nil
+	return ext, nil
 }
 
 func main() {
@@ -98,7 +89,11 @@ func main() {
 	case "metrics":
 		handleMetrics(flags)
 	default:
-		fmt.Fprintf(os.Stderr, "error: unknown command %q\n\n", command)
+		fmt.Fprintf(os.Stderr, "error: unknown command %q\n", command)
+		if suggestion := suggestCommand(command); suggestion != "" {
+			fmt.Fprintf(os.Stderr, "  Did you mean %q?\n", suggestion)
+		}
+		fmt.Fprintln(os.Stderr)
 		printUsage()
 		os.Exit(int(ExitUsage))
 	}
@@ -123,7 +118,7 @@ func handleIngest(args []string, f Flags) {
 		}
 
 		contentArg := strings.Join(args[1:], " ")
-		err := runJob("ingest", map[string]string{"source": "raw_text"}, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
+		err := runJob("ingest", map[string]string{"source": "raw_text"}, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
 			if err := job.SetStatus("loading", ""); err != nil {
 				return err
 			}
@@ -146,11 +141,12 @@ func handleIngest(args []string, f Flags) {
 			}
 			repo := sqlite.NewEventRepository(db)
 			for _, event := range events {
-				if err := repo.Append(event); err != nil {
+				if err := repo.Append(ctx, event); err != nil {
 					return NewSystemError(err, "failed to persist event %s", event.ID)
 				}
 			}
-			fmt.Printf("run_id=%s input=%s type=%s format=%s bytes=%d events=%d db=%s source=%s\n", job.ID(), input.ID, input.Type, input.Format, len(content), len(events), defaultDBPath, input.Metadata["source"])
+			fmt.Printf("run_id=%s input=%s type=%s format=%s bytes=%d events=%d db=%s source=%s\n", job.ID(), input.ID, input.Type, input.Format, len(content), len(events), resolveDBPath(), input.Metadata["source"])
+			printIngestHint(job.ID())
 			return nil
 		})
 		exitWithMnemosError(f.Verbose, err)
@@ -164,7 +160,7 @@ func handleIngest(args []string, f Flags) {
 	}
 
 	path := args[0]
-	err := runJob("ingest", map[string]string{"path": path}, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
+	err := runJob("ingest", map[string]string{"path": path}, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -187,11 +183,12 @@ func handleIngest(args []string, f Flags) {
 		}
 		repo := sqlite.NewEventRepository(db)
 		for _, event := range events {
-			if err := repo.Append(event); err != nil {
+			if err := repo.Append(ctx, event); err != nil {
 				return NewSystemError(err, "failed to persist event %s", event.ID)
 			}
 		}
-		fmt.Printf("run_id=%s input=%s type=%s format=%s bytes=%d events=%d db=%s source=%s\n", job.ID(), input.ID, input.Type, input.Format, len(content), len(events), defaultDBPath, input.Metadata["source_path"])
+		fmt.Printf("run_id=%s input=%s type=%s format=%s bytes=%d events=%d db=%s source=%s\n", job.ID(), input.ID, input.Type, input.Format, len(content), len(events), resolveDBPath(), input.Metadata["source_path"])
+		printIngestHint(job.ID())
 		return nil
 	})
 	exitWithMnemosError(f.Verbose, err)
@@ -208,7 +205,7 @@ func handleQuery(args []string, f Flags) {
 		scope["run_id"] = runID
 	}
 
-	err = runJob("query", scope, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
+	err = runJob("query", scope, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -221,9 +218,13 @@ func handleQuery(args []string, f Flags) {
 		if f.Embed {
 			printProgress("semantic search: preparing query embeddings")
 			embCfg, err := embedding.ConfigFromEnv()
-			if err == nil {
+			if err != nil {
+				printProgress("warning: --embed requested but embedding config failed: %v (falling back to keyword matching)", err)
+			} else {
 				embClient, err := embedding.NewClient(embCfg)
-				if err == nil {
+				if err != nil {
+					printProgress("warning: --embed requested but embedding client failed: %v (falling back to keyword matching)", err)
+				} else {
 					engine = engine.WithEmbeddings(
 						sqlite.NewEmbeddingRepository(db),
 						embClient,
@@ -232,18 +233,18 @@ func handleQuery(args []string, f Flags) {
 			}
 		}
 
-		if err := job.SetStatus("querying", ""); err != nil {
-			return err
+		if statusErr := job.SetStatus("querying", ""); statusErr != nil {
+			return statusErr
 		}
 		var answer domain.Answer
-		var err error
+		var queryErr error
 		if runID != "" {
-			answer, err = engine.AnswerForRun(question, runID)
+			answer, queryErr = engine.AnswerForRun(question, runID)
 		} else {
-			answer, err = engine.Answer(question)
+			answer, queryErr = engine.Answer(question)
 		}
-		if err != nil {
-			return NewSystemError(err, "query engine failed")
+		if queryErr != nil {
+			return NewSystemError(queryErr, "query engine failed")
 		}
 
 		if f.Human {
@@ -330,27 +331,53 @@ func printHumanReadableAnswer(question string, answer domain.Answer) {
 
 func handleExtract(args []string, f Flags) {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "error: extract requires one or more event IDs")
+		fmt.Fprintln(os.Stderr, "error: extract requires event IDs or --run flag")
 		fmt.Fprintln(os.Stderr, "  mnemos extract <event-id> [event-id ...]")
-		fmt.Fprintln(os.Stderr, "  mnemos extract ev_abc123 ev_def456")
+		fmt.Fprintln(os.Stderr, "  mnemos extract --run <run-id>")
 		os.Exit(int(ExitUsage))
 	}
 
-	err := runJob("extract", map[string]string{"event_ids": strings.Join(args, ",")}, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
+	// Parse --run flag for run-scoped extraction.
+	var runID string
+	eventIDs := args
+	if args[0] == "--run" {
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "error: --run flag requires a run ID")
+			os.Exit(int(ExitUsage))
+		}
+		runID = args[1]
+		eventIDs = args[2:]
+	}
+
+	scope := map[string]string{}
+	if runID != "" {
+		scope["run_id"] = runID
+	} else {
+		scope["event_ids"] = strings.Join(eventIDs, ",")
+	}
+
+	err := runJob("extract", scope, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
 		eventRepo := sqlite.NewEventRepository(db)
-		events, err := eventRepo.ListByIDs(args)
+
+		var events []domain.Event
+		var err error
+		if runID != "" {
+			events, err = eventRepo.ListByRunID(ctx, runID)
+		} else {
+			events, err = eventRepo.ListByIDs(ctx, eventIDs)
+		}
 		if err != nil {
 			return NewSystemError(err, "database lookup failed")
 		}
 		if len(events) == 0 {
-			return &MnemosError{
-				Code:    ExitNotFound,
-				Message: fmt.Sprintf("no events found for the provided IDs (%d given)", len(args)),
-				Hint:    "Tip: Run 'mnemos ingest <file>' or 'mnemos process --text <text>' first",
+			hint := "Tip: Run 'mnemos ingest <file>' or 'mnemos process --text <text>' first"
+			if runID != "" {
+				return &MnemosError{Code: ExitNotFound, Message: fmt.Sprintf("no events found for run %q", runID), Hint: hint}
 			}
+			return &MnemosError{Code: ExitNotFound, Message: fmt.Sprintf("no events found for the provided IDs (%d given)", len(eventIDs)), Hint: hint}
 		}
 
 		if err := job.SetStatus("extracting", ""); err != nil {
@@ -363,7 +390,7 @@ func handleExtract(args []string, f Flags) {
 		if err != nil {
 			return err
 		}
-		claims, links, err := ext.extract(events)
+		claims, links, err := ext.ExtractFn(events)
 		if err != nil {
 			return NewSystemError(err, "extraction failed")
 		}
@@ -375,21 +402,21 @@ func handleExtract(args []string, f Flags) {
 			return err
 		}
 		claimRepo := sqlite.NewClaimRepository(db)
-		if err := claimRepo.Upsert(claims); err != nil {
+		if err := claimRepo.Upsert(ctx, claims); err != nil {
 			return NewSystemError(err, "failed to persist claims")
 		}
-		if err := claimRepo.UpsertEvidence(links); err != nil {
+		if err := claimRepo.UpsertEvidence(ctx, links); err != nil {
 			return NewSystemError(err, "failed to persist claim evidence links")
 		}
 
-		fmt.Printf("events=%d claims=%d evidence_links=%d db=%s\n", len(events), len(claims), len(links), defaultDBPath)
+		fmt.Printf("events=%d claims=%d evidence_links=%d db=%s\n", len(events), len(claims), len(links), resolveDBPath())
 		return nil
 	})
 	exitWithMnemosError(f.Verbose, err)
 }
 
 func handleRelate(args []string, f Flags) {
-	err := runJob("relate", map[string]string{"event_ids": strings.Join(args, ",")}, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
+	err := runJob("relate", map[string]string{"event_ids": strings.Join(args, ",")}, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -399,9 +426,9 @@ func handleRelate(args []string, f Flags) {
 		var claims []domain.Claim
 		var err error
 		if len(args) == 0 {
-			claims, err = claimRepo.ListAll()
+			claims, err = claimRepo.ListAll(ctx)
 		} else {
-			claims, err = claimRepo.ListByEventIDs(args)
+			claims, err = claimRepo.ListByEventIDs(ctx, args)
 		}
 		if err != nil {
 			return NewSystemError(err, "database lookup failed")
@@ -425,11 +452,11 @@ func handleRelate(args []string, f Flags) {
 		if err := job.SetStatus("saving", ""); err != nil {
 			return err
 		}
-		if err := relRepo.Upsert(rels); err != nil {
+		if err := relRepo.Upsert(ctx, rels); err != nil {
 			return NewSystemError(err, "failed to persist relationships")
 		}
 
-		fmt.Printf("claims=%d relationships=%d db=%s\n", len(claims), len(rels), defaultDBPath)
+		fmt.Printf("claims=%d relationships=%d db=%s\n", len(claims), len(rels), resolveDBPath())
 		return nil
 	})
 	exitWithMnemosError(f.Verbose, err)
@@ -451,7 +478,7 @@ func handleProcess(args []string, f Flags) {
 		scope = map[string]string{"source": "raw_text"}
 	}
 
-	err := runJob("process", scope, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
+	err := runJob("process", scope, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -495,7 +522,7 @@ func handleProcess(args []string, f Flags) {
 		if f.LLM {
 			printProgress("llm extraction: sending content to %s", os.Getenv("MNEMOS_LLM_PROVIDER"))
 		}
-		claims, links, err := ext.extract(events)
+		claims, links, err := ext.ExtractFn(events)
 		if err != nil {
 			return NewSystemError(err, "claim extraction failed")
 		}
@@ -515,7 +542,7 @@ func handleProcess(args []string, f Flags) {
 		if err := job.SetStatus("saving", ""); err != nil {
 			return err
 		}
-		if err := persistProcessArtifacts(db, events, claims, links, rels); err != nil {
+		if err := pipeline.PersistArtifacts(ctx, db, events, claims, links, rels); err != nil {
 			return err
 		}
 
@@ -524,9 +551,14 @@ func handleProcess(args []string, f Flags) {
 				return err
 			}
 			printProgress("embedding: generating vectors with %s", os.Getenv("MNEMOS_EMBED_PROVIDER"))
-			if err := generateEmbeddings(db, events); err != nil {
-				// Embedding failure is non-fatal; log and continue.
-				fmt.Fprintf(os.Stderr, "warning: embedding generation failed: %v\n", err)
+			if n, err := pipeline.GenerateEmbeddings(ctx, db, events); err != nil {
+				// Embedding failure is non-fatal but should be prominent since --embed was explicit.
+				warn := icon("⚠️", "(!)")
+				fmt.Fprintf(os.Stderr, "\n  %s Embedding failed: %v\n", warn, err)
+				fmt.Fprintf(os.Stderr, "  Queries will fall back to keyword matching instead of semantic search.\n")
+				fmt.Fprintf(os.Stderr, "  Check MNEMOS_EMBED_PROVIDER and MNEMOS_EMBED_API_KEY.\n\n")
+			} else {
+				printProgress("embedding: generated %d vectors", n)
 			}
 		}
 
@@ -544,7 +576,7 @@ func handleProcess(args []string, f Flags) {
 }
 
 func handleMetrics(f Flags) {
-	err := runJob("metrics", map[string]string{}, func(_ context.Context, job *workflow.Job, db *sql.DB) error {
+	err := runJob("metrics", map[string]string{}, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -610,97 +642,29 @@ func cacheEntryCount() int {
 	return count
 }
 
-func persistProcessArtifacts(db *sql.DB, events []domain.Event, claims []domain.Claim, links []domain.ClaimEvidence, relationships []domain.Relationship) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return NewSystemError(err, "database transaction failed")
-	}
-	defer rollbackTx(tx)
-
-	q := sqlcgen.New(tx)
-	ctx := context.Background()
-
-	for _, event := range events {
-		metadata, err := json.Marshal(event.Metadata)
-		if err != nil {
-			return NewSystemError(err, "internal error marshaling event metadata")
-		}
-		err = q.CreateEvent(ctx, sqlcgen.CreateEventParams{
-			ID:            event.ID,
-			RunID:         event.RunID,
-			SchemaVersion: event.SchemaVersion,
-			Content:       event.Content,
-			SourceInputID: event.SourceInputID,
-			Timestamp:     event.Timestamp.UTC().Format(time.RFC3339Nano),
-			MetadataJson:  string(metadata),
-			IngestedAt:    event.IngestedAt.UTC().Format(time.RFC3339Nano),
-		})
-		if err != nil {
-			return NewSystemError(err, "failed to insert event %s", event.ID)
-		}
-	}
-
-	for _, claim := range claims {
-		if err := claim.Validate(); err != nil {
-			return NewSystemError(err, "internal: invalid claim %s", claim.ID)
-		}
-		err = q.UpsertClaim(ctx, sqlcgen.UpsertClaimParams{
-			ID:         claim.ID,
-			Text:       claim.Text,
-			Type:       string(claim.Type),
-			Confidence: claim.Confidence,
-			Status:     string(claim.Status),
-			CreatedAt:  claim.CreatedAt.UTC().Format(time.RFC3339Nano),
-		})
-		if err != nil {
-			return NewSystemError(err, "failed to upsert claim %s", claim.ID)
-		}
-	}
-
-	for _, link := range links {
-		if err := link.Validate(); err != nil {
-			return NewSystemError(err, "internal: invalid claim evidence")
-		}
-		err = q.UpsertClaimEvidence(ctx, sqlcgen.UpsertClaimEvidenceParams{ClaimID: link.ClaimID, EventID: link.EventID})
-		if err != nil {
-			return NewSystemError(err, "failed to upsert claim evidence (%s,%s)", link.ClaimID, link.EventID)
-		}
-	}
-
-	for _, rel := range relationships {
-		err = q.UpsertRelationship(ctx, sqlcgen.UpsertRelationshipParams{
-			ID:          rel.ID,
-			Type:        string(rel.Type),
-			FromClaimID: rel.FromClaimID,
-			ToClaimID:   rel.ToClaimID,
-			CreatedAt:   rel.CreatedAt.UTC().Format(time.RFC3339Nano),
-		})
-		if err != nil {
-			return NewSystemError(err, "failed to upsert relationship %s", rel.ID)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return NewSystemError(err, "failed to commit transaction")
-	}
-
-	return nil
-}
-
 func printUsage() {
-	fmt.Println("Mnemos CLI")
+	fmt.Println("Mnemos CLI — local-first knowledge engine")
 	fmt.Println("")
-	fmt.Println("Usage:")
-	fmt.Println("  mnemos ingest <path>")
-	fmt.Println("  mnemos ingest --text <content>")
-	fmt.Println("  mnemos extract <event-id> [event-id ...]")
-	fmt.Println("  mnemos relate [event-id ...]")
-	fmt.Println("  mnemos process <path>")
-	fmt.Println("  mnemos process --text <content>")
-	fmt.Println("  mnemos process --llm <path>           (LLM-powered extraction)")
-	fmt.Println("  mnemos process --llm --embed <path>   (LLM extraction + embeddings)")
-	fmt.Println("  mnemos query [--run <run-id>] [--human] <question>")
-	fmt.Println("  mnemos metrics [--human]")
+	fmt.Println("Quick Start:")
+	fmt.Println("  mnemos process --text \"Your text here\"")
+	fmt.Println("  mnemos query --human \"Your question\"")
+	fmt.Println("")
+	fmt.Println("Pipeline Commands:")
+	fmt.Println("  ingest <path>                        Ingest a file as events")
+	fmt.Println("  ingest --text <content>              Ingest raw text as events")
+	fmt.Println("  extract <event-id> [event-id ...]    Extract claims from events")
+	fmt.Println("  extract --run <run-id>               Extract claims from all events in a run")
+	fmt.Println("  relate [event-id ...]                Detect relationships between claims")
+	fmt.Println("")
+	fmt.Println("All-in-One:")
+	fmt.Println("  process <path>                       Ingest + extract + relate in one step")
+	fmt.Println("  process --text <content>             Same, from raw text")
+	fmt.Println("  process --llm <path>                 Use LLM-powered extraction")
+	fmt.Println("  process --llm --embed <path>         LLM extraction + embeddings")
+	fmt.Println("")
+	fmt.Println("Query & Reporting:")
+	fmt.Println("  query [--run <run-id>] <question>    Query with evidence")
+	fmt.Println("  metrics [--human]                    Knowledge base statistics")
 	fmt.Println("")
 	fmt.Println("Flags:")
 	fmt.Println("  -h, --help     show this help message")
@@ -709,23 +673,18 @@ func printUsage() {
 	fmt.Println("  --human        human-readable output (default: JSON)")
 	fmt.Println("  --json         force JSON output (default for non-query commands)")
 	fmt.Println("  --llm          use LLM-powered extraction (requires MNEMOS_LLM_PROVIDER)")
-	fmt.Println("  --embed        generate embeddings for semantic search (requires MNEMOS_EMBED_PROVIDER or MNEMOS_LLM_PROVIDER)")
+	fmt.Println("  --embed        generate embeddings for semantic search")
 	fmt.Println("")
-	fmt.Println("LLM Environment Variables:")
-	fmt.Println("  MNEMOS_LLM_PROVIDER   anthropic, openai, gemini, ollama, openai-compat")
-	fmt.Println("  MNEMOS_LLM_API_KEY    API key (required for cloud providers)")
-	fmt.Println("  MNEMOS_LLM_MODEL      model override (optional)")
-	fmt.Println("  MNEMOS_LLM_BASE_URL   custom endpoint (required for openai-compat)")
-	fmt.Println("")
-	fmt.Println("Embedding Environment Variables:")
-	fmt.Println("  MNEMOS_EMBED_PROVIDER  openai, gemini, ollama, openai-compat (falls back to LLM provider)")
-	fmt.Println("  MNEMOS_EMBED_API_KEY   API key (falls back to MNEMOS_LLM_API_KEY)")
-	fmt.Println("  MNEMOS_EMBED_MODEL     model override (optional)")
-	fmt.Println("  MNEMOS_EMBED_BASE_URL  custom endpoint (optional)")
-	fmt.Println("")
-	fmt.Println("Quick Start:")
-	fmt.Println("  mnemos process --text \"Your text here\"")
-	fmt.Println("  mnemos query --human \"Your question\"")
+	fmt.Println("Environment Variables:")
+	fmt.Println("  MNEMOS_DB_PATH         database path (default: ~/.local/share/mnemos/mnemos.db)")
+	fmt.Println("  MNEMOS_LLM_PROVIDER    anthropic, openai, gemini, ollama, openai-compat")
+	fmt.Println("  MNEMOS_LLM_API_KEY     API key (required for cloud providers)")
+	fmt.Println("  MNEMOS_LLM_MODEL       model override (optional)")
+	fmt.Println("  MNEMOS_LLM_BASE_URL    custom endpoint (required for openai-compat)")
+	fmt.Println("  MNEMOS_EMBED_PROVIDER  embedding provider (falls back to LLM provider)")
+	fmt.Println("  MNEMOS_EMBED_API_KEY   embedding API key (falls back to LLM key)")
+	fmt.Println("  MNEMOS_EMBED_MODEL     embedding model override (optional)")
+	fmt.Println("  MNEMOS_EMBED_BASE_URL  embedding endpoint (optional)")
 }
 
 func parseQueryArgs(args []string) (string, string, error) {
@@ -755,15 +714,17 @@ func parseQueryArgs(args []string) (string, string, error) {
 }
 
 func runJob(kind string, scope map[string]string, fn func(context.Context, *workflow.Job, *sql.DB) error) error {
-	if isFirstRun(defaultDBPath) && kind != "ingest" && kind != "process" {
+	dbPath := resolveDBPath()
+
+	if isFirstRun(dbPath) && kind != "ingest" && kind != "process" {
 		printWelcome()
 		fmt.Println("  First run detected. Use 'process' or 'ingest' to add knowledge.")
 		printFirstRunHints()
 	}
 
-	db, err := sqlite.Open(defaultDBPath)
+	db, err := sqlite.Open(dbPath)
 	if err != nil {
-		return NewSystemError(err, "failed to open database at %q", defaultDBPath)
+		return NewSystemError(err, "failed to open database at %q", dbPath)
 	}
 	defer closeDB(db)
 
@@ -775,53 +736,4 @@ func runJob(kind string, scope map[string]string, fn func(context.Context, *work
 		return fn(ctx, job, db)
 	})
 	return jobErr
-}
-
-// generateEmbeddings creates vector embeddings for the given events and stores
-// them in the database. It reads embedding provider config from env vars.
-func generateEmbeddings(db *sql.DB, events []domain.Event) error {
-	cfg, err := embedding.ConfigFromEnv()
-	if err != nil {
-		return fmt.Errorf("embedding config: %w", err)
-	}
-
-	client, err := embedding.NewClient(cfg)
-	if err != nil {
-		return fmt.Errorf("create embedding client: %w", err)
-	}
-
-	texts := make([]string, 0, len(events))
-	for _, ev := range events {
-		texts = append(texts, ev.Content)
-	}
-
-	retrier := retry.New[[][]float32](retry.Config{
-		MaxAttempts:   3,
-		InitialDelay:  200 * time.Millisecond,
-		MaxDelay:      time.Second,
-		BackoffPolicy: retry.BackoffExponential,
-		Jitter:        true,
-		Logger:        slog.New(slog.NewJSONHandler(os.Stderr, nil)),
-	})
-
-	vectors, err := retrier.Do(context.Background(), func(ctx context.Context) ([][]float32, error) {
-		return client.Embed(ctx, texts)
-	})
-	if err != nil {
-		return fmt.Errorf("embed events: %w", err)
-	}
-
-	repo := sqlite.NewEmbeddingRepository(db)
-	model := cfg.Model
-	for i, ev := range events {
-		if i >= len(vectors) {
-			break
-		}
-		if err := repo.Upsert(ev.ID, "event", vectors[i], model); err != nil {
-			return fmt.Errorf("store embedding for event %s: %w", ev.ID, err)
-		}
-	}
-
-	fmt.Printf("Embedded: %d events (%s / %s)\n", len(vectors), cfg.Provider, model)
-	return nil
 }

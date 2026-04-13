@@ -23,12 +23,12 @@ func NewClaimRepository(db *sql.DB) ClaimRepository {
 }
 
 // Upsert inserts or updates the given claims in a single transaction.
-func (r ClaimRepository) Upsert(claims []domain.Claim) error {
+func (r ClaimRepository) Upsert(ctx context.Context, claims []domain.Claim) error {
 	if len(claims) == 0 {
 		return nil
 	}
 
-	tx, err := r.db.Begin()
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin claim upsert tx: %w", err)
 	}
@@ -40,7 +40,7 @@ func (r ClaimRepository) Upsert(claims []domain.Claim) error {
 		if err := claim.Validate(); err != nil {
 			return fmt.Errorf("invalid claim %s: %w", claim.ID, err)
 		}
-		err := qtx.UpsertClaim(context.Background(), sqlcgen.UpsertClaimParams{
+		err := qtx.UpsertClaim(ctx, sqlcgen.UpsertClaimParams{
 			ID:         claim.ID,
 			Text:       claim.Text,
 			Type:       string(claim.Type),
@@ -61,12 +61,12 @@ func (r ClaimRepository) Upsert(claims []domain.Claim) error {
 }
 
 // UpsertEvidence inserts or updates claim-to-event evidence links in a single transaction.
-func (r ClaimRepository) UpsertEvidence(links []domain.ClaimEvidence) error {
+func (r ClaimRepository) UpsertEvidence(ctx context.Context, links []domain.ClaimEvidence) error {
 	if len(links) == 0 {
 		return nil
 	}
 
-	tx, err := r.db.Begin()
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin claim evidence tx: %w", err)
 	}
@@ -78,7 +78,7 @@ func (r ClaimRepository) UpsertEvidence(links []domain.ClaimEvidence) error {
 		if err := link.Validate(); err != nil {
 			return fmt.Errorf("invalid claim evidence: %w", err)
 		}
-		err := qtx.UpsertClaimEvidence(context.Background(), sqlcgen.UpsertClaimEvidenceParams{
+		err := qtx.UpsertClaimEvidence(ctx, sqlcgen.UpsertClaimEvidenceParams{
 			ClaimID: link.ClaimID,
 			EventID: link.EventID,
 		})
@@ -95,7 +95,7 @@ func (r ClaimRepository) UpsertEvidence(links []domain.ClaimEvidence) error {
 }
 
 // ListByEventIDs returns all claims linked to the given event IDs via claim evidence.
-func (r ClaimRepository) ListByEventIDs(eventIDs []string) ([]domain.Claim, error) {
+func (r ClaimRepository) ListByEventIDs(ctx context.Context, eventIDs []string) ([]domain.Claim, error) {
 	if len(eventIDs) == 0 {
 		return []domain.Claim{}, nil
 	}
@@ -114,7 +114,7 @@ JOIN claim_evidence ce ON ce.claim_id = c.id
 WHERE ce.event_id IN (%s)
 ORDER BY c.created_at ASC`, strings.Join(placeholders, ",")) //nolint:gosec // G201: placeholders are literal "?" strings, not user input
 
-	rows, err := r.db.Query(query, args...)
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list claims by event ids: %w", err)
 	}
@@ -136,8 +136,8 @@ ORDER BY c.created_at ASC`, strings.Join(placeholders, ",")) //nolint:gosec // G
 }
 
 // ListAll returns every claim stored in the database.
-func (r ClaimRepository) ListAll() ([]domain.Claim, error) {
-	rows, err := r.q.ListAllClaims(context.Background())
+func (r ClaimRepository) ListAll(ctx context.Context) ([]domain.Claim, error) {
+	rows, err := r.q.ListAllClaims(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list all claims: %w", err)
 	}

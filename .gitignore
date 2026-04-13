@@ -10,6 +10,8 @@ data/ingestion/*
 # Build artifacts
 bin/
 dist/
+/mnemos
+/mnemos-mcp
 
 # Coverage and test outputs
 *.out

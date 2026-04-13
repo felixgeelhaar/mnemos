@@ -14,7 +14,7 @@ import (
 )
 
 type jobStore interface {
-	Upsert(domain.CompilationJob) error
+	Upsert(context.Context, domain.CompilationJob) error
 }
 
 // Runner executes compilation jobs with timeout, retry, and status tracking.
@@ -63,7 +63,7 @@ func (r Runner) Run(kind string, scope map[string]string, fn func(context.Contex
 		UpdatedAt: now,
 		Error:     "",
 	}
-	if err := r.Store.Upsert(jobData); err != nil {
+	if err := r.Store.Upsert(context.Background(), jobData); err != nil {
 		return fmt.Errorf("create job: %w", err)
 	}
 
@@ -133,7 +133,7 @@ func (j *Job) SetStatus(status, errMsg string) error {
 	j.data.Status = status
 	j.data.Error = errMsg
 	j.data.UpdatedAt = j.runner.now().UTC()
-	if err := j.runner.Store.Upsert(j.data); err != nil {
+	if err := j.runner.Store.Upsert(context.Background(), j.data); err != nil {
 		return fmt.Errorf("update job %s status %s: %w", j.id, status, err)
 	}
 	return nil

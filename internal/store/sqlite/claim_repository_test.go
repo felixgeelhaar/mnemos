@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -24,7 +25,7 @@ func TestClaimRepositoryUpsertAndListByEventIDs(t *testing.T) {
 		IngestedAt:    now,
 		Metadata:      map[string]string{"chunk_kind": "text"},
 	}
-	if err := eventRepo.Append(event); err != nil {
+	if err := eventRepo.Append(context.Background(), event); err != nil {
 		t.Fatalf("Append() event error = %v", err)
 	}
 
@@ -36,15 +37,15 @@ func TestClaimRepositoryUpsertAndListByEventIDs(t *testing.T) {
 		Status:     domain.ClaimStatusActive,
 		CreatedAt:  now,
 	}
-	if err := claimRepo.Upsert([]domain.Claim{claim}); err != nil {
+	if err := claimRepo.Upsert(context.Background(), []domain.Claim{claim}); err != nil {
 		t.Fatalf("Upsert() claim error = %v", err)
 	}
 
-	if err := claimRepo.UpsertEvidence([]domain.ClaimEvidence{{ClaimID: "cl_1", EventID: "ev_for_claim"}}); err != nil {
+	if err := claimRepo.UpsertEvidence(context.Background(), []domain.ClaimEvidence{{ClaimID: "cl_1", EventID: "ev_for_claim"}}); err != nil {
 		t.Fatalf("UpsertEvidence() error = %v", err)
 	}
 
-	claims, err := claimRepo.ListByEventIDs([]string{"ev_for_claim"})
+	claims, err := claimRepo.ListByEventIDs(context.Background(), []string{"ev_for_claim"})
 	if err != nil {
 		t.Fatalf("ListByEventIDs() error = %v", err)
 	}

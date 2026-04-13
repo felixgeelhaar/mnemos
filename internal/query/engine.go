@@ -13,8 +13,8 @@ import (
 
 type eventLister interface {
 	ports.EventRepository
-	ListAll() ([]domain.Event, error)
-	ListByRunID(runID string) ([]domain.Event, error)
+	ListAll(ctx context.Context) ([]domain.Event, error)
+	ListByRunID(ctx context.Context, runID string) ([]domain.Event, error)
 }
 
 // Engine answers natural-language questions by ranking events, resolving claims,
@@ -43,29 +43,31 @@ func (e Engine) WithEmbeddings(repo ports.EmbeddingRepository, client embedding.
 
 // Answer searches all stored events for the best answer to the given question.
 func (e Engine) Answer(question string) (domain.Answer, error) {
-	allEvents, err := e.events.ListAll()
+	ctx := context.Background()
+	allEvents, err := e.events.ListAll(ctx)
 	if err != nil {
 		return domain.Answer{}, fmt.Errorf("load events for query: %w", err)
 	}
-	return e.answerWithEvents(question, allEvents)
+	return e.answerWithEvents(ctx, question, allEvents)
 }
 
 // AnswerForRun searches events belonging to the specified run for the best answer.
 func (e Engine) AnswerForRun(question, runID string) (domain.Answer, error) {
+	ctx := context.Background()
 	if strings.TrimSpace(runID) == "" {
 		return domain.Answer{}, fmt.Errorf("run id is required")
 	}
-	events, err := e.events.ListByRunID(runID)
+	events, err := e.events.ListByRunID(ctx, runID)
 	if err != nil {
 		return domain.Answer{}, fmt.Errorf("load events for run: %w", err)
 	}
 	if len(events) == 0 {
 		return domain.Answer{AnswerText: fmt.Sprintf("No events found for run %q.", runID)}, nil
 	}
-	return e.answerWithEvents(question, events)
+	return e.answerWithEvents(ctx, question, events)
 }
 
-func (e Engine) answerWithEvents(question string, allEvents []domain.Event) (domain.Answer, error) {
+func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents []domain.Event) (domain.Answer, error) {
 	q := strings.TrimSpace(question)
 	if q == "" {
 		return domain.Answer{}, fmt.Errorf("query question is required")
@@ -74,18 +76,18 @@ func (e Engine) answerWithEvents(question string, allEvents []domain.Event) (dom
 		return domain.Answer{AnswerText: "No ingested events yet."}, nil
 	}
 
-	topEvents := e.rankEventsWithFallback(q, allEvents, 5)
+	topEvents := e.rankEventsWithFallback(ctx, q, allEvents, 5)
 	eventIDs := make([]string, 0, len(topEvents))
 	for _, event := range topEvents {
 		eventIDs = append(eventIDs, event.ID)
 	}
 
-	claims, err := e.claims.ListByEventIDs(eventIDs)
+	claims, err := e.claims.ListByEventIDs(ctx, eventIDs)
 	if err != nil {
 		return domain.Answer{}, fmt.Errorf("load claims for query: %w", err)
 	}
 
-	contradictions, err := collectContradictions(e.relationships, claims)
+	contradictions, err := collectContradictions(ctx, e.relationships, claims)
 	if err != nil {
 		return domain.Answer{}, fmt.Errorf("load contradictions for query: %w", err)
 	}
@@ -101,9 +103,9 @@ func (e Engine) answerWithEvents(question string, allEvents []domain.Event) (dom
 
 // rankEventsWithFallback tries cosine similarity first (if embeddings are available),
 // then falls back to token-overlap ranking.
-func (e Engine) rankEventsWithFallback(question string, events []domain.Event, limit int) []domain.Event {
+func (e Engine) rankEventsWithFallback(ctx context.Context, question string, events []domain.Event, limit int) []domain.Event {
 	if e.embeddings != nil && e.embedClient != nil {
-		result, err := e.rankEventsByCosine(question, events, limit)
+		result, err := e.rankEventsByCosine(ctx, question, events, limit)
 		if err == nil && len(result) > 0 {
 			return result
 		}
@@ -114,8 +116,8 @@ func (e Engine) rankEventsWithFallback(question string, events []domain.Event, l
 
 // rankEventsByCosine embeds the question and ranks events by cosine similarity
 // against their stored embeddings.
-func (e Engine) rankEventsByCosine(question string, events []domain.Event, limit int) ([]domain.Event, error) {
-	stored, err := e.embeddings.ListByEntityType("event")
+func (e Engine) rankEventsByCosine(ctx context.Context, question string, events []domain.Event, limit int) ([]domain.Event, error) {
+	stored, err := e.embeddings.ListByEntityType(ctx, "event")
 	if err != nil || len(stored) == 0 {
 		return nil, fmt.Errorf("no embeddings available")
 	}
@@ -139,7 +141,7 @@ func (e Engine) rankEventsByCosine(question string, events []domain.Event, limit
 	}
 
 	// Embed the question.
-	qVectors, err := e.embedClient.Embed(context.Background(), []string{question})
+	qVectors, err := e.embedClient.Embed(ctx, []string{question})
 	if err != nil || len(qVectors) == 0 {
 		return nil, fmt.Errorf("embed question: %w", err)
 	}
@@ -213,11 +215,11 @@ func rankEvents(question string, events []domain.Event, limit int) []domain.Even
 	return out
 }
 
-func collectContradictions(repo ports.RelationshipRepository, claims []domain.Claim) ([]domain.Relationship, error) {
+func collectContradictions(ctx context.Context, repo ports.RelationshipRepository, claims []domain.Claim) ([]domain.Relationship, error) {
 	seen := map[string]struct{}{}
 	result := make([]domain.Relationship, 0)
 	for _, claim := range claims {
-		rels, err := repo.ListByClaim(claim.ID)
+		rels, err := repo.ListByClaim(ctx, claim.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -277,11 +279,4 @@ func overlapScore(a, b map[string]struct{}) int {
 		}
 	}
 	return score
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

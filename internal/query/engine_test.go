@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -12,11 +13,15 @@ type fakeEventRepo struct {
 	events []domain.Event
 }
 
-func (f fakeEventRepo) Append(domain.Event) error                  { return nil }
-func (f fakeEventRepo) GetByID(string) (domain.Event, error)       { return domain.Event{}, nil }
-func (f fakeEventRepo) ListByIDs([]string) ([]domain.Event, error) { return nil, nil }
-func (f fakeEventRepo) ListAll() ([]domain.Event, error)           { return f.events, nil }
-func (f fakeEventRepo) ListByRunID(runID string) ([]domain.Event, error) {
+func (f fakeEventRepo) Append(_ context.Context, _ domain.Event) error { return nil }
+func (f fakeEventRepo) GetByID(_ context.Context, _ string) (domain.Event, error) {
+	return domain.Event{}, nil
+}
+func (f fakeEventRepo) ListByIDs(_ context.Context, _ []string) ([]domain.Event, error) {
+	return nil, nil
+}
+func (f fakeEventRepo) ListAll(_ context.Context) ([]domain.Event, error) { return f.events, nil }
+func (f fakeEventRepo) ListByRunID(_ context.Context, runID string) ([]domain.Event, error) {
 	filtered := make([]domain.Event, 0)
 	for _, event := range f.events {
 		if event.RunID == runID {
@@ -30,8 +35,8 @@ type fakeClaimRepo struct {
 	claims []domain.Claim
 }
 
-func (f fakeClaimRepo) Upsert([]domain.Claim) error { return nil }
-func (f fakeClaimRepo) ListByEventIDs([]string) ([]domain.Claim, error) {
+func (f fakeClaimRepo) Upsert(_ context.Context, _ []domain.Claim) error { return nil }
+func (f fakeClaimRepo) ListByEventIDs(_ context.Context, _ []string) ([]domain.Claim, error) {
 	return f.claims, nil
 }
 
@@ -39,8 +44,8 @@ type fakeRelationshipRepo struct {
 	rels map[string][]domain.Relationship
 }
 
-func (f fakeRelationshipRepo) Upsert([]domain.Relationship) error { return nil }
-func (f fakeRelationshipRepo) ListByClaim(claimID string) ([]domain.Relationship, error) {
+func (f fakeRelationshipRepo) Upsert(_ context.Context, _ []domain.Relationship) error { return nil }
+func (f fakeRelationshipRepo) ListByClaim(_ context.Context, claimID string) ([]domain.Relationship, error) {
 	return f.rels[claimID], nil
 }
 

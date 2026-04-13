@@ -1,10 +1,8 @@
 # Mnemos
 
-**The local-first knowledge engine that eliminates AI hallucination.**
+**The local-first evidence layer that grounds AI in truth.**
 
-AI systems are becoming decision-makers. But they forget context, invent facts, and contradict themselves. Without a system of truth, AI cannot be reliable.
-
-Mnemos is the system that makes knowledge reliable—for humans and AI.
+Your RAG system hallucinates because your data layer has no concept of evidence or contradiction. Mnemos fixes the data layer — every claim traces to its source, and conflicting information is surfaced instead of buried.
 
 ## The Problem
 
@@ -117,7 +115,7 @@ mnemos query --embed --human "What improved after onboarding changed?"
 | Claims traced to evidence | ❌ | ✅ |
 | Contradictions surfaced | ❌ | ✅ |
 | Local-first / private | ❌ | ✅ |
-| No hallucination | ❌ | ✅ |
+| Grounded in governed data | ❌ | ✅ |
 | Evolves over time | ❌ | ✅ |
 
 ## Status
@@ -143,15 +141,19 @@ Current focus: hardening release, packaging, and team-ready workflows.
 
 ```
 cmd/mnemos           # CLI entrypoint
+cmd/mnemos-mcp       # MCP server entrypoint
 internal/
-  domain/            # Core types: Event, Claim, Relationship
+  domain/            # Core types: Event, Claim, Relationship, EmbeddingRecord
   ports/             # Interfaces for engines and repositories
+  pipeline/          # Shared orchestration (extraction, persistence, embeddings)
   ingest/            # Multi-format input ingestion
   parser/            # Input-to-event normalization
   extract/           # Claim extraction with evidence mapping
   relate/            # Relationship detection (supports/contradicts)
   query/             # Query assembly and ranking
-  store/sqlite/      # SQLite event store
+  embedding/         # Vector embedding client abstraction
+  llm/               # LLM client abstraction (multi-provider)
+  store/sqlite/      # SQLite event store (sqlc-generated queries)
   workflow/          # Job runner with retries and structured logs
 ```
 
@@ -172,6 +174,7 @@ internal/
 | `mnemos ingest <file>` | Ingest document |
 | `mnemos ingest --text <text>` | Ingest raw text |
 | `mnemos extract <event-id>...` | Extract claims from events |
+| `mnemos extract --run <run-id>` | Extract claims from all events in a run |
 | `mnemos relate` | Detect relationships |
 | `mnemos process --text <text>` | Ingest + extract + relate in one step |
 | `mnemos process --llm --text <text>` | Use LLM-backed extraction |

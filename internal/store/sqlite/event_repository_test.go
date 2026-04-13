@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"path/filepath"
 	"testing"
@@ -28,11 +29,11 @@ func TestEventRepositoryAppendAndGetByID(t *testing.T) {
 		},
 	}
 
-	if err := repo.Append(event); err != nil {
+	if err := repo.Append(context.Background(), event); err != nil {
 		t.Fatalf("Append() error = %v", err)
 	}
 
-	got, err := repo.GetByID("ev_1")
+	got, err := repo.GetByID(context.Background(), "ev_1")
 	if err != nil {
 		t.Fatalf("GetByID() error = %v", err)
 	}
@@ -59,12 +60,12 @@ func TestEventRepositoryListByIDsOrder(t *testing.T) {
 		{ID: "ev_c", RunID: "run_a", SchemaVersion: "v1", Content: "c", SourceInputID: "in_1", Timestamp: now, IngestedAt: now, Metadata: map[string]string{}},
 	}
 	for _, event := range seed {
-		if err := repo.Append(event); err != nil {
+		if err := repo.Append(context.Background(), event); err != nil {
 			t.Fatalf("Append() error = %v", err)
 		}
 	}
 
-	got, err := repo.ListByIDs([]string{"ev_c", "ev_a", "ev_missing"})
+	got, err := repo.ListByIDs(context.Background(), []string{"ev_c", "ev_a", "ev_missing"})
 	if err != nil {
 		t.Fatalf("ListByIDs() error = %v", err)
 	}
@@ -87,12 +88,12 @@ func TestEventRepositoryListAll(t *testing.T) {
 		{ID: "ev_2", RunID: "run_2", SchemaVersion: "v1", Content: "two", SourceInputID: "in_1", Timestamp: now.Add(time.Second), IngestedAt: now, Metadata: map[string]string{}},
 	}
 	for _, event := range seed {
-		if err := repo.Append(event); err != nil {
+		if err := repo.Append(context.Background(), event); err != nil {
 			t.Fatalf("Append() error = %v", err)
 		}
 	}
 
-	events, err := repo.ListAll()
+	events, err := repo.ListAll(context.Background())
 	if err != nil {
 		t.Fatalf("ListAll() error = %v", err)
 	}
@@ -113,12 +114,12 @@ func TestEventRepositoryListByRunID(t *testing.T) {
 		{ID: "ev_3", RunID: "run_1", SchemaVersion: "v1", Content: "three", SourceInputID: "in_1", Timestamp: now.Add(2 * time.Second), IngestedAt: now, Metadata: map[string]string{}},
 	}
 	for _, event := range seed {
-		if err := repo.Append(event); err != nil {
+		if err := repo.Append(context.Background(), event); err != nil {
 			t.Fatalf("Append() error = %v", err)
 		}
 	}
 
-	events, err := repo.ListByRunID("run_1")
+	events, err := repo.ListByRunID(context.Background(), "run_1")
 	if err != nil {
 		t.Fatalf("ListByRunID() error = %v", err)
 	}

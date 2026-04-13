@@ -25,13 +25,13 @@ func NewEventRepository(db *sql.DB) EventRepository {
 }
 
 // Append persists a single domain event to the database.
-func (r EventRepository) Append(event domain.Event) error {
+func (r EventRepository) Append(ctx context.Context, event domain.Event) error {
 	metadata, err := json.Marshal(event.Metadata)
 	if err != nil {
 		return fmt.Errorf("marshal event metadata: %w", err)
 	}
 
-	err = r.q.CreateEvent(context.Background(), sqlcgen.CreateEventParams{
+	err = r.q.CreateEvent(ctx, sqlcgen.CreateEventParams{
 		ID:            event.ID,
 		RunID:         event.RunID,
 		SchemaVersion: event.SchemaVersion,
@@ -49,8 +49,8 @@ func (r EventRepository) Append(event domain.Event) error {
 }
 
 // GetByID retrieves a single event by its unique identifier.
-func (r EventRepository) GetByID(id string) (domain.Event, error) {
-	row, err := r.q.GetEventByID(context.Background(), id)
+func (r EventRepository) GetByID(ctx context.Context, id string) (domain.Event, error) {
+	row, err := r.q.GetEventByID(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Event{}, fmt.Errorf("event %s not found", id)
 	}
@@ -66,7 +66,7 @@ func (r EventRepository) GetByID(id string) (domain.Event, error) {
 }
 
 // ListByIDs returns events matching the given IDs, preserving the input order.
-func (r EventRepository) ListByIDs(ids []string) ([]domain.Event, error) {
+func (r EventRepository) ListByIDs(ctx context.Context, ids []string) ([]domain.Event, error) {
 	if len(ids) == 0 {
 		return []domain.Event{}, nil
 	}
@@ -83,7 +83,7 @@ SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata
 FROM events
 WHERE id IN (%s)`, strings.Join(placeholders, ",")) //nolint:gosec // G201: placeholders are literal "?" strings, not user input
 
-	rows, err := r.db.Query(query, args...)
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query events by ids: %w", err)
 	}
@@ -114,8 +114,8 @@ WHERE id IN (%s)`, strings.Join(placeholders, ",")) //nolint:gosec // G201: plac
 }
 
 // ListAll returns every event stored in the database.
-func (r EventRepository) ListAll() ([]domain.Event, error) {
-	rows, err := r.q.ListAllEvents(context.Background())
+func (r EventRepository) ListAll(ctx context.Context) ([]domain.Event, error) {
+	rows, err := r.q.ListAllEvents(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list all events: %w", err)
 	}
@@ -133,8 +133,8 @@ func (r EventRepository) ListAll() ([]domain.Event, error) {
 }
 
 // ListByRunID returns all events that belong to the specified run.
-func (r EventRepository) ListByRunID(runID string) ([]domain.Event, error) {
-	rows, err := r.q.ListEventsByRunID(context.Background(), runID)
+func (r EventRepository) ListByRunID(ctx context.Context, runID string) ([]domain.Event, error) {
+	rows, err := r.q.ListEventsByRunID(ctx, runID)
 	if err != nil {
 		return nil, fmt.Errorf("list events by run id: %w", err)
 	}

@@ -22,13 +22,13 @@ func NewCompilationJobRepository(db *sql.DB) CompilationJobRepository {
 }
 
 // Upsert inserts or updates a compilation job record.
-func (r CompilationJobRepository) Upsert(job domain.CompilationJob) error {
+func (r CompilationJobRepository) Upsert(ctx context.Context, job domain.CompilationJob) error {
 	scopeJSON, err := json.Marshal(job.Scope)
 	if err != nil {
 		return fmt.Errorf("marshal job scope: %w", err)
 	}
 
-	err = r.q.UpsertCompilationJob(context.Background(), sqlcgen.UpsertCompilationJobParams{
+	err = r.q.UpsertCompilationJob(ctx, sqlcgen.UpsertCompilationJobParams{
 		ID:        job.ID,
 		Kind:      job.Kind,
 		Status:    job.Status,
@@ -45,8 +45,8 @@ func (r CompilationJobRepository) Upsert(job domain.CompilationJob) error {
 }
 
 // GetByID retrieves a compilation job by its unique identifier.
-func (r CompilationJobRepository) GetByID(id string) (domain.CompilationJob, error) {
-	row, err := r.q.GetCompilationJobByID(context.Background(), id)
+func (r CompilationJobRepository) GetByID(ctx context.Context, id string) (domain.CompilationJob, error) {
+	row, err := r.q.GetCompilationJobByID(ctx, id)
 	if err != nil {
 		return domain.CompilationJob{}, fmt.Errorf("get compilation job %s: %w", id, err)
 	}

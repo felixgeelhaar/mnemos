@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 )
@@ -76,7 +77,8 @@ func exitWithMnemosError(verbose bool, err error) {
 	msg := err.Error()
 	hint := ""
 
-	if me, ok := err.(*MnemosError); ok {
+	var me *MnemosError
+	if errors.As(err, &me) {
 		code = me.Code
 		if verbose || code == ExitUsage {
 			msg = me.Error()

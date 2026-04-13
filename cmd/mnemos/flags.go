@@ -26,7 +26,7 @@ func ParseFlags(args []string) (Flags, []string) {
 			f.Version = true
 		case "-v", "--verbose":
 			f.Verbose = true
-		case "--human", "-o", "text":
+		case "--human", "-o":
 			f.Human = true
 		case "--json":
 			f.JSON = true

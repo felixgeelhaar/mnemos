@@ -1,0 +1,7 @@
+bin/
+dist/
+data/
+*.db
+.git/
+.claude/
+coverage.out

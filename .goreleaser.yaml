@@ -55,6 +55,33 @@ archives:
       - README.md
       - LICENSE*
 
+brews:
+  - ids:
+      - mnemos
+      - mnemos-mcp
+    repository:
+      owner: felixgeelhaar
+      name: homebrew-tap
+    directory: Formula
+    homepage: https://github.com/felixgeelhaar/mnemos
+    description: "Local-first evidence layer that grounds AI in truth"
+    license: MIT
+    install: |
+      bin.install "mnemos"
+      bin.install "mnemos-mcp"
+    test: |
+      system bin/"mnemos", "--version"
+
+dockers:
+  - image_templates:
+      - "ghcr.io/felixgeelhaar/mnemos:{{ .Version }}"
+      - "ghcr.io/felixgeelhaar/mnemos:latest"
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - "--build-arg=VERSION={{ .Version }}"
+      - "--build-arg=COMMIT={{ .ShortCommit }}"
+      - "--build-arg=BUILD_DATE={{ .Date }}"
+
 checksum:
   name_template: checksums.txt
 

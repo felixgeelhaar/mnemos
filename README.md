@@ -16,46 +16,72 @@ RAG alone reduces hallucination by 40-71%. But RAG on ungoverned data? 52% fabri
 
 **"Confident wrong answers" are worse than uncertain ones.** Users don't verify cited outputs.
 
-## The Solution
+## 5-Minute Quickstart
 
-Mnemos introduces an evidence-backed knowledge layer:
-
-```
-inputs → claims → evidence → contradictions → truth
-```
-
-Every claim is traceable to its source. Contradictions are surfaced, not buried. Knowledge evolves instead of decays.
-
-## Key Features
-
-- **Evidence-backed claims** — Every extracted claim maps to source material
-- **Contradiction detection** — Automatically surface conflicting information  
-- **Local-first** — Your data stays on your machine
-- **Multi-provider extraction** — Anthropic, OpenAI, Gemini, Ollama, and OpenAI-compatible endpoints
-- **Developer-friendly** — CLI-first, JSON output, MCP-ready, pipeline-friendly
-
-## Quickstart
+### 1. Install
 
 ```bash
-# Install from source
-make install
+# macOS / Linux (Homebrew)
+brew tap felixgeelhaar/tap && brew install mnemos
 
-# Process any text and immediately query
-mnemos process --text "We decided to use PostgreSQL. The team prefers MySQL."
-mnemos query --human "What database should we use?"
+# Go (any platform with Go 1.25+)
+go install github.com/felixgeelhaar/mnemos/cmd/mnemos@latest
+go install github.com/felixgeelhaar/mnemos/cmd/mnemos-mcp@latest
 
-# Ingest documents
-mnemos ingest PRD.md
-mnemos ingest --text "Revenue grew 25% after the launch."
+# Docker
+docker run --rm ghcr.io/felixgeelhaar/mnemos --version
 
-# Query with evidence
-mnemos query "What decisions were made about our tech stack?"
-
-# Start the MCP server over stdio
-mnemos-mcp
+# From source
+git clone https://github.com/felixgeelhaar/mnemos.git && cd mnemos && make install
 ```
 
-If you do not want to install globally, run `make build` and use `./bin/mnemos` plus `./bin/mnemos-mcp`.
+### 2. Process text — extract claims and detect contradictions
+
+```bash
+mnemos process --text "We decided to use PostgreSQL for the new service. The team prefers MySQL for better tooling support."
+```
+
+You'll see Mnemos extract two claims — a decision and a fact — and flag the contradiction between them.
+
+### 3. Query with evidence
+
+```bash
+mnemos query --human "What database should we use?"
+```
+
+The answer comes with the source claims, confidence scores, and any contradictions — so you know what's true and what's contested.
+
+### 4. Try with your own documents
+
+```bash
+mnemos process meeting-notes.md
+mnemos query --human "What decisions were made?"
+```
+
+That's it. No API keys required — rule-based extraction works out of the box. Add `--llm` for LLM-powered extraction when you want higher quality.
+
+### Optional: LLM-powered extraction
+
+```bash
+export MNEMOS_LLM_PROVIDER=openai   # or: anthropic, gemini, ollama, openai-compat
+export MNEMOS_LLM_API_KEY=sk-...
+mnemos process --llm --text "Customers may prefer annual billing. We decided to test it in Q3."
+```
+
+### Optional: Semantic search with embeddings
+
+```bash
+export MNEMOS_EMBED_PROVIDER=openai
+export MNEMOS_EMBED_API_KEY=sk-...
+mnemos process --llm --embed --text "Support tickets dropped after the onboarding rewrite."
+mnemos query --embed --human "What improved after onboarding changed?"
+```
+
+### Optional: MCP server for AI agents
+
+```bash
+mnemos-mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over stdio
+```
 
 ## How It Works
 
@@ -66,8 +92,8 @@ If you do not want to install globally, run `make build` and use `./bin/mnemos` 
 └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘
 ```
 
-**Extract** — Turns raw text into structured claims (facts, decisions, hypotheses)  
-**Relate** — Detects support and contradiction relationships between claims  
+**Extract** — Turns raw text into structured claims (facts, decisions, hypotheses)
+**Relate** — Detects support and contradiction relationships between claims
 **Query** — Returns answers with claims, evidence, and surfaced contradictions
 
 ## Example Output
@@ -85,29 +111,6 @@ If you do not want to install globally, run `make build` and use `./bin/mnemos` 
 }
 ```
 
-## Usage Examples
-
-```bash
-# Rule-based extraction
-mnemos process --text "Q2 revenue grew 18%. We will expand to Germany next quarter."
-
-# LLM extraction with a cloud provider
-export MNEMOS_LLM_PROVIDER=openai
-export MNEMOS_LLM_API_KEY=...
-mnemos process --llm --text "Customers may prefer annual billing. We decided to test it in Q3."
-
-# Local extraction with Ollama
-export MNEMOS_LLM_PROVIDER=ollama
-export MNEMOS_LLM_MODEL=llama3.2
-mnemos process --llm --text "The roadmap now prioritizes API reliability over new UI work."
-
-# Semantic query with embeddings
-export MNEMOS_EMBED_PROVIDER=openai
-export MNEMOS_EMBED_API_KEY=...
-mnemos process --llm --embed --text "Support tickets dropped after the onboarding rewrite."
-mnemos query --embed --human "What improved after onboarding changed?"
-```
-
 ## Why Mnemos?
 
 | | Traditional RAG | Mnemos |
@@ -118,24 +121,26 @@ mnemos query --embed --human "What improved after onboarding changed?"
 | Grounded in governed data | ❌ | ✅ |
 | Evolves over time | ❌ | ✅ |
 
-## Status
+## Key Features
 
-Phase 1: Developer Primitive — Available now.
+- **Evidence-backed claims** — Every extracted claim maps to source material
+- **Contradiction detection** — Automatically surface conflicting information
+- **Local-first** — Your data stays on your machine (`~/.local/share/mnemos/`)
+- **Multi-provider extraction** — Anthropic, OpenAI, Gemini, Ollama, and OpenAI-compatible endpoints
+- **Developer-friendly** — CLI-first, JSON output, MCP-ready, pipeline-friendly
 
-Shipped in Phase 1:
+## Commands
 
-- Rule-based extraction with eval coverage
-- LLM-powered extraction with multi-provider support
-- Embeddings for semantic search
-- CLI + MCP server entrypoints
-
-Current focus: hardening release, packaging, and team-ready workflows.
-
-## Social Proof
-
-- Built against 78 extraction eval cases
-- Supports local-first and hosted model providers with the same CLI
-- Uses the same `mcp-go` framework as Roady-style MCP tooling for typed server integration
+| Command | Description |
+|---------|-------------|
+| `mnemos process <path or --text>` | Ingest + extract + relate in one step |
+| `mnemos process --llm --text <text>` | Use LLM-backed extraction |
+| `mnemos ingest <file>` | Ingest document as events |
+| `mnemos extract --run <run-id>` | Extract claims from a run's events |
+| `mnemos relate` | Detect relationships between claims |
+| `mnemos query <question>` | Query with evidence |
+| `mnemos metrics` | Knowledge base statistics |
+| `mnemos-mcp` | Start MCP server over stdio |
 
 ## Architecture
 
@@ -157,30 +162,36 @@ internal/
   workflow/          # Job runner with retries and structured logs
 ```
 
-## Prerequisites
+## Environment Variables
 
-- Go 1.25+
+| Variable | Description |
+|----------|-------------|
+| `MNEMOS_DB_PATH` | Database path (default: `~/.local/share/mnemos/mnemos.db`) |
+| `MNEMOS_LLM_PROVIDER` | `anthropic`, `openai`, `gemini`, `ollama`, `openai-compat` |
+| `MNEMOS_LLM_API_KEY` | API key (required for cloud providers) |
+| `MNEMOS_LLM_MODEL` | Model override (optional) |
+| `MNEMOS_LLM_BASE_URL` | Custom endpoint (required for `openai-compat`) |
+| `MNEMOS_EMBED_PROVIDER` | Embedding provider (falls back to `LLM_PROVIDER`) |
+| `MNEMOS_EMBED_API_KEY` | Embedding API key (falls back to `LLM_API_KEY`) |
 
-## Commands
+## Development
 
-| Command | Description |
-|---------|-------------|
-| `make check` | Format, lint, test, build |
-| `make build` | Build CLI binary |
-| `make install` | Install `mnemos` and `mnemos-mcp` |
-| `make test` | Run tests (includes 78 eval cases) |
-| `make release-check` | Validate GoReleaser config |
-| `make release-snapshot` | Build local GoReleaser archives without publishing |
-| `mnemos ingest <file>` | Ingest document |
-| `mnemos ingest --text <text>` | Ingest raw text |
-| `mnemos extract <event-id>...` | Extract claims from events |
-| `mnemos extract --run <run-id>` | Extract claims from all events in a run |
-| `mnemos relate` | Detect relationships |
-| `mnemos process --text <text>` | Ingest + extract + relate in one step |
-| `mnemos process --llm --text <text>` | Use LLM-backed extraction |
-| `mnemos query <question>` | Query with evidence |
-| `mnemos metrics` | Report local success metrics and knowledge counts |
-| `mnemos-mcp` | Start MCP server over stdio |
+```bash
+make check          # Format, lint, test, build (CI equivalent)
+make build          # Build bin/mnemos and bin/mnemos-mcp
+make test           # Run tests (includes 78 eval cases)
+make sqlc           # Regenerate sqlc query code
+make release-check  # Validate GoReleaser config
+```
+
+## Status
+
+Phase 1: Developer Primitive — Available now.
+
+- Rule-based and LLM-powered extraction with eval coverage
+- Embeddings for semantic search
+- CLI + MCP server entrypoints
+- 78 extraction eval cases
 
 ## Contributing
 
@@ -188,9 +199,7 @@ Contributions welcome. See [PRD.md](./PRD.md) for product direction and [TDD.md]
 
 ## Releases
 
-- Tagged releases are published with GoReleaser via `.github/workflows/release.yml`
-- Validate config locally with `make release-check`
-- Build local release archives with `make release-snapshot`
+Tagged releases are published with GoReleaser via `.github/workflows/release.yml`, including Homebrew formula updates and Docker images.
 
 ## License
 

@@ -106,6 +106,113 @@ func TestDetectContractionNegation(t *testing.T) {
 	}
 }
 
+func TestDetectIncrementalFindsRelationships(t *testing.T) {
+	engine := Engine{
+		now: func() time.Time {
+			return time.Date(2026, 4, 12, 15, 0, 0, 0, time.UTC)
+		},
+		nextID: seqRelationshipIDs(),
+	}
+
+	existing := []domain.Claim{
+		{ID: "cl_old_1", Text: "Revenue increased in Q2"},
+	}
+
+	newClaims := []domain.Claim{
+		{ID: "cl_new_1", Text: "Revenue increased in Q2 after the product launch"},
+		{ID: "cl_new_2", Text: "Revenue did not increase in Q2"},
+	}
+
+	rels, err := engine.DetectIncremental(newClaims, existing)
+	if err != nil {
+		t.Fatalf("DetectIncremental() error = %v", err)
+	}
+	if len(rels) == 0 {
+		t.Fatal("DetectIncremental() expected relationships, got none")
+	}
+
+	hasSupport := false
+	hasContradiction := false
+	for _, rel := range rels {
+		// All relationships should be from new claims to existing claims.
+		if rel.FromClaimID != "cl_new_1" && rel.FromClaimID != "cl_new_2" {
+			t.Fatalf("DetectIncremental() unexpected FromClaimID %q, expected a new claim", rel.FromClaimID)
+		}
+		if rel.ToClaimID != "cl_old_1" {
+			t.Fatalf("DetectIncremental() unexpected ToClaimID %q, expected cl_old_1", rel.ToClaimID)
+		}
+		if rel.Type == domain.RelationshipTypeSupports {
+			hasSupport = true
+		}
+		if rel.Type == domain.RelationshipTypeContradicts {
+			hasContradiction = true
+		}
+	}
+
+	if !hasSupport {
+		t.Fatal("DetectIncremental() expected at least one supports relationship")
+	}
+	if !hasContradiction {
+		t.Fatal("DetectIncremental() expected at least one contradicts relationship")
+	}
+}
+
+func TestDetectIncrementalDoesNotCompareExistingPairs(t *testing.T) {
+	engine := Engine{
+		now: func() time.Time {
+			return time.Date(2026, 4, 12, 15, 0, 0, 0, time.UTC)
+		},
+		nextID: seqRelationshipIDs(),
+	}
+
+	existing := []domain.Claim{
+		{ID: "cl_old_1", Text: "Revenue increased in Q2"},
+		{ID: "cl_old_2", Text: "Revenue increased in Q2 significantly"},
+	}
+
+	// New claim is unrelated to existing claims.
+	newClaims := []domain.Claim{
+		{ID: "cl_new_1", Text: "The weather was sunny today"},
+	}
+
+	rels, err := engine.DetectIncremental(newClaims, existing)
+	if err != nil {
+		t.Fatalf("DetectIncremental() error = %v", err)
+	}
+	// The two existing claims are related to each other, but DetectIncremental
+	// should NOT detect that — only new vs existing comparisons.
+	if len(rels) != 0 {
+		t.Fatalf("DetectIncremental() expected 0 relationships (only new vs existing), got %d", len(rels))
+	}
+}
+
+func TestDetectIncrementalEmptyInputs(t *testing.T) {
+	engine := Engine{
+		now: func() time.Time {
+			return time.Date(2026, 4, 12, 15, 0, 0, 0, time.UTC)
+		},
+		nextID: seqRelationshipIDs(),
+	}
+
+	// Empty new claims.
+	rels, err := engine.DetectIncremental(nil, []domain.Claim{{ID: "cl_1", Text: "test"}})
+	if err != nil {
+		t.Fatalf("DetectIncremental() error = %v", err)
+	}
+	if rels != nil {
+		t.Fatalf("DetectIncremental() with empty newClaims expected nil, got %v", rels)
+	}
+
+	// Empty existing claims.
+	rels, err = engine.DetectIncremental([]domain.Claim{{ID: "cl_1", Text: "test"}}, nil)
+	if err != nil {
+		t.Fatalf("DetectIncremental() error = %v", err)
+	}
+	if rels != nil {
+		t.Fatalf("DetectIncremental() with empty existingClaims expected nil, got %v", rels)
+	}
+}
+
 func seqRelationshipIDs() func() (string, error) {
 	i := 0
 	return func() (string, error) {

@@ -174,3 +174,56 @@ func GenerateEmbeddings(ctx context.Context, db *sql.DB, events []domain.Event) 
 
 	return len(vectors), nil
 }
+
+// GenerateClaimEmbeddings creates vector embeddings for the given claims and
+// stores them in the database with entity_type="claim". Returns the number of
+// embeddings created.
+func GenerateClaimEmbeddings(ctx context.Context, db *sql.DB, claims []domain.Claim) (int, error) {
+	if len(claims) == 0 {
+		return 0, nil
+	}
+
+	cfg, err := embedding.ConfigFromEnv()
+	if err != nil {
+		return 0, fmt.Errorf("embedding config: %w", err)
+	}
+
+	client, err := embedding.NewClient(cfg)
+	if err != nil {
+		return 0, fmt.Errorf("create embedding client: %w", err)
+	}
+
+	texts := make([]string, 0, len(claims))
+	for _, cl := range claims {
+		texts = append(texts, cl.Text)
+	}
+
+	retrier := retry.New[[][]float32](retry.Config{
+		MaxAttempts:   3,
+		InitialDelay:  200 * time.Millisecond,
+		MaxDelay:      time.Second,
+		BackoffPolicy: retry.BackoffExponential,
+		Jitter:        true,
+		Logger:        slog.New(slog.NewJSONHandler(os.Stderr, nil)),
+	})
+
+	vectors, err := retrier.Do(ctx, func(ctx context.Context) ([][]float32, error) {
+		return client.Embed(ctx, texts)
+	})
+	if err != nil {
+		return 0, fmt.Errorf("embed claims: %w", err)
+	}
+
+	repo := sqlite.NewEmbeddingRepository(db)
+	model := cfg.Model
+	for i, cl := range claims {
+		if i >= len(vectors) {
+			break
+		}
+		if err := repo.Upsert(ctx, cl.ID, "claim", vectors[i], model); err != nil {
+			return 0, fmt.Errorf("store embedding for claim %s: %w", cl.ID, err)
+		}
+	}
+
+	return len(vectors), nil
+}

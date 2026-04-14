@@ -107,6 +107,67 @@ func (e Engine) Detect(claims []domain.Claim) ([]domain.Relationship, error) {
 	return rels, nil
 }
 
+// DetectIncremental compares each new claim against all existing claims and
+// returns inferred relationships. It does NOT compare existing claims against
+// each other, making it suitable for incremental processing where the existing
+// claims have already been compared in a prior pass.
+func (e Engine) DetectIncremental(newClaims []domain.Claim, existingClaims []domain.Claim) ([]domain.Relationship, error) {
+	if len(newClaims) == 0 || len(existingClaims) == 0 {
+		return nil, nil
+	}
+
+	rels := make([]domain.Relationship, 0)
+	now := e.now().UTC()
+
+	type analyzed struct {
+		tokens map[string]struct{}
+		neg    bool
+	}
+
+	newCache := make([]analyzed, len(newClaims))
+	for i := range newClaims {
+		tokens, neg := contentTokensAndPolarity(newClaims[i].Text)
+		newCache[i] = analyzed{tokens: tokens, neg: neg}
+	}
+
+	existCache := make([]analyzed, len(existingClaims))
+	for i := range existingClaims {
+		tokens, neg := contentTokensAndPolarity(existingClaims[i].Text)
+		existCache[i] = analyzed{tokens: tokens, neg: neg}
+	}
+
+	for i := 0; i < len(newClaims); i++ {
+		if len(newCache[i].tokens) == 0 {
+			continue
+		}
+		for j := 0; j < len(existingClaims); j++ {
+			if len(existCache[j].tokens) == 0 {
+				continue
+			}
+
+			relType, ok := inferRelationship(newCache[i].tokens, newCache[i].neg, existCache[j].tokens, existCache[j].neg)
+			if !ok {
+				continue
+			}
+
+			id, err := e.nextID()
+			if err != nil {
+				return nil, err
+			}
+
+			rels = append(rels, domain.Relationship{
+				ID:          id,
+				Type:        relType,
+				FromClaimID: newClaims[i].ID,
+				ToClaimID:   existingClaims[j].ID,
+				CreatedAt:   now,
+			})
+		}
+	}
+
+	return rels, nil
+}
+
 // contentTokensAndPolarity splits text into content tokens (stop words removed)
 // and detects whether the text contains negation.
 func contentTokensAndPolarity(text string) (map[string]struct{}, bool) {

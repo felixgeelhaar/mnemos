@@ -13,6 +13,7 @@ import (
 	mcp "github.com/felixgeelhaar/mcp-go"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/ingest"
+	"github.com/felixgeelhaar/mnemos/internal/llm"
 	"github.com/felixgeelhaar/mnemos/internal/parser"
 	"github.com/felixgeelhaar/mnemos/internal/pipeline"
 	"github.com/felixgeelhaar/mnemos/internal/query"
@@ -153,6 +154,13 @@ func runQuery(_ context.Context, input queryInput) (queryOutput, error) {
 		sqlite.NewRelationshipRepository(db),
 	)
 
+	// Enable grounded generation when LLM is configured.
+	if llmCfg, err := llm.ConfigFromEnv(); err == nil {
+		if llmClient, err := llm.NewClient(llmCfg); err == nil {
+			engine = engine.WithLLM(llmClient)
+		}
+	}
+
 	var answer domain.Answer
 	if strings.TrimSpace(input.RunID) != "" {
 		answer, err = engine.AnswerForRun(strings.TrimSpace(input.Question), strings.TrimSpace(input.RunID))
@@ -225,9 +233,24 @@ func runProcessText(ctx context.Context, input processTextInput) (processTextOut
 		if err := job.SetStatus("relating", ""); err != nil {
 			return err
 		}
-		rels, err := relate.NewEngine().Detect(claims)
+		relEngine := relate.NewEngine()
+		rels, err := relEngine.Detect(claims)
 		if err != nil {
 			return err
+		}
+
+		// Incremental: compare new claims against previously stored claims.
+		claimRepo := sqlite.NewClaimRepository(db)
+		existingClaims, err := claimRepo.ListAll(ctx)
+		if err != nil {
+			return err
+		}
+		if len(existingClaims) > 0 {
+			incrementalRels, err := relEngine.DetectIncremental(claims, existingClaims)
+			if err != nil {
+				return err
+			}
+			rels = append(rels, incrementalRels...)
 		}
 		_ = progress.Report(3, &total)
 
@@ -247,6 +270,11 @@ func runProcessText(ctx context.Context, input processTextInput) (processTextOut
 			if err != nil {
 				return err
 			}
+			claimEmbCount, claimErr := pipeline.GenerateClaimEmbeddings(ctx, db, claims)
+			if claimErr != nil {
+				return claimErr
+			}
+			embeddingCount += claimEmbCount
 		}
 		_ = progress.Report(5, &total)
 

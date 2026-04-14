@@ -8,6 +8,7 @@ import (
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/embedding"
+	"github.com/felixgeelhaar/mnemos/internal/llm"
 	"github.com/felixgeelhaar/mnemos/internal/ports"
 )
 
@@ -25,6 +26,7 @@ type Engine struct {
 	relationships ports.RelationshipRepository
 	embeddings    ports.EmbeddingRepository
 	embedClient   embedding.Client
+	llmClient     llm.Client
 }
 
 // NewEngine returns an Engine wired to the given event, claim, and relationship stores.
@@ -38,6 +40,14 @@ func NewEngine(events eventLister, claims ports.ClaimRepository, relationships p
 func (e Engine) WithEmbeddings(repo ports.EmbeddingRepository, client embedding.Client) Engine {
 	e.embeddings = repo
 	e.embedClient = client
+	return e
+}
+
+// WithLLM configures LLM-grounded answer generation. When set, the engine
+// uses the LLM to synthesize answers from retrieved claims instead of using
+// a fixed template. Falls back to template answers on LLM failure.
+func (e Engine) WithLLM(client llm.Client) Engine {
+	e.llmClient = client
 	return e
 }
 
@@ -87,12 +97,15 @@ func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents
 		return domain.Answer{}, fmt.Errorf("load claims for query: %w", err)
 	}
 
+	// Re-rank claims by semantic similarity when embeddings are available.
+	claims = e.rankClaimsByCosine(ctx, q, claims)
+
 	contradictions, err := collectContradictions(ctx, e.relationships, claims)
 	if err != nil {
 		return domain.Answer{}, fmt.Errorf("load contradictions for query: %w", err)
 	}
 
-	answerText := buildAnswerText(q, claims, contradictions, len(topEvents))
+	answerText := e.generateAnswer(ctx, q, claims, contradictions, len(topEvents))
 	return domain.Answer{
 		AnswerText:       answerText,
 		Claims:           claims,
@@ -178,6 +191,77 @@ func (e Engine) rankEventsByCosine(ctx context.Context, question string, events 
 	return out, nil
 }
 
+// rankClaimsByCosine reorders claims by cosine similarity to the question when
+// claim embeddings and an embedding client are available. Returns the original
+// order on any error or when embeddings are not configured.
+func (e Engine) rankClaimsByCosine(ctx context.Context, question string, claims []domain.Claim) []domain.Claim {
+	if len(claims) <= 1 || e.embeddings == nil || e.embedClient == nil {
+		return claims
+	}
+
+	stored, err := e.embeddings.ListByEntityType(ctx, "claim")
+	if err != nil || len(stored) == 0 {
+		return claims
+	}
+
+	vecByID := make(map[string][]float32, len(stored))
+	for _, rec := range stored {
+		vecByID[rec.EntityID] = rec.Vector
+	}
+
+	// Check that at least some claims have embeddings.
+	hasAny := false
+	for _, cl := range claims {
+		if _, ok := vecByID[cl.ID]; ok {
+			hasAny = true
+			break
+		}
+	}
+	if !hasAny {
+		return claims
+	}
+
+	qVectors, err := e.embedClient.Embed(ctx, []string{question})
+	if err != nil || len(qVectors) == 0 {
+		return claims
+	}
+	qVec := qVectors[0]
+
+	type scored struct {
+		claim domain.Claim
+		score float32
+		idx   int // original index for stable ordering
+	}
+	scoredClaims := make([]scored, 0, len(claims))
+	for i, cl := range claims {
+		vec, ok := vecByID[cl.ID]
+		if !ok {
+			// Keep claims without embeddings at their original position with a low score.
+			scoredClaims = append(scoredClaims, scored{claim: cl, score: -1, idx: i})
+			continue
+		}
+		sim, err := embedding.CosineSimilarity(qVec, vec)
+		if err != nil {
+			scoredClaims = append(scoredClaims, scored{claim: cl, score: -1, idx: i})
+			continue
+		}
+		scoredClaims = append(scoredClaims, scored{claim: cl, score: sim, idx: i})
+	}
+
+	sort.Slice(scoredClaims, func(i, j int) bool {
+		if scoredClaims[i].score == scoredClaims[j].score {
+			return scoredClaims[i].idx < scoredClaims[j].idx
+		}
+		return scoredClaims[i].score > scoredClaims[j].score
+	})
+
+	result := make([]domain.Claim, 0, len(scoredClaims))
+	for _, sc := range scoredClaims {
+		result = append(result, sc.claim)
+	}
+	return result
+}
+
 func rankEvents(question string, events []domain.Event, limit int) []domain.Event {
 	qTokens := tokenSet(question)
 	type scored struct {
@@ -235,6 +319,56 @@ func collectContradictions(ctx context.Context, repo ports.RelationshipRepositor
 		}
 	}
 	return result, nil
+}
+
+// generateAnswer produces the answer text. When an LLM client is configured,
+// it synthesizes a grounded answer from the retrieved claims. Falls back to
+// the template-based answer on LLM failure or when no client is set.
+func (e Engine) generateAnswer(ctx context.Context, question string, claims []domain.Claim, contradictions []domain.Relationship, eventCount int) string {
+	if e.llmClient == nil || len(claims) == 0 {
+		return buildAnswerText(question, claims, contradictions, eventCount)
+	}
+
+	answer, err := e.groundedAnswer(ctx, question, claims, contradictions)
+	if err != nil {
+		// Fall back to template on any LLM error.
+		return buildAnswerText(question, claims, contradictions, eventCount)
+	}
+	return answer
+}
+
+const groundedSystemPrompt = `You are Mnemos, an evidence-backed knowledge engine. Answer the user's question using ONLY the provided claims as evidence.
+
+Rules:
+1. Cite claims by their number (e.g., [1], [2]) when referencing them.
+2. If claims contradict each other, explicitly acknowledge the contradiction.
+3. Do not add information not present in the claims.
+4. Be concise — 2-4 sentences.
+5. If the claims do not address the question, say so.`
+
+func (e Engine) groundedAnswer(ctx context.Context, question string, claims []domain.Claim, contradictions []domain.Relationship) (string, error) {
+	var b strings.Builder
+	b.WriteString("Question: ")
+	b.WriteString(question)
+	b.WriteString("\n\nClaims:\n")
+	for i, cl := range claims {
+		fmt.Fprintf(&b, "[%d] %s (type: %s, confidence: %.2f, status: %s)\n", i+1, cl.Text, cl.Type, cl.Confidence, cl.Status)
+	}
+	if len(contradictions) > 0 {
+		b.WriteString("\nContradictions:\n")
+		for _, rel := range contradictions {
+			fmt.Fprintf(&b, "- Claim %s contradicts claim %s\n", rel.FromClaimID, rel.ToClaimID)
+		}
+	}
+
+	resp, err := e.llmClient.Complete(ctx, []llm.Message{
+		{Role: llm.RoleSystem, Content: groundedSystemPrompt},
+		{Role: llm.RoleUser, Content: b.String()},
+	})
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(resp.Content), nil
 }
 
 func buildAnswerText(question string, claims []domain.Claim, contradictions []domain.Relationship, eventCount int) string {

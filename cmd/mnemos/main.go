@@ -14,6 +14,7 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/embedding"
 	"github.com/felixgeelhaar/mnemos/internal/extract"
 	"github.com/felixgeelhaar/mnemos/internal/ingest"
+	"github.com/felixgeelhaar/mnemos/internal/llm"
 	"github.com/felixgeelhaar/mnemos/internal/parser"
 	"github.com/felixgeelhaar/mnemos/internal/pipeline"
 	"github.com/felixgeelhaar/mnemos/internal/query"
@@ -229,6 +230,17 @@ func handleQuery(args []string, f Flags) {
 						sqlite.NewEmbeddingRepository(db),
 						embClient,
 					)
+				}
+			}
+		}
+
+		if f.LLM {
+			llmCfg, err := llm.ConfigFromEnv()
+			if err == nil {
+				llmClient, err := llm.NewClient(llmCfg)
+				if err == nil {
+					engine = engine.WithLLM(llmClient)
+					printProgress("grounded generation: using %s for answer synthesis", llmCfg.Provider)
 				}
 			}
 		}
@@ -539,6 +551,20 @@ func handleProcess(args []string, f Flags) {
 			return NewSystemError(err, "relationship detection failed")
 		}
 
+		// Incremental: compare new claims against previously stored claims.
+		claimRepo := sqlite.NewClaimRepository(db)
+		existingClaims, err := claimRepo.ListAll(ctx)
+		if err != nil {
+			return NewSystemError(err, "failed to load existing claims for incremental detection")
+		}
+		if len(existingClaims) > 0 {
+			incrementalRels, err := relEngine.DetectIncremental(claims, existingClaims)
+			if err != nil {
+				return NewSystemError(err, "incremental relationship detection failed")
+			}
+			rels = append(rels, incrementalRels...)
+		}
+
 		if err := job.SetStatus("saving", ""); err != nil {
 			return err
 		}
@@ -554,11 +580,18 @@ func handleProcess(args []string, f Flags) {
 			if n, err := pipeline.GenerateEmbeddings(ctx, db, events); err != nil {
 				// Embedding failure is non-fatal but should be prominent since --embed was explicit.
 				warn := icon("⚠️", "(!)")
-				fmt.Fprintf(os.Stderr, "\n  %s Embedding failed: %v\n", warn, err)
+				fmt.Fprintf(os.Stderr, "\n  %s Event embedding failed: %v\n", warn, err)
 				fmt.Fprintf(os.Stderr, "  Queries will fall back to keyword matching instead of semantic search.\n")
 				fmt.Fprintf(os.Stderr, "  Check MNEMOS_EMBED_PROVIDER and MNEMOS_EMBED_API_KEY.\n\n")
 			} else {
-				printProgress("embedding: generated %d vectors", n)
+				printProgress("embedding: generated %d event vectors", n)
+			}
+
+			if nc, err := pipeline.GenerateClaimEmbeddings(ctx, db, claims); err != nil {
+				warn := icon("⚠️", "(!)")
+				fmt.Fprintf(os.Stderr, "\n  %s Claim embedding failed: %v\n", warn, err)
+			} else {
+				printProgress("embedding: generated %d claim vectors", nc)
 			}
 		}
 

@@ -1,0 +1,164 @@
+# Robustness Tests
+# Tests extraction on noisy, messy, and unconventional inputs that
+# reflect real-world usage: emails, Slack messages, markdown, bullets, etc.
+
+test_cases:
+  - id: robust-001
+    description: "Email with signature and boilerplate"
+    tags: [robustness, email]
+    input: "Hi team,\n\nJust confirming: we decided to migrate to Kubernetes by end of Q2. Current infra costs are $45K per month. Let me know if you have concerns.\n\nBest,\nAlice\n--\nAlice Johnson | VP Engineering\nalice@example.com | +1-555-0100"
+    expected_claims:
+      - text: "we decided to migrate to Kubernetes by end of Q2"
+        type: decision
+        min_confidence: 0.80
+      - text: "Current infra costs are $45K per month"
+        type: fact
+        min_confidence: 0.75
+    not_expected_claims:
+      - "Alice Johnson"
+      - "alice@example.com"
+    expected_min_count: 2
+
+  - id: robust-002
+    description: "Slack-style informal message"
+    tags: [robustness, informal]
+    input: "hey @channel quick update: shipped the auth fix yesterday, latency is down to 12ms now. might need to bump the redis memory limit tho, seeing some evictions. also bob mentioned we should probably switch to postgres for the analytics db"
+    expected_claims:
+      - text: "shipped the auth fix yesterday"
+        type: fact
+        min_confidence: 0.70
+      - text: "latency is down to 12ms now"
+        type: fact
+        min_confidence: 0.75
+      - text: "might need to bump the redis memory limit"
+        type: hypothesis
+        min_confidence: 0.50
+    expected_min_count: 2
+
+  - id: robust-003
+    description: "Markdown with headers and code blocks"
+    tags: [robustness, markdown]
+    input: "# Sprint Review\n\n## Completed\n- Deployed v2.3 to production\n- Response time improved from 200ms to 50ms\n\n## Decisions\n- We will use GraphQL for the new API\n- Authentication moved to Auth0\n\n```json\n{\"status\": \"ok\"}\n```\n\n## Risks\n- Memory usage might spike during peak hours"
+    expected_claims:
+      - text: "Deployed v2.3 to production"
+        type: fact
+        min_confidence: 0.70
+      - text: "Response time improved from 200ms to 50ms"
+        type: fact
+        min_confidence: 0.75
+      - text: "We will use GraphQL for the new API"
+        type: decision
+        min_confidence: 0.80
+      - text: "Memory usage might spike during peak hours"
+        type: hypothesis
+        min_confidence: 0.50
+    expected_min_count: 3
+
+  - id: robust-004
+    description: "Bullet points and numbered lists"
+    tags: [robustness, lists]
+    input: "Action items from standup:\n1. Database migration scheduled for Thursday\n2. We approved the new pricing tier\n3. Load testing showed 5000 concurrent users supported\n4. Mobile app might not be ready for the demo\n- Need to review security audit results\n- CI pipeline takes 45 minutes currently"
+    expected_claims:
+      - text: "Database migration scheduled for Thursday"
+        type: fact
+        min_confidence: 0.70
+      - text: "We approved the new pricing tier"
+        type: decision
+        min_confidence: 0.80
+      - text: "Load testing showed 5000 concurrent users supported"
+        type: fact
+        min_confidence: 0.75
+      - text: "Mobile app might not be ready for the demo"
+        type: hypothesis
+        min_confidence: 0.50
+      - text: "CI pipeline takes 45 minutes currently"
+        type: fact
+        min_confidence: 0.70
+    expected_min_count: 3
+
+  - id: robust-005
+    description: "Mixed languages and abbreviations"
+    tags: [robustness, abbreviations]
+    input: "TL;DR: API v3 is 40% faster than v2. DB queries optimized w/ new indexes. FYI the CDN config needs updating ASAP. IMO we should deprecate the legacy endpoints by EOY."
+    expected_claims:
+      - text: "API v3 is 40% faster than v2"
+        type: fact
+        min_confidence: 0.75
+      - text: "DB queries optimized"
+        type: fact
+        min_confidence: 0.70
+    expected_min_count: 2
+
+  - id: robust-006
+    description: "Text with URLs and references"
+    tags: [robustness, urls]
+    input: "Per the RFC (https://tools.ietf.org/html/rfc7519), JWT tokens must include an expiration claim. Our implementation sets exp to 24 hours. The team decided to use RS256 for signing. See JIRA-1234 for details."
+    expected_claims:
+      - text: "JWT tokens must include an expiration claim"
+        type: fact
+        min_confidence: 0.70
+      - text: "Our implementation sets exp to 24 hours"
+        type: fact
+        min_confidence: 0.70
+      - text: "The team decided to use RS256 for signing"
+        type: decision
+        min_confidence: 0.80
+    expected_min_count: 2
+
+  - id: robust-007
+    description: "Repeated and redundant information"
+    tags: [robustness, redundancy]
+    input: "The server handles 10K requests per second. As mentioned, the server can handle ten thousand requests per second. To reiterate: our throughput is 10K req/s."
+    expected_claims:
+      - text: "The server handles 10K requests per second"
+        type: fact
+        min_confidence: 0.75
+    expected_count: 3
+
+  - id: robust-008
+    description: "Very short fragments"
+    tags: [robustness, fragments]
+    input: "Revenue up. Costs down. Hired 3. Shipping Friday. Maybe delay."
+    expected_min_count: 3
+
+  - id: robust-009
+    description: "Table-like structured text"
+    tags: [robustness, tables]
+    input: "Metric | Q1 | Q2\nDAU | 10K | 15K\nRevenue | $500K | $750K\nChurn | 5% | 3%\n\nSummary: Revenue grew 50% quarter over quarter. Churn decreased from 5% to 3%. We decided to invest in retention features."
+    expected_claims:
+      - text: "Revenue grew 50% quarter over quarter"
+        type: fact
+        min_confidence: 0.75
+      - text: "Churn decreased from 5% to 3%"
+        type: fact
+        min_confidence: 0.75
+      - text: "We decided to invest in retention features"
+        type: decision
+        min_confidence: 0.80
+    expected_min_count: 2
+
+  - id: robust-010
+    description: "Multi-paragraph with mixed quality"
+    tags: [robustness, mixed]
+    input: "CONFIDENTIAL - Internal Use Only\n\nProject Phoenix Status Update\nDate: March 15, 2026\nAuthor: Engineering Team\n\nThe migration to microservices is 60% complete. We observed a 30% reduction in deployment time. Three services are still running on the monolith. The team decided to prioritize the payment service migration next.\n\nRisks: The payment service migration might introduce billing errors during the transition period. We cannot afford downtime during peak shopping season.\n\nNext steps: TBD in Thursday's meeting."
+    expected_claims:
+      - text: "The migration to microservices is 60% complete"
+        type: fact
+        min_confidence: 0.75
+      - text: "We observed a 30% reduction in deployment time"
+        type: fact
+        min_confidence: 0.75
+      - text: "Three services are still running on the monolith"
+        type: fact
+        min_confidence: 0.75
+      - text: "The team decided to prioritize the payment service migration next"
+        type: decision
+        min_confidence: 0.80
+      - text: "The payment service migration might introduce billing errors"
+        type: hypothesis
+        min_confidence: 0.50
+    not_expected_claims:
+      - "CONFIDENTIAL"
+      - "Internal Use Only"
+      - "TBD"
+    expected_min_count: 4

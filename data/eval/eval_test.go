@@ -10,6 +10,7 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/extract"
 	"github.com/felixgeelhaar/mnemos/internal/llm"
+	"github.com/felixgeelhaar/mnemos/internal/relate"
 	"gopkg.in/yaml.v3"
 )
 
@@ -271,8 +272,9 @@ func TestAllCases(t *testing.T) {
 
 	for _, tf := range testFiles {
 		for _, tc := range tf.TestCases {
-			// Skip LLM-specific cases in the rule-based suite.
-			if containsTag(tc.Tags, "llm") {
+			// Skip LLM-specific and robustness cases in the strict suite.
+			// Robustness cases are evaluated separately with substring matching.
+			if containsTag(tc.Tags, "llm") || containsTag(tc.Tags, "robustness") {
 				continue
 			}
 			t.Run(tc.ID, func(t *testing.T) {
@@ -399,6 +401,245 @@ func runLLMTestCase(t *testing.T, tc TestCase, engine extract.LLMEngine) {
 			if strings.Contains(normalizeClaimText(claim.Text), normalizedNot) {
 				t.Errorf("%s: unexpected claim found: '%s' matches '%s'", tc.ID, claim.Text, notExpected)
 			}
+		}
+	}
+}
+
+// TestPrecisionRecall computes extraction precision and recall across all
+// non-LLM eval cases. Precision = correct extractions / total extractions.
+// Recall = found expected claims / total expected claims.
+func TestPrecisionRecall(t *testing.T) {
+	testFiles := loadTestFiles(t)
+	engine := extract.NewEngine()
+
+	type categoryMetrics struct {
+		truePositives  int // expected claims found
+		falseNegatives int // expected claims NOT found
+		totalExtracted int // all claims extracted
+	}
+
+	byCategory := map[string]*categoryMetrics{}
+	aggregate := &categoryMetrics{}
+
+	for _, tf := range testFiles {
+		for _, tc := range tf.TestCases {
+			if containsTag(tc.Tags, "llm") {
+				continue
+			}
+
+			event := testCaseToEvent(tc)
+			claims, _, err := engine.Extract([]domain.Event{event})
+			if err != nil {
+				continue
+			}
+
+			// Determine primary category from first tag.
+			cat := "unknown"
+			if len(tc.Tags) > 0 {
+				cat = tc.Tags[0]
+			}
+			if byCategory[cat] == nil {
+				byCategory[cat] = &categoryMetrics{}
+			}
+			m := byCategory[cat]
+
+			m.totalExtracted += len(claims)
+			aggregate.totalExtracted += len(claims)
+
+			for _, expected := range tc.ExpectedClaims {
+				isRealWorld := containsTag(tc.Tags, "real_world")
+				found := false
+				for _, claim := range claims {
+					nc := normalizeClaimText(claim.Text)
+					ne := normalizeClaimText(expected.Text)
+					if nc == ne || (isRealWorld && strings.Contains(nc, ne)) {
+						found = true
+						break
+					}
+				}
+				if found {
+					m.truePositives++
+					aggregate.truePositives++
+				} else {
+					m.falseNegatives++
+					aggregate.falseNegatives++
+				}
+			}
+		}
+	}
+
+	t.Logf("\n=== PRECISION / RECALL REPORT ===")
+	t.Logf("%-25s %6s %6s %6s %8s %8s", "Category", "TP", "FN", "Ext", "Prec", "Recall")
+	t.Logf("%-25s %6s %6s %6s %8s %8s", "--------", "--", "--", "---", "----", "------")
+
+	for cat, m := range byCategory {
+		precision := float64(0)
+		if m.totalExtracted > 0 {
+			precision = float64(m.truePositives) / float64(m.totalExtracted)
+		}
+		recall := float64(0)
+		totalExpected := m.truePositives + m.falseNegatives
+		if totalExpected > 0 {
+			recall = float64(m.truePositives) / float64(totalExpected)
+		}
+		t.Logf("%-25s %6d %6d %6d %7.1f%% %7.1f%%", cat, m.truePositives, m.falseNegatives, m.totalExtracted, precision*100, recall*100)
+	}
+
+	// Aggregate.
+	precision := float64(0)
+	if aggregate.totalExtracted > 0 {
+		precision = float64(aggregate.truePositives) / float64(aggregate.totalExtracted)
+	}
+	totalExpected := aggregate.truePositives + aggregate.falseNegatives
+	recall := float64(0)
+	if totalExpected > 0 {
+		recall = float64(aggregate.truePositives) / float64(totalExpected)
+	}
+	f1 := float64(0)
+	if precision+recall > 0 {
+		f1 = 2 * precision * recall / (precision + recall)
+	}
+
+	t.Logf("%-25s %6s %6s %6s %8s %8s", "--------", "--", "--", "---", "----", "------")
+	t.Logf("%-25s %6d %6d %6d %7.1f%% %7.1f%%", "AGGREGATE", aggregate.truePositives, aggregate.falseNegatives, aggregate.totalExtracted, precision*100, recall*100)
+	t.Logf("F1 Score: %.1f%%", f1*100)
+}
+
+// TestRelationshipDetection evaluates the relate engine against annotated
+// claim pairs with expected relationship types.
+func TestRelationshipDetection(t *testing.T) {
+	testFiles := loadRelationshipTestFiles(t)
+	relEngine := relate.NewEngine()
+
+	truePositives := 0
+	falsePositives := 0
+	falseNegatives := 0
+
+	for _, tf := range testFiles {
+		for _, tc := range tf.TestCases {
+			t.Run(tc.ID, func(t *testing.T) {
+				claims := make([]domain.Claim, len(tc.Claims))
+				for i, c := range tc.Claims {
+					claims[i] = domain.Claim{ID: c.ID, Text: c.Text}
+				}
+
+				rels, err := relEngine.Detect(claims)
+				if err != nil {
+					t.Fatalf("Detect() error = %v", err)
+				}
+
+				// Build lookup of actual relationships.
+				type edge struct{ from, to string }
+				actual := map[edge]domain.RelationshipType{}
+				for _, rel := range rels {
+					actual[edge{rel.FromClaimID, rel.ToClaimID}] = rel.Type
+				}
+
+				// Check expected relationships.
+				for _, exp := range tc.ExpectedRelationships {
+					e := edge{exp.FromClaimID, exp.ToClaimID}
+					got, ok := actual[e]
+					if !ok {
+						// Try reverse direction.
+						e = edge{exp.ToClaimID, exp.FromClaimID}
+						got, ok = actual[e]
+					}
+					if !ok {
+						falseNegatives++
+						t.Errorf("%s: expected %s relationship between %s and %s, not found",
+							tc.ID, exp.Type, exp.FromClaimID, exp.ToClaimID)
+					} else if string(got) != exp.Type {
+						falsePositives++
+						t.Errorf("%s: relationship between %s and %s: want %s, got %s",
+							tc.ID, exp.FromClaimID, exp.ToClaimID, exp.Type, got)
+					} else {
+						truePositives++
+					}
+				}
+
+				// Check that no unexpected relationships are detected.
+				if tc.ExpectedNone && len(rels) > 0 {
+					falsePositives += len(rels)
+					t.Errorf("%s: expected no relationships, got %d", tc.ID, len(rels))
+				}
+			})
+		}
+	}
+
+	total := truePositives + falsePositives + falseNegatives
+	t.Logf("\n=== RELATIONSHIP DETECTION EVAL ===")
+	t.Logf("True Positives:  %d", truePositives)
+	t.Logf("False Positives: %d", falsePositives)
+	t.Logf("False Negatives: %d", falseNegatives)
+	if truePositives+falsePositives > 0 {
+		t.Logf("Precision: %.1f%%", float64(truePositives)/float64(truePositives+falsePositives)*100)
+	}
+	if truePositives+falseNegatives > 0 {
+		t.Logf("Recall:    %.1f%%", float64(truePositives)/float64(truePositives+falseNegatives)*100)
+	}
+	t.Logf("Total:     %d", total)
+}
+
+// Relationship eval types and loader.
+type RelationshipTestCase struct {
+	ID                    string                 `yaml:"id"`
+	Description           string                 `yaml:"description"`
+	Claims                []RelTestClaim         `yaml:"claims"`
+	ExpectedRelationships []RelTestExpected      `yaml:"expected_relationships"`
+	ExpectedNone          bool                   `yaml:"expected_none"`
+}
+
+type RelTestClaim struct {
+	ID   string `yaml:"id"`
+	Text string `yaml:"text"`
+}
+
+type RelTestExpected struct {
+	FromClaimID string `yaml:"from_claim_id"`
+	ToClaimID   string `yaml:"to_claim_id"`
+	Type        string `yaml:"type"`
+}
+
+type RelationshipTestFile struct {
+	TestCases []RelationshipTestCase `yaml:"test_cases"`
+}
+
+func loadRelationshipTestFiles(t *testing.T) []RelationshipTestFile {
+	evalDir, err := os.Getwd()
+	if err != nil {
+		t.Skipf("eval directory not found: %v", err)
+	}
+
+	path := filepath.Join(evalDir, "relationship_detection.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Skipf("relationship_detection.yaml not found: %v", err)
+	}
+
+	var tf RelationshipTestFile
+	if err := yaml.Unmarshal(data, &tf); err != nil {
+		t.Fatalf("Failed to parse relationship_detection.yaml: %v", err)
+	}
+	return []RelationshipTestFile{tf}
+}
+
+func TestRobustness(t *testing.T) {
+	testFiles := loadTestFiles(t)
+	engine := extract.NewEngine()
+
+	for _, tf := range testFiles {
+		for _, tc := range tf.TestCases {
+			if !containsTag(tc.Tags, "robustness") {
+				continue
+			}
+			// Force real_world-style substring matching for robustness tests
+			// since rule-based extraction preserves prefix noise.
+			if !containsTag(tc.Tags, "real_world") {
+				tc.Tags = append(tc.Tags, "real_world")
+			}
+			t.Run(tc.ID, func(t *testing.T) {
+				runTestCase(t, tc, engine)
+			})
 		}
 	}
 }

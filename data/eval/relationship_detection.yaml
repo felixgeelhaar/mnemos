@@ -1,0 +1,150 @@
+# Relationship Detection Evaluation
+# Tests the relate engine's ability to detect supports/contradicts relationships
+# between claim pairs. Evaluates precision (no false positives) and recall
+# (finds true relationships).
+
+test_cases:
+  # === True contradictions (should detect) ===
+
+  - id: rel-001
+    description: "Direct negation contradiction"
+    claims:
+      - id: cl_1
+        text: "The deployment succeeded in production"
+      - id: cl_2
+        text: "The deployment did not succeed in production"
+    expected_relationships:
+      - from_claim_id: cl_1
+        to_claim_id: cl_2
+        type: contradicts
+
+  - id: rel-002
+    description: "Contraction negation (didn't)"
+    claims:
+      - id: cl_1
+        text: "The service passed all integration tests"
+      - id: cl_2
+        text: "The service didn't pass all integration tests"
+    expected_relationships:
+      - from_claim_id: cl_1
+        to_claim_id: cl_2
+        type: contradicts
+
+  - id: rel-003
+    description: "Never vs affirmative"
+    claims:
+      - id: cl_1
+        text: "The system never experiences downtime"
+      - id: cl_2
+        text: "The system experiences downtime during deployments"
+    expected_relationships:
+      - from_claim_id: cl_1
+        to_claim_id: cl_2
+        type: contradicts
+
+  - id: rel-004
+    description: "Cannot vs can"
+    claims:
+      - id: cl_1
+        text: "The database cannot handle concurrent writes"
+      - id: cl_2
+        text: "The database can handle concurrent writes efficiently"
+    expected_relationships:
+      - from_claim_id: cl_1
+        to_claim_id: cl_2
+        type: contradicts
+
+  # === True supports (should detect) ===
+
+  - id: rel-005
+    description: "Supporting claims with shared content"
+    claims:
+      - id: cl_1
+        text: "Revenue increased significantly in Q2"
+      - id: cl_2
+        text: "Revenue increased after the product launch in Q2"
+    expected_relationships:
+      - from_claim_id: cl_1
+        to_claim_id: cl_2
+        type: supports
+
+  - id: rel-006
+    description: "Reinforcing technical claims"
+    claims:
+      - id: cl_1
+        text: "PostgreSQL performance improved after indexing"
+      - id: cl_2
+        text: "PostgreSQL query performance improved with new indexes"
+    expected_relationships:
+      - from_claim_id: cl_1
+        to_claim_id: cl_2
+        type: supports
+
+  # === No relationship expected (false positive tests) ===
+
+  - id: rel-007
+    description: "Unrelated claims sharing only stop words"
+    claims:
+      - id: cl_1
+        text: "The frontend uses React for rendering"
+      - id: cl_2
+        text: "The backend uses Kafka for messaging"
+    expected_none: true
+
+  - id: rel-008
+    description: "Different domains with single shared content word"
+    claims:
+      - id: cl_1
+        text: "Revenue increased in Q2"
+      - id: cl_2
+        text: "The team increased headcount"
+    expected_none: true
+
+  - id: rel-009
+    description: "Completely unrelated claims"
+    claims:
+      - id: cl_1
+        text: "The API response time is 45ms"
+      - id: cl_2
+        text: "We hired three new engineers"
+    expected_none: true
+
+  - id: rel-010
+    description: "Similar structure but different subjects"
+    claims:
+      - id: cl_1
+        text: "Python is used for data science"
+      - id: cl_2
+        text: "Go is used for backend services"
+    expected_none: true
+
+  # === Multi-claim scenarios ===
+
+  - id: rel-011
+    description: "Three claims with one contradiction pair and one support pair"
+    claims:
+      - id: cl_1
+        text: "The migration completed successfully in staging"
+      - id: cl_2
+        text: "The migration completed successfully in production"
+      - id: cl_3
+        text: "The migration failed in production"
+    expected_relationships:
+      - from_claim_id: cl_1
+        to_claim_id: cl_2
+        type: supports
+      - from_claim_id: cl_2
+        to_claim_id: cl_3
+        type: contradicts
+
+  - id: rel-012
+    description: "Prefix negation words (impossible, unlikely)"
+    claims:
+      - id: cl_1
+        text: "Meeting the Q4 deadline is achievable with current resources"
+      - id: cl_2
+        text: "Meeting the Q4 deadline is impossible with current resources"
+    expected_relationships:
+      - from_claim_id: cl_1
+        to_claim_id: cl_2
+        type: contradicts

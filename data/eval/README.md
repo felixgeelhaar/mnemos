@@ -1,73 +1,78 @@
-# Mnemos Extraction Engine Evaluation Dataset
+# Mnemos Evaluation Framework
 
-This directory contains test cases for evaluating the Mnemos claim extraction engine.
+This directory contains test cases for evaluating the Mnemos extraction and relationship detection engines.
 
 ## Structure
 
 ```
 data/eval/
-├── README.md              # This file
-├── schema.yaml            # Format specification
-├── claim_types.yaml       # Claim type classification tests (10 cases)
-├── deduplication.yaml     # Deduplication tests (8 cases)
-├── contested_detection.yaml  # Contradiction detection tests (10 cases)
-├── confidence_scoring.yaml   # Confidence score tests (8 cases)
-├── edge_cases.yaml        # Edge case tests (12 cases)
-├── boundaries.yaml        # Boundary condition tests (12 cases)
-└── real_world.yaml       # Real document tests (8 cases)
+├── README.md                     # This file
+├── schema.yaml                   # Format specification
+├── eval_test.go                  # Test runner with precision/recall metrics
+├── claim_types.yaml              # Claim type classification tests (10 cases)
+├── deduplication.yaml            # Deduplication tests (8 cases)
+├── contested_detection.yaml      # Contradiction detection tests (10 cases)
+├── confidence_scoring.yaml       # Confidence score tests (8 cases)
+├── edge_cases.yaml               # Edge case tests (12 cases)
+├── boundaries.yaml               # Boundary condition tests (12 cases)
+├── real_world.yaml               # Real document tests (8 cases)
+├── robustness.yaml               # Noisy/messy input tests (10 cases)
+├── relationship_detection.yaml   # Relate engine eval (12 cases)
+└── llm_extraction.yaml           # LLM extraction tests (requires API key)
 ```
-
-## Total Test Cases: 68
-
-| Category | Count | Description |
-|----------|-------|-------------|
-| Claim Types | 10 | Classification of facts, decisions, hypotheses |
-| Deduplication | 8 | Near-identical claim detection |
-| Contested Detection | 10 | Contradiction identification |
-| Confidence Scoring | 8 | Score assignment accuracy |
-| Edge Cases | 12 | Boundary conditions and unusual inputs |
-| Boundaries | 12 | Minimum length, formatting edge cases |
-| Real World | 8 | Full documents (meeting notes, PRDs, etc.) |
 
 ## Running the Evaluation
 
 ```bash
-# Run all tests
-go test ./data/eval/...
+# Run all tests (strict matching, excludes robustness and LLM)
+go test ./data/eval/ -run TestAllCases -v
 
-# Run specific category
-go test ./data/eval/... -run TestClaimTypes
+# Precision/recall metrics across all categories
+go test ./data/eval/ -run TestPrecisionRecall -v
 
-# Run with verbose output
-go test ./data/eval/... -v
+# Relationship detection precision/recall
+go test ./data/eval/ -run TestRelationshipDetection -v
 
-# Generate coverage report
-go test ./data/eval/... -coverprofile=eval.out
+# Robustness tests (substring matching for noisy inputs)
+go test ./data/eval/ -run TestRobustness -v
+
+# Run by category
+go test ./data/eval/ -run TestClaimTypes -v
+go test ./data/eval/ -run TestContestedDetection -v
+go test ./data/eval/ -run TestRealWorld -v
+
+# LLM extraction eval (requires MNEMOS_LLM_PROVIDER)
+MNEMOS_LLM_PROVIDER=openai MNEMOS_LLM_API_KEY=... go test ./data/eval/ -run TestLLMExtraction -v
 ```
 
-## Test Format
+## Evaluation Dimensions
 
-Each test case specifies:
-- `id`: Unique identifier
-- `description`: What the test validates
-- `tags`: Category tags for filtering
-- `input`: Document text to extract from
-- `expected_claims`: Claims that should be extracted
-- `not_expected_claims`: Claims that should NOT be extracted
-- `expected_count` / `expected_min_count`: Claim count constraints
+### Extraction Quality (TestPrecisionRecall)
+- **Precision** — What fraction of extracted claims are correct?
+- **Recall** — What fraction of expected claims are found?
+- **F1 Score** — Harmonic mean of precision and recall
+- Reports per-category and aggregate metrics
 
-## Success Criteria
+### Relationship Detection (TestRelationshipDetection)
+- **Precision** — Of detected relationships, how many are correct?
+- **Recall** — Of true relationships, how many are detected?
+- Tests both supports and contradicts relationship types
+- Includes false-positive tests (unrelated claims should produce no relationships)
 
-For a passing evaluation:
-1. All expected claims must be extracted with correct type
-2. No unexpected claims should be extracted
-3. Contested claims must be correctly identified
-4. Confidence scores should be within acceptable bounds
-5. Claim counts must meet expected thresholds
+### Robustness (TestRobustness)
+- Tests extraction on noisy, messy real-world inputs
+- Emails with signatures, Slack messages, markdown with code blocks
+- Bullet lists, abbreviations, URLs, redundant text, table-like data
+- Uses substring matching (rule-based engine preserves prefix noise)
+
+### Strict Tests (TestAllCases)
+- Exact-match validation for clean inputs
+- Covers: claim types, deduplication, contested detection, confidence scoring, edge cases, boundaries, real-world documents
 
 ## Adding New Tests
 
-1. Add test case to appropriate YAML file
+1. Add test cases to the appropriate YAML file (or create a new one)
 2. Follow the schema in `schema.yaml`
-3. Include both positive and negative cases
-4. Document the reasoning in `description`
+3. Tag cases appropriately for filtering
+4. For noisy inputs, add to `robustness.yaml` (uses substring matching)
+5. For relationship tests, add to `relationship_detection.yaml`

@@ -139,6 +139,7 @@ mnemos-mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over
 | `mnemos extract --run <run-id>` | Extract claims from a run's events |
 | `mnemos relate` | Detect relationships between claims |
 | `mnemos query <question>` | Query with evidence |
+| `mnemos query --llm <question>` | Query with LLM-grounded answer generation |
 | `mnemos metrics` | Knowledge base statistics |
 | `mnemos-mcp` | Start MCP server over stdio |
 
@@ -179,7 +180,7 @@ internal/
 ```bash
 make check          # Format, lint, test, build (CI equivalent)
 make build          # Build bin/mnemos and bin/mnemos-mcp
-make test           # Run tests (includes 78 eval cases)
+make test           # Run tests (includes 102 eval cases)
 make sqlc           # Regenerate sqlc query code
 make release-check  # Validate GoReleaser config
 ```

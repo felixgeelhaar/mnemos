@@ -19,7 +19,7 @@
 - [x] CLI query interface
 - [x] Workflow orchestration with structured logs
 - [x] SQLC typed data access
-- [x] 68 eval test cases
+- [x] 102 eval test cases
 - [x] First-run UX polish
 - [x] LLM-powered extraction
 - [x] Embeddings for semantic search

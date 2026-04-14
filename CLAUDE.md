@@ -14,7 +14,7 @@ Pipeline: `ingest → extract → relate → query`
 make check          # fmt + lint + test + build (CI equivalent)
 make build          # Build bin/mnemos and bin/mnemos-mcp
 make install        # Install both binaries to $GOPATH/bin
-make test           # Run all tests (includes 78 extraction eval cases)
+make test           # Run all tests (includes 102 eval cases (90 extraction + 12 relationship detection))
 make fmt            # go fmt ./...
 make lint           # go vet + golangci-lint
 make sqlc           # Regenerate sqlc query code from sql/sqlite/
@@ -61,7 +61,7 @@ All domain types have `Validate()` methods. Contradictions are first-class conce
 | `internal/embedding/` | Vector embedding client abstraction (openai, gemini, ollama, openai-compat) |
 | `internal/llm/` | LLM client abstraction (anthropic, openai, gemini, ollama, openai-compat) |
 | `internal/store/sqlite/` | SQLite repositories with foreign key enforcement; sqlc-generated queries in `sqlcgen/` |
-| `internal/pipeline/` | Shared orchestration: `Extractor`, `PersistArtifacts`, `GenerateEmbeddings` (used by both CLI and MCP) |
+| `internal/pipeline/` | Shared orchestration: `Extractor`, `PersistArtifacts`, `GenerateEmbeddings`, `GenerateClaimEmbeddings` (used by both CLI and MCP) |
 | `internal/workflow/` | Job runner with statekit state machine, retry, and timeout |
 
 ### Entrypoints
@@ -79,7 +79,10 @@ All domain types have `Validate()` methods. Contradictions are first-class conce
 ### Key Design Decisions
 
 - **Event-sourced core**: events are immutable source of truth; claims/relationships are derived
-- **Graceful degradation**: LLM extraction falls back to rule-based on failure; query falls back from cosine similarity to token overlap when no embeddings
+- **Graceful degradation**: LLM extraction falls back to rule-based on failure; query falls back from cosine similarity to token overlap when no embeddings; grounded generation falls back to template answers when no LLM configured
+- **Claim-level embeddings**: both events and claims are embedded when `--embed` is set; claims are reranked by cosine similarity at query time
+- **Incremental relationship detection**: new claims are compared against existing knowledge base via `DetectIncremental`, not just within the current batch
+- **Grounded generation**: `query --llm` uses the LLM to synthesize answers from retrieved claims with inline citations
 - **LLM cache**: extraction results cached in `data/cache/llm-extraction/<hash>.json`; prompt version `v1.2` with few-shot examples
 - **Run isolation**: `run_id` on events enables scoped queries and extraction across ingestion runs
 - **Contested detection**: happens during rule-based extraction (high token overlap + same polarity), separate from relationship detection

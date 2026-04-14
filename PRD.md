@@ -36,7 +36,7 @@ AI systems are becoming decision-makers, but they forget context, invent facts, 
 
 ## 4. Phased Roadmap
 
-### Phase 1: Developer Primitive (CURRENT) — v0.1
+### Phase 1: Developer Primitive (COMPLETE) — v0.1
 
 **Goal:** Establish Mnemos as a local-first, open-source knowledge engine for AI agents and developer tooling.
 
@@ -50,7 +50,7 @@ AI systems are becoming decision-makers, but they forget context, invent facts, 
 - [x] CLI query interface with structured JSON output
 - [x] Workflow jobs with status transitions and structured logs
 - [x] SQLC-based typed data-access layer
-- [x] 68 eval test cases for extraction accuracy
+- [x] 102 eval test cases for extraction accuracy
 - [x] First-run experience and UX polish
 - [x] LLM-powered extraction (Anthropic, OpenAI, Gemini, Ollama, OpenAI-compatible)
 - [x] Embeddings for semantic search (multi-provider)

@@ -432,13 +432,3 @@ func tokenSet(text string) map[string]struct{} {
 	}
 	return tokens
 }
-
-func overlapScore(a, b map[string]struct{}) int {
-	score := 0
-	for token := range a {
-		if _, ok := b[token]; ok {
-			score++
-		}
-	}
-	return score
-}

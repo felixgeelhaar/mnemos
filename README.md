@@ -38,27 +38,27 @@ git clone https://github.com/felixgeelhaar/mnemos.git && cd mnemos && make insta
 ### 2. Process text — extract claims and detect contradictions
 
 ```bash
-mnemos process --text "We decided to use PostgreSQL for the new service. The team prefers MySQL for better tooling support."
+mnemos process --text "The deployment succeeded in production. The deployment did not succeed in production. Response times averaged 45ms."
 ```
 
-You'll see Mnemos extract two claims — a decision and a fact — and flag the contradiction between them.
+Mnemos extracts three claims, detects the contradiction between the first two, and flags them as contested.
 
 ### 3. Query with evidence
 
 ```bash
-mnemos query --human "What database should we use?"
+mnemos query "What happened with the deployment?"
 ```
 
-The answer comes with the source claims, confidence scores, and any contradictions — so you know what's true and what's contested.
+The answer comes with the source claims, confidence scores, and surfaced contradictions — so you know what's true and what's contested.
 
 ### 4. Try with your own documents
 
 ```bash
 mnemos process meeting-notes.md
-mnemos query --human "What decisions were made?"
+mnemos query "What decisions were made?"
 ```
 
-That's it. No API keys required — rule-based extraction works out of the box. Add `--llm` for LLM-powered extraction when you want higher quality.
+No API keys required — rule-based extraction works out of the box. Add `--llm` for LLM-powered extraction and `--llm` on query for grounded answer generation.
 
 ### Optional: LLM-powered extraction
 

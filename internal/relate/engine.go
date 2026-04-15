@@ -207,27 +207,59 @@ func stemWord(word string) string {
 
 func inferRelationship(aTokens map[string]struct{}, aNeg bool, bTokens map[string]struct{}, bNeg bool) (domain.RelationshipType, bool) {
 	overlap := contentOverlap(aTokens, bTokens)
-	if overlap < minContentTokenOverlap {
-		return "", false
+
+	// Primary path: sufficient token overlap.
+	if overlap >= minContentTokenOverlap {
+		shorter := len(aTokens)
+		if len(bTokens) < shorter {
+			shorter = len(bTokens)
+		}
+		if shorter > 0 {
+			ratio := float64(overlap) / float64(shorter)
+			if ratio >= minOverlapRatio {
+				if aNeg != bNeg {
+					return domain.RelationshipTypeContradicts, true
+				}
+				return domain.RelationshipTypeSupports, true
+			}
+		}
 	}
 
-	// Check overlap ratio against the shorter claim's token count.
-	shorter := len(aTokens)
-	if len(bTokens) < shorter {
-		shorter = len(bTokens)
-	}
-	if shorter == 0 {
-		return "", false
-	}
-	ratio := float64(overlap) / float64(shorter)
-	if ratio < minOverlapRatio {
-		return "", false
-	}
-
-	if aNeg != bNeg {
+	// Secondary path: value-divergence detection.
+	// Claims that share most tokens but differ on 1 key token are competing
+	// alternatives (e.g., "use PostgreSQL" vs "prefers MySQL").
+	if detectValueDivergence(aTokens, bTokens) {
 		return domain.RelationshipTypeContradicts, true
 	}
-	return domain.RelationshipTypeSupports, true
+
+	return "", false
+}
+
+// detectValueDivergence returns true when two claims share a structural
+// pattern but differ on a key value. This catches "use React frontend" vs
+// "use Vue frontend" where claims share most tokens but differ on one.
+func detectValueDivergence(a, b map[string]struct{}) bool {
+	la, lb := len(a), len(b)
+	if la < 2 || lb < 2 {
+		return false
+	}
+
+	overlap := contentOverlap(a, b)
+	onlyA := la - overlap
+	onlyB := lb - overlap
+
+	// Both claims must share at least 1 token AND each must have
+	// exactly 1 unique token (the divergent value).
+	if overlap >= 1 && onlyA == 1 && onlyB == 1 {
+		return true
+	}
+
+	// Looser: share >= 2 tokens and each has 1-2 unique tokens.
+	if overlap >= 2 && onlyA <= 2 && onlyB <= 2 && onlyA >= 1 && onlyB >= 1 {
+		return true
+	}
+
+	return false
 }
 
 func contentOverlap(a, b map[string]struct{}) int {

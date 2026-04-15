@@ -4,10 +4,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 )
+
+func claimTypePriority(t domain.ClaimType) int {
+	switch t {
+	case domain.ClaimTypeDecision:
+		return 0
+	case domain.ClaimTypeFact:
+		return 1
+	default:
+		return 2
+	}
+}
 
 // useASCII returns true when the terminal likely cannot render Unicode/emoji.
 func useASCII() bool {
@@ -174,9 +186,20 @@ func printClaimPreview(claims []domain.Claim, maxDisplay int) {
 		return
 	}
 
-	fmt.Println("  Recent Claims:")
-	for i := 0; i < len(claims) && i < maxDisplay; i++ {
-		c := claims[i]
+	// Sort: decisions first, then by confidence descending.
+	sorted := make([]domain.Claim, len(claims))
+	copy(sorted, claims)
+	sort.Slice(sorted, func(i, j int) bool {
+		ti, tj := claimTypePriority(sorted[i].Type), claimTypePriority(sorted[j].Type)
+		if ti != tj {
+			return ti < tj
+		}
+		return sorted[i].Confidence > sorted[j].Confidence
+	})
+
+	fmt.Println("  Top Claims:")
+	for i := 0; i < len(sorted) && i < maxDisplay; i++ {
+		c := sorted[i]
 		typeIcon := icon("•", "-")
 		switch c.Type {
 		case domain.ClaimTypeDecision:

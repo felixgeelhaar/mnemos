@@ -22,6 +22,7 @@ type Runner struct {
 	Store      jobStore
 	Timeout    time.Duration
 	MaxRetries int
+	Verbose    bool
 	now        func() time.Time
 	nextID     func() (string, error)
 	logger     *bolt.Logger
@@ -140,6 +141,9 @@ func (j *Job) SetStatus(status, errMsg string) error {
 }
 
 func (j *Job) log(stage string, fields map[string]any) {
+	if !j.runner.Verbose {
+		return
+	}
 	event := j.runner.logger.Info().
 		Str("job_id", j.id).
 		Str("kind", j.data.Kind).

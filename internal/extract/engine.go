@@ -150,15 +150,44 @@ func splitCandidates(content string) []string {
 		if len(candidate) < 4 {
 			continue
 		}
+		if isStructuralNoise(candidate) {
+			continue
+		}
 		out = append(out, candidate)
 	}
 	if len(out) == 0 {
 		fallback := strings.TrimSpace(content)
-		if fallback != "" {
+		if fallback != "" && !isStructuralNoise(fallback) {
 			return []string{fallback}
 		}
 	}
 	return out
+}
+
+// isStructuralNoise returns true for markdown artifacts and formatting
+// that should not be extracted as claims.
+func isStructuralNoise(text string) bool {
+	trimmed := strings.TrimSpace(text)
+
+	// Markdown headers: # Title, ## Section, etc.
+	if strings.HasPrefix(trimmed, "#") {
+		return true
+	}
+	// Markdown list markers without substantive content (just "-" or "* ").
+	stripped := strings.TrimLeft(trimmed, "-*> ")
+	if stripped == "" {
+		return true
+	}
+	// Horizontal rules (--- or more).
+	noSpaces := strings.ReplaceAll(trimmed, " ", "")
+	if len(noSpaces) >= 3 && strings.Trim(noSpaces, "-") == "" {
+		return true
+	}
+	// Code fences.
+	if strings.HasPrefix(trimmed, "```") {
+		return true
+	}
+	return false
 }
 
 func normalizeForDedupe(text string) string {

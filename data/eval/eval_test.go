@@ -582,11 +582,11 @@ func TestRelationshipDetection(t *testing.T) {
 
 // Relationship eval types and loader.
 type RelationshipTestCase struct {
-	ID                    string                 `yaml:"id"`
-	Description           string                 `yaml:"description"`
-	Claims                []RelTestClaim         `yaml:"claims"`
-	ExpectedRelationships []RelTestExpected      `yaml:"expected_relationships"`
-	ExpectedNone          bool                   `yaml:"expected_none"`
+	ID                    string            `yaml:"id"`
+	Description           string            `yaml:"description"`
+	Claims                []RelTestClaim    `yaml:"claims"`
+	ExpectedRelationships []RelTestExpected `yaml:"expected_relationships"`
+	ExpectedNone          bool              `yaml:"expected_none"`
 }
 
 type RelTestClaim struct {

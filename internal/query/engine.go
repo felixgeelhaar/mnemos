@@ -87,6 +87,11 @@ func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents
 	}
 
 	topEvents := e.rankEventsWithFallback(ctx, q, allEvents, 5)
+	if len(topEvents) == 0 {
+		return domain.Answer{
+			AnswerText: fmt.Sprintf("I have %d events in the knowledge base, but none are relevant to %q. Try a different question or use --embed for semantic search.", len(allEvents), q),
+		}, nil
+	}
 	eventIDs := make([]string, 0, len(topEvents))
 	for _, event := range topEvents {
 		eventIDs = append(eventIDs, event.ID)
@@ -264,25 +269,48 @@ func (e Engine) rankClaimsByCosine(ctx context.Context, question string, claims 
 
 func rankEvents(question string, events []domain.Event, limit int) []domain.Event {
 	qTokens := tokenSet(question)
+
+	// Build document frequency for IDF-like weighting.
+	df := map[string]int{}
+	for _, event := range events {
+		seen := map[string]struct{}{}
+		for _, token := range strings.Fields(strings.ToLower(event.Content)) {
+			token = strings.Trim(token, ",.;:!?()[]{}\"'")
+			if _, ok := seen[token]; ok {
+				continue
+			}
+			seen[token] = struct{}{}
+			df[token]++
+		}
+	}
+	n := float64(len(events))
+
 	type scored struct {
 		event domain.Event
-		score int
+		score float64
 	}
 	scoredEvents := make([]scored, 0, len(events))
 	for _, event := range events {
-		s := overlapScore(qTokens, tokenSet(event.Content))
-		if s == 0 {
-			continue
+		eTokens := tokenSet(event.Content)
+		s := float64(0)
+		for token := range qTokens {
+			if _, ok := eTokens[token]; ok {
+				// IDF weight: rare query terms score higher.
+				idf := 1.0
+				if freq, ok := df[token]; ok && freq > 0 {
+					idf = n / float64(freq)
+				}
+				s += idf
+			}
 		}
-		scoredEvents = append(scoredEvents, scored{event: event, score: s})
+		if s > 0 {
+			scoredEvents = append(scoredEvents, scored{event: event, score: s})
+		}
 	}
 
 	if len(scoredEvents) == 0 {
-		fallback := make([]domain.Event, 0, min(limit, len(events)))
-		for i := len(events) - 1; i >= 0 && len(fallback) < limit; i-- {
-			fallback = append(fallback, events[i])
-		}
-		return fallback
+		// No matching events — return empty so the answer can say "no relevant results."
+		return nil
 	}
 
 	sort.Slice(scoredEvents, func(i, j int) bool {

@@ -64,6 +64,14 @@ func main() {
 	}
 
 	flags, args := ParseFlags(os.Args[1:])
+
+	// Default to human-readable output in interactive terminals.
+	if !flags.Human && !flags.JSON {
+		if fileInfo, _ := os.Stdout.Stat(); fileInfo != nil && fileInfo.Mode()&os.ModeCharDevice != 0 {
+			flags.Human = true
+		}
+	}
+
 	if flags.Help {
 		printUsage()
 		os.Exit(int(ExitSuccess))
@@ -119,7 +127,7 @@ func handleIngest(args []string, f Flags) {
 		}
 
 		contentArg := strings.Join(args[1:], " ")
-		err := runJob("ingest", map[string]string{"source": "raw_text"}, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
+		err := runJob("ingest", map[string]string{"source": "raw_text"}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
 			if err := job.SetStatus("loading", ""); err != nil {
 				return err
 			}
@@ -161,7 +169,7 @@ func handleIngest(args []string, f Flags) {
 	}
 
 	path := args[0]
-	err := runJob("ingest", map[string]string{"path": path}, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
+	err := runJob("ingest", map[string]string{"path": path}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -206,7 +214,7 @@ func handleQuery(args []string, f Flags) {
 		scope["run_id"] = runID
 	}
 
-	err = runJob("query", scope, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
+	err = runJob("query", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -260,6 +268,9 @@ func handleQuery(args []string, f Flags) {
 		}
 
 		if f.Human {
+			// Resolve claim text for contradiction display — some
+			// contradictions may reference claims outside the answer set.
+			resolveContradictionClaimText(ctx, db, &answer)
 			printHumanReadableAnswer(question, answer)
 		} else {
 			response := map[string]any{
@@ -277,6 +288,58 @@ func handleQuery(args []string, f Flags) {
 		return nil
 	})
 	exitWithMnemosError(f.Verbose, err)
+}
+
+// resolveContradictionClaimText ensures all claims referenced in contradictions
+// have their text available in the answer's claim set for display purposes.
+func resolveContradictionClaimText(ctx context.Context, db *sql.DB, answer *domain.Answer) {
+	if len(answer.Contradictions) == 0 {
+		return
+	}
+
+	known := make(map[string]struct{}, len(answer.Claims))
+	for _, c := range answer.Claims {
+		known[c.ID] = struct{}{}
+	}
+
+	hasMissing := false
+	for _, rel := range answer.Contradictions {
+		if _, ok := known[rel.FromClaimID]; !ok {
+			hasMissing = true
+			break
+		}
+		if _, ok := known[rel.ToClaimID]; !ok {
+			hasMissing = true
+			break
+		}
+	}
+	if !hasMissing {
+		return
+	}
+
+	claimRepo := sqlite.NewClaimRepository(db)
+	allClaims, err := claimRepo.ListAll(ctx)
+	if err != nil {
+		return
+	}
+	byID := make(map[string]domain.Claim, len(allClaims))
+	for _, c := range allClaims {
+		byID[c.ID] = c
+	}
+	for _, rel := range answer.Contradictions {
+		if _, ok := known[rel.FromClaimID]; !ok {
+			if c, found := byID[rel.FromClaimID]; found {
+				answer.Claims = append(answer.Claims, c)
+				known[rel.FromClaimID] = struct{}{}
+			}
+		}
+		if _, ok := known[rel.ToClaimID]; !ok {
+			if c, found := byID[rel.ToClaimID]; found {
+				answer.Claims = append(answer.Claims, c)
+				known[rel.ToClaimID] = struct{}{}
+			}
+		}
+	}
 }
 
 func printHumanReadableAnswer(question string, answer domain.Answer) {
@@ -368,7 +431,7 @@ func handleExtract(args []string, f Flags) {
 		scope["event_ids"] = strings.Join(eventIDs, ",")
 	}
 
-	err := runJob("extract", scope, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
+	err := runJob("extract", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -428,7 +491,7 @@ func handleExtract(args []string, f Flags) {
 }
 
 func handleRelate(args []string, f Flags) {
-	err := runJob("relate", map[string]string{"event_ids": strings.Join(args, ",")}, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
+	err := runJob("relate", map[string]string{"event_ids": strings.Join(args, ",")}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -490,7 +553,7 @@ func handleProcess(args []string, f Flags) {
 		scope = map[string]string{"source": "raw_text"}
 	}
 
-	err := runJob("process", scope, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
+	err := runJob("process", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -609,7 +672,7 @@ func handleProcess(args []string, f Flags) {
 }
 
 func handleMetrics(f Flags) {
-	err := runJob("metrics", map[string]string{}, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
+	err := runJob("metrics", map[string]string{}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -746,7 +809,7 @@ func parseQueryArgs(args []string) (string, string, error) {
 	return question, runID, nil
 }
 
-func runJob(kind string, scope map[string]string, fn func(context.Context, *workflow.Job, *sql.DB) error) error {
+func runJob(kind string, scope map[string]string, verbose bool, fn func(context.Context, *workflow.Job, *sql.DB) error) error {
 	dbPath := resolveDBPath()
 
 	if isFirstRun(dbPath) && kind != "ingest" && kind != "process" {
@@ -764,6 +827,7 @@ func runJob(kind string, scope map[string]string, fn func(context.Context, *work
 	runner := workflow.NewRunner(sqlite.NewCompilationJobRepository(db))
 	runner.Timeout = 20 * time.Second
 	runner.MaxRetries = 1
+	runner.Verbose = verbose
 
 	jobErr := runner.Run(kind, scope, func(ctx context.Context, job *workflow.Job) error {
 		return fn(ctx, job, db)

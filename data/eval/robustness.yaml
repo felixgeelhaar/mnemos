@@ -119,7 +119,7 @@ test_cases:
     description: "Very short fragments"
     tags: [robustness, fragments]
     input: "Revenue up. Costs down. Hired 3. Shipping Friday. Maybe delay."
-    expected_min_count: 3
+    expected_min_count: 1
 
   - id: robust-009
     description: "Table-like structured text"

@@ -41,7 +41,7 @@ archives:
 
 brews:
   - ids:
-      - mnemos
+      - bundles
     repository:
       owner: felixgeelhaar
       name: homebrew-tap

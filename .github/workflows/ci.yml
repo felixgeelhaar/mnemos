@@ -32,11 +32,10 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Install golangci-lint
+      - name: Lint
         uses: golangci/golangci-lint-action@v7
         with:
           version: v2.11
-          args: run
 
       - name: Test
         run: go test -race -count=1 ./...

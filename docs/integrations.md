@@ -466,7 +466,7 @@ def query_with_mnemos_context(question: str, retriever: LlamaBaseRetriever) -> s
 
 ## MCP Integration for AI Agents
 
-Mnemos ships `mnemos-mcp`, a Model Context Protocol server that exposes three tools over stdio:
+Mnemos includes an MCP server (`mnemos mcp`) that exposes three tools over stdio:
 
 | Tool | Description | Input |
 |------|-------------|-------|
@@ -482,7 +482,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "mnemos": {
-      "command": "mnemos-mcp",
+      "command": "mnemos",
+      "args": ["mcp"],
       "env": {
         "MNEMOS_LLM_PROVIDER": "anthropic",
         "MNEMOS_LLM_API_KEY": "sk-ant-..."
@@ -492,13 +493,14 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-If `mnemos-mcp` is not on your `PATH`, use the absolute path:
+If `mnemos` is not on your `PATH`, use the absolute path:
 
 ```json
 {
   "mcpServers": {
     "mnemos": {
-      "command": "/usr/local/bin/mnemos-mcp",
+      "command": "/usr/local/bin/mnemos",
+      "args": ["mcp"],
       "env": {
         "MNEMOS_LLM_PROVIDER": "anthropic",
         "MNEMOS_LLM_API_KEY": "sk-ant-..."
@@ -516,7 +518,8 @@ Add to `~/.claude/mcp.json` (global) or `.claude/mcp.json` (per-project):
 {
   "mcpServers": {
     "mnemos": {
-      "command": "mnemos-mcp",
+      "command": "mnemos",
+      "args": ["mcp"],
       "env": {
         "MNEMOS_DB_PATH": "/absolute/path/to/project/.mnemos/mnemos.db"
       }
@@ -535,7 +538,8 @@ Add to `.cursor/mcp.json` in your project root:
 {
   "mcpServers": {
     "mnemos": {
-      "command": "mnemos-mcp",
+      "command": "mnemos",
+      "args": ["mcp"],
       "env": {
         "MNEMOS_DB_PATH": ".mnemos/mnemos.db"
       }

@@ -11,15 +11,12 @@ ARG BUILD_DATE=unknown
 
 RUN CGO_ENABLED=0 go build \
     -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildDate=${BUILD_DATE}" \
-    -o /bin/mnemos ./cmd/mnemos && \
-    CGO_ENABLED=0 go build \
-    -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildDate=${BUILD_DATE}" \
-    -o /bin/mnemos-mcp ./cmd/mnemos-mcp
+    -o /bin/mnemos ./cmd/mnemos
 
 FROM alpine:3.21
 
 RUN adduser -D -h /home/mnemos mnemos
-COPY --from=builder /bin/mnemos /bin/mnemos-mcp /usr/local/bin/
+COPY --from=builder /bin/mnemos /usr/local/bin/
 
 USER mnemos
 WORKDIR /home/mnemos

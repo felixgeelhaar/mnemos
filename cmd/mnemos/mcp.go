@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,62 +21,49 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/workflow"
 )
 
-// resolveDBPath returns the database path from MNEMOS_DB_PATH or the
-// XDG-compliant default (~/.local/share/mnemos/mnemos.db).
-func resolveDBPath() string {
-	if p := os.Getenv("MNEMOS_DB_PATH"); p != "" {
-		return p
-	}
-	dataHome := os.Getenv("XDG_DATA_HOME")
-	if dataHome == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return filepath.Join("data", "mnemos.db")
-		}
-		dataHome = filepath.Join(home, ".local", "share")
-	}
-	return filepath.Join(dataHome, "mnemos", "mnemos.db")
-}
-
-type boltLogger struct {
+type mcpBoltLogger struct {
 	logger *bolt.Logger
 }
 
-func (l boltLogger) Info(msg string, fields ...mcp.LogField) { l.log(l.logger.Info(), msg, fields...) }
-func (l boltLogger) Error(msg string, fields ...mcp.LogField) {
+func (l mcpBoltLogger) Info(msg string, fields ...mcp.LogField) {
+	l.log(l.logger.Info(), msg, fields...)
+}
+func (l mcpBoltLogger) Error(msg string, fields ...mcp.LogField) {
 	l.log(l.logger.Error(), msg, fields...)
 }
-func (l boltLogger) Debug(msg string, fields ...mcp.LogField) {
+func (l mcpBoltLogger) Debug(msg string, fields ...mcp.LogField) {
 	l.log(l.logger.Debug(), msg, fields...)
 }
-func (l boltLogger) Warn(msg string, fields ...mcp.LogField) { l.log(l.logger.Warn(), msg, fields...) }
+func (l mcpBoltLogger) Warn(msg string, fields ...mcp.LogField) {
+	l.log(l.logger.Warn(), msg, fields...)
+}
 
-func (l boltLogger) log(event *bolt.Event, msg string, fields ...mcp.LogField) {
+func (l mcpBoltLogger) log(event *bolt.Event, msg string, fields ...mcp.LogField) {
 	for _, field := range fields {
 		event = event.Any(field.Key, field.Value)
 	}
 	event.Msg(msg)
 }
 
-type queryInput struct {
+type mcpQueryInput struct {
 	Question string `json:"question" jsonschema:"required,description=Natural language question to ask Mnemos"`
 	RunID    string `json:"runId,omitempty" jsonschema:"description=Optional run ID to scope the query"`
 }
 
-type queryOutput struct {
+type mcpQueryOutput struct {
 	Answer         string                `json:"answer"`
 	Claims         []domain.Claim        `json:"claims"`
 	Contradictions []domain.Relationship `json:"contradictions"`
 	Timeline       []string              `json:"timeline"`
 }
 
-type processTextInput struct {
+type mcpProcessTextInput struct {
 	Text          string `json:"text" jsonschema:"required,description=Raw text to ingest and process"`
 	UseLLM        bool   `json:"useLlm,omitempty" jsonschema:"description=Use configured LLM extraction provider"`
 	UseEmbeddings bool   `json:"useEmbeddings,omitempty" jsonschema:"description=Generate embeddings after processing"`
 }
 
-type processTextOutput struct {
+type mcpProcessTextOutput struct {
 	RunID          string `json:"runId"`
 	Events         int    `json:"events"`
 	Claims         int    `json:"claims"`
@@ -87,7 +73,7 @@ type processTextOutput struct {
 	UsedEmbeddings bool   `json:"usedEmbeddings"`
 }
 
-type metricsOutput struct {
+type mcpMetricsOutput struct {
 	Runs            int64 `json:"runs"`
 	Events          int64 `json:"events"`
 	Claims          int64 `json:"claims"`
@@ -97,7 +83,9 @@ type metricsOutput struct {
 	Embeddings      int64 `json:"embeddings"`
 }
 
-func main() {
+// handleMCP starts the MCP server over stdio. This is a long-lived process
+// that blocks until the connection is closed.
+func handleMCP() {
 	logger := bolt.New(bolt.NewJSONHandler(os.Stderr))
 	srv := mcp.NewServer(mcp.ServerInfo{
 		Name:    "mnemos",
@@ -115,36 +103,36 @@ func main() {
 
 	srv.Tool("query_knowledge").
 		Description("Query the Mnemos knowledge base and return evidence-backed results.").
-		OutputSchema(queryOutput{}).
+		OutputSchema(mcpQueryOutput{}).
 		ValidateInput().
-		Handler(func(ctx context.Context, input queryInput) (queryOutput, error) {
-			return runQuery(ctx, input)
+		Handler(func(ctx context.Context, input mcpQueryInput) (mcpQueryOutput, error) {
+			return mcpRunQuery(ctx, input)
 		})
 
 	srv.Tool("process_text").
 		Description("Ingest raw text, extract claims, detect relationships, and optionally generate embeddings.").
-		OutputSchema(processTextOutput{}).
+		OutputSchema(mcpProcessTextOutput{}).
 		ValidateInput().
-		Handler(func(ctx context.Context, input processTextInput) (processTextOutput, error) {
-			return runProcessText(ctx, input)
+		Handler(func(ctx context.Context, input mcpProcessTextInput) (mcpProcessTextOutput, error) {
+			return mcpRunProcessText(ctx, input)
 		})
 
 	srv.Tool("knowledge_metrics").
 		Description("Return counts and statistics about the Mnemos knowledge base.").
-		OutputSchema(metricsOutput{}).
-		Handler(func(_ context.Context, _ struct{}) (metricsOutput, error) {
-			return runMetrics()
+		OutputSchema(mcpMetricsOutput{}).
+		Handler(func(_ context.Context, _ struct{}) (mcpMetricsOutput, error) {
+			return mcpRunMetrics()
 		})
 
-	if err := mcp.ServeStdio(context.Background(), srv, mcp.WithMiddleware(mcp.DefaultMiddlewareWithTimeout(boltLogger{logger: logger}, 30*time.Second)...)); err != nil {
+	if err := mcp.ServeStdio(context.Background(), srv, mcp.WithMiddleware(mcp.DefaultMiddlewareWithTimeout(mcpBoltLogger{logger: logger}, 30*time.Second)...)); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func runQuery(_ context.Context, input queryInput) (queryOutput, error) {
+func mcpRunQuery(_ context.Context, input mcpQueryInput) (mcpQueryOutput, error) {
 	db, err := sqlite.Open(resolveDBPath())
 	if err != nil {
-		return queryOutput{}, err
+		return mcpQueryOutput{}, err
 	}
 	defer func() { _ = db.Close() }()
 
@@ -154,7 +142,6 @@ func runQuery(_ context.Context, input queryInput) (queryOutput, error) {
 		sqlite.NewRelationshipRepository(db),
 	)
 
-	// Enable grounded generation when LLM is configured.
 	if llmCfg, err := llm.ConfigFromEnv(); err == nil {
 		if llmClient, err := llm.NewClient(llmCfg); err == nil {
 			engine = engine.WithLLM(llmClient)
@@ -168,10 +155,10 @@ func runQuery(_ context.Context, input queryInput) (queryOutput, error) {
 		answer, err = engine.Answer(strings.TrimSpace(input.Question))
 	}
 	if err != nil {
-		return queryOutput{}, err
+		return mcpQueryOutput{}, err
 	}
 
-	return queryOutput{
+	return mcpQueryOutput{
 		Answer:         answer.AnswerText,
 		Claims:         answer.Claims,
 		Contradictions: answer.Contradictions,
@@ -179,14 +166,14 @@ func runQuery(_ context.Context, input queryInput) (queryOutput, error) {
 	}, nil
 }
 
-func runProcessText(ctx context.Context, input processTextInput) (processTextOutput, error) {
+func mcpRunProcessText(ctx context.Context, input mcpProcessTextInput) (mcpProcessTextOutput, error) {
 	service := ingest.NewService()
 	normalizer := parser.NewNormalizer()
 	progress := mcp.ProgressFromContext(ctx)
 
 	db, err := sqlite.Open(resolveDBPath())
 	if err != nil {
-		return processTextOutput{}, err
+		return mcpProcessTextOutput{}, err
 	}
 	defer func() { _ = db.Close() }()
 
@@ -194,7 +181,7 @@ func runProcessText(ctx context.Context, input processTextInput) (processTextOut
 	runner.Timeout = 30 * time.Second
 	runner.MaxRetries = 1
 
-	var result processTextOutput
+	var result mcpProcessTextOutput
 	err = runner.Run("process", map[string]string{"source": "raw_text", "mcp": "true"}, func(ctx context.Context, job *workflow.Job) error {
 		total := 5.0
 		_ = progress.Report(0, &total)
@@ -239,7 +226,6 @@ func runProcessText(ctx context.Context, input processTextInput) (processTextOut
 			return err
 		}
 
-		// Incremental: compare new claims against previously stored claims.
 		claimRepo := sqlite.NewClaimRepository(db)
 		existingClaims, err := claimRepo.ListAll(ctx)
 		if err != nil {
@@ -278,7 +264,7 @@ func runProcessText(ctx context.Context, input processTextInput) (processTextOut
 		}
 		_ = progress.Report(5, &total)
 
-		result = processTextOutput{
+		result = mcpProcessTextOutput{
 			RunID:          job.ID(),
 			Events:         len(events),
 			Claims:         len(claims),
@@ -290,33 +276,33 @@ func runProcessText(ctx context.Context, input processTextInput) (processTextOut
 		return nil
 	})
 	if err != nil {
-		return processTextOutput{}, err
+		return mcpProcessTextOutput{}, err
 	}
 
 	return result, nil
 }
 
-func runMetrics() (metricsOutput, error) {
+func mcpRunMetrics() (mcpMetricsOutput, error) {
 	db, err := sqlite.Open(resolveDBPath())
 	if err != nil {
-		return metricsOutput{}, err
+		return mcpMetricsOutput{}, err
 	}
 	defer func() { _ = db.Close() }()
 
-	return metricsOutput{
-		Runs:            countRows(db, `SELECT COUNT(DISTINCT run_id) FROM events WHERE run_id <> ''`),
-		Events:          countRows(db, `SELECT COUNT(*) FROM events`),
-		Claims:          countRows(db, `SELECT COUNT(*) FROM claims`),
-		ContestedClaims: countRows(db, `SELECT COUNT(*) FROM claims WHERE status = 'contested'`),
-		Relationships:   countRows(db, `SELECT COUNT(*) FROM relationships`),
-		Contradictions:  countRows(db, `SELECT COUNT(*) FROM relationships WHERE type = 'contradicts'`),
-		Embeddings:      countRows(db, `SELECT COUNT(*) FROM embeddings`),
+	return mcpMetricsOutput{
+		Runs:            mcpCountRows(db, `SELECT COUNT(DISTINCT run_id) FROM events WHERE run_id <> ''`),
+		Events:          mcpCountRows(db, `SELECT COUNT(*) FROM events`),
+		Claims:          mcpCountRows(db, `SELECT COUNT(*) FROM claims`),
+		ContestedClaims: mcpCountRows(db, `SELECT COUNT(*) FROM claims WHERE status = 'contested'`),
+		Relationships:   mcpCountRows(db, `SELECT COUNT(*) FROM relationships`),
+		Contradictions:  mcpCountRows(db, `SELECT COUNT(*) FROM relationships WHERE type = 'contradicts'`),
+		Embeddings:      mcpCountRows(db, `SELECT COUNT(*) FROM embeddings`),
 	}, nil
 }
 
-func countRows(db *sql.DB, query string) int64 {
+func mcpCountRows(db *sql.DB, q string) int64 {
 	var n int64
-	if err := db.QueryRow(query).Scan(&n); err != nil {
+	if err := db.QueryRow(q).Scan(&n); err != nil {
 		return 0
 	}
 	return n

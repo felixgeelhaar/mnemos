@@ -23,26 +23,10 @@ builds:
     ldflags:
       - -s -w -X main.version={{ .Version }} -X main.commit={{ .ShortCommit }} -X main.buildDate={{ .Date }}
 
-  - id: mnemos-mcp
-    main: ./cmd/mnemos-mcp
-    binary: mnemos-mcp
-    env:
-      - CGO_ENABLED=0
-    goos:
-      - darwin
-      - linux
-      - windows
-    goarch:
-      - amd64
-      - arm64
-    ldflags:
-      - -s -w -X main.version={{ .Version }} -X main.commit={{ .ShortCommit }} -X main.buildDate={{ .Date }}
-
 archives:
   - id: bundles
     ids:
       - mnemos
-      - mnemos-mcp
     formats:
       - tar.gz
     format_overrides:
@@ -58,7 +42,6 @@ archives:
 brews:
   - ids:
       - mnemos
-      - mnemos-mcp
     repository:
       owner: felixgeelhaar
       name: homebrew-tap
@@ -68,7 +51,6 @@ brews:
     license: MIT
     install: |
       bin.install "mnemos"
-      bin.install "mnemos-mcp"
     test: |
       system bin/"mnemos", "--version"
 

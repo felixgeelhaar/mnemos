@@ -97,6 +97,8 @@ func main() {
 		handleQuery(args, flags)
 	case "metrics":
 		handleMetrics(flags)
+	case "mcp":
+		handleMCP()
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command %q\n", command)
 		if suggestion := suggestCommand(command); suggestion != "" {
@@ -760,7 +762,9 @@ func printUsage() {
 	fmt.Println("")
 	fmt.Println("Query & Reporting:")
 	fmt.Println("  query [--run <run-id>] <question>    Query with evidence")
+	fmt.Println("  query --llm <question>               Query with LLM-grounded answer")
 	fmt.Println("  metrics [--human]                    Knowledge base statistics")
+	fmt.Println("  mcp                                  Start MCP server over stdio")
 	fmt.Println("")
 	fmt.Println("Flags:")
 	fmt.Println("  -h, --help     show this help message")

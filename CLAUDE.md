@@ -12,8 +12,8 @@ Pipeline: `ingest → extract → relate → query`
 
 ```bash
 make check          # fmt + lint + test + build (CI equivalent)
-make build          # Build bin/mnemos and bin/mnemos-mcp
-make install        # Install both binaries to $GOPATH/bin
+make build          # Build bin/mnemos
+make install        # Install mnemos to $GOPATH/bin
 make test           # Run all tests (includes 102 eval cases (90 extraction + 12 relationship detection))
 make fmt            # go fmt ./...
 make lint           # go vet + golangci-lint
@@ -67,7 +67,7 @@ All domain types have `Validate()` methods. Contradictions are first-class conce
 ### Entrypoints
 
 - `cmd/mnemos/` — CLI with subcommands: `ingest`, `extract` (supports `--run`), `relate`, `process`, `query`, `metrics`
-- `cmd/mnemos-mcp/` — MCP server over stdio exposing `query_knowledge`, `process_text`, and `knowledge_metrics` tools
+- `mnemos mcp` — MCP server subcommand exposing `query_knowledge`, `process_text`, and `knowledge_metrics` over stdio
 
 ### Internal Libraries (owned by same author)
 

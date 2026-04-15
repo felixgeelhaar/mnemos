@@ -114,7 +114,7 @@ func printFirstRunHints() {
 	fmt.Println("")
 }
 
-var commands = []string{"ingest", "extract", "relate", "process", "query", "metrics"}
+var commands = []string{"ingest", "extract", "relate", "process", "query", "metrics", "mcp"}
 
 // suggestCommand returns the closest known command to input, or "" if none is close.
 func suggestCommand(input string) string {

@@ -26,7 +26,7 @@ brew tap felixgeelhaar/tap && brew install mnemos
 
 # Go (any platform with Go 1.25+)
 go install github.com/felixgeelhaar/mnemos/cmd/mnemos@latest
-go install github.com/felixgeelhaar/mnemos/cmd/mnemos-mcp@latest
+go install github.com/felixgeelhaar/mnemos/cmd/mnemos@latest
 
 # Docker
 docker run --rm ghcr.io/felixgeelhaar/mnemos --version
@@ -80,7 +80,7 @@ mnemos query --embed --human "What improved after onboarding changed?"
 ### Optional: MCP server for AI agents
 
 ```bash
-mnemos-mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over stdio
+mnemos mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over stdio
 ```
 
 ## How It Works
@@ -141,13 +141,12 @@ mnemos-mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over
 | `mnemos query <question>` | Query with evidence |
 | `mnemos query --llm <question>` | Query with LLM-grounded answer generation |
 | `mnemos metrics` | Knowledge base statistics |
-| `mnemos-mcp` | Start MCP server over stdio |
+| `mnemos mcp` | Start MCP server over stdio |
 
 ## Architecture
 
 ```
 cmd/mnemos           # CLI entrypoint
-cmd/mnemos-mcp       # MCP server entrypoint
 internal/
   domain/            # Core types: Event, Claim, Relationship, EmbeddingRecord
   ports/             # Interfaces for engines and repositories
@@ -179,7 +178,7 @@ internal/
 
 ```bash
 make check          # Format, lint, test, build (CI equivalent)
-make build          # Build bin/mnemos and bin/mnemos-mcp
+make build          # Build bin/mnemos
 make test           # Run tests (includes 102 eval cases)
 make sqlc           # Regenerate sqlc query code
 make release-check  # Validate GoReleaser config

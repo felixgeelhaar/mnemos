@@ -58,11 +58,11 @@ dockers:
   - image_templates:
       - "ghcr.io/felixgeelhaar/mnemos:{{ .Version }}"
       - "ghcr.io/felixgeelhaar/mnemos:latest"
+    ids:
+      - mnemos
     dockerfile: Dockerfile
-    build_flag_templates:
-      - "--build-arg=VERSION={{ .Version }}"
-      - "--build-arg=COMMIT={{ .ShortCommit }}"
-      - "--build-arg=BUILD_DATE={{ .Date }}"
+    goos: linux
+    goarch: amd64
 
 checksum:
   name_template: checksums.txt

@@ -43,5 +43,10 @@ jobs:
       - name: Build
         run: make build
 
+      - name: Install GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          install-only: true
+
       - name: Validate GoReleaser config
         run: goreleaser check

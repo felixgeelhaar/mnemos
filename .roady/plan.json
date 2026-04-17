@@ -32,7 +32,7 @@
     {
       "id": "task-parser-and-event-normalization",
       "title": "Implement Parser and Event Normalization",
-      "description": "Implement the feature: Parser and Event Normalization. Normalize heterogeneous inputs into immutable events with schema versioning and source linkage, forming the canonical Input -\u003e Event transformation.",
+      "description": "Implement the feature: Parser and Event Normalization. Normalize heterogeneous inputs into immutable events with schema versioning and source linkage, forming the canonical Input -> Event transformation.",
       "priority": "medium",
       "estimate": "",
       "depends_on": [],
@@ -176,7 +176,7 @@
     {
       "id": "task-mcp-project-document-auto-ingest",
       "title": "Implement MCP Project Document Auto-Ingest",
-      "description": "Implement the feature: MCP Project Document Auto-Ingest. When the MCP server starts inside a project (`.mnemos/` exists), bulk-ingest standard project documents — README, PRD, CHANGELOG, Roadmap, CLAUDE.md, ARCHITECTURE — plus the top level of `docs/` and recursive ADR conventions. Deduped via SQLite json_extract on event metadata source paths.",
+      "description": "Implement the feature: MCP Project Document Auto-Ingest. When the MCP server starts inside a project (`.mnemos/` exists), bulk-ingest standard project documents \u2014 README, PRD, CHANGELOG, Roadmap, CLAUDE.md, ARCHITECTURE \u2014 plus the top level of `docs/` and recursive ADR conventions. Deduped via SQLite json_extract on event metadata source paths.",
       "priority": "medium",
       "estimate": "",
       "depends_on": [],
@@ -221,7 +221,7 @@
     {
       "id": "task-knowledge-registry-server-(mnemos-serve)",
       "title": "Implement Knowledge Registry Server (mnemos serve)",
-      "description": "Implement the feature: Knowledge Registry Server (mnemos serve). Add a `mnemos serve` subcommand that starts an HTTP API registry server backed by the same SQLite schema as the local client. The registry is the \"remote origin\" to each local project's \"local repo\" — users can push knowledge to a shared registry and pull from it at query time. Core endpoints cover event append, claim lookup, and relationship reads. Runs standalone or in a container.",
+      "description": "Implement the feature: Knowledge Registry Server (mnemos serve). Add a `mnemos serve` subcommand that starts an HTTP API registry server backed by the same SQLite schema as the local client. The registry is the \"remote origin\" to each local project's \"local repo\" \u2014 users can push knowledge to a shared registry and pull from it at query time. Core endpoints cover event append, claim lookup, and relationship reads. Runs standalone or in a container.",
       "priority": "medium",
       "estimate": "",
       "depends_on": [],
@@ -230,10 +230,12 @@
     {
       "id": "task-push/pull-synchronization-with-remote-registry",
       "title": "Implement Push/Pull Synchronization with Remote Registry",
-      "description": "Implement the feature: Push/Pull Synchronization with Remote Registry. Add `mnemos registry connect \u003curl\u003e` to wire a local project to a remote registry, plus push and pull semantics that mirror git's model. Push sends local events/claims/relationships to the registry; pull fetches remote knowledge and merges by source hash + run_id. Automatic sync hooks into process/query when enabled. Depends on Knowledge Registry Server.",
+      "description": "Implement the feature: Push/Pull Synchronization with Remote Registry. Add `mnemos registry connect <url>` to wire a local project to a remote registry, plus push and pull semantics that mirror git's model. Push sends local events/claims/relationships to the registry; pull fetches remote knowledge and merges by source hash + run_id. Automatic sync hooks into process/query when enabled. Depends on Knowledge Registry Server.",
       "priority": "medium",
       "estimate": "",
-      "depends_on": [],
+      "depends_on": [
+        "task-knowledge-registry-server-(mnemos-serve)"
+      ],
       "feature_id": "push/pull-synchronization-with-remote-registry"
     },
     {
@@ -242,7 +244,9 @@
       "description": "Implement the feature: Cross-Project Query Federation. Extend the query engine to federate across the local database and one or more connected registries. Results include source provenance (local vs registry-name) so claims can be weighed by trust. Ranks cross-project results using the same cosine + token-overlap logic as local queries. Depends on Push/Pull Synchronization.",
       "priority": "medium",
       "estimate": "",
-      "depends_on": [],
+      "depends_on": [
+        "task-push/pull-synchronization-with-remote-registry"
+      ],
       "feature_id": "cross-project-query-federation"
     },
     {
@@ -251,7 +255,9 @@
       "description": "Implement the feature: Registry Namespace and Scope Isolation. Add namespace/scope primitives to the registry (team, org, project) so multiple tenants share a single server without leaking claims across boundaries. Push and pull operations carry a namespace context. Query federation respects the caller's accessible namespaces. Depends on Knowledge Registry Server.",
       "priority": "medium",
       "estimate": "",
-      "depends_on": [],
+      "depends_on": [
+        "task-knowledge-registry-server-(mnemos-serve)"
+      ],
       "feature_id": "registry-namespace-and-scope-isolation"
     },
     {
@@ -284,10 +290,12 @@
     {
       "id": "task-web-interface-on-registry-api",
       "title": "Implement Web Interface on Registry API",
-      "description": "Implement the feature: Web Interface on Registry API. Build a web UI that sits on top of the Phase 2B registry HTTP API — not a standalone app. Surfaces query, browsing, contradictions, and timeline views. Deferred until the registry API is proven with the CLI and MCP surfaces, per the \"API before UI\" principle established in the Phase 2A rewrite.",
+      "description": "Implement the feature: Web Interface on Registry API. Build a web UI that sits on top of the Phase 2B registry HTTP API \u2014 not a standalone app. Surfaces query, browsing, contradictions, and timeline views. Deferred until the registry API is proven with the CLI and MCP surfaces, per the \"API before UI\" principle established in the Phase 2A rewrite.",
       "priority": "medium",
       "estimate": "",
-      "depends_on": [],
+      "depends_on": [
+        "task-knowledge-registry-server-(mnemos-serve)"
+      ],
       "feature_id": "web-interface-on-registry-api"
     }
   ],

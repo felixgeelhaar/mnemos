@@ -23,10 +23,15 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/workflow"
 )
 
-// resolveDBPath returns the database path from MNEMOS_DB_PATH or the
-// XDG-compliant default (~/.local/share/mnemos/mnemos.db).
+// resolveDBPath returns the database path in the following precedence:
+//  1. MNEMOS_DB_PATH environment variable (explicit override)
+//  2. Nearest .mnemos/mnemos.db walking up from the working directory
+//  3. XDG-compliant global default (~/.local/share/mnemos/mnemos.db)
 func resolveDBPath() string {
 	if p := os.Getenv("MNEMOS_DB_PATH"); p != "" {
+		return p
+	}
+	if p, ok := findProjectDB(); ok {
 		return p
 	}
 	dataHome := os.Getenv("XDG_DATA_HOME")
@@ -38,6 +43,33 @@ func resolveDBPath() string {
 		dataHome = filepath.Join(home, ".local", "share")
 	}
 	return filepath.Join(dataHome, "mnemos", "mnemos.db")
+}
+
+// findProjectDB walks up from the current working directory looking for a
+// .mnemos directory and, if found, returns the path to mnemos.db within it.
+// Stops at the filesystem root or the user's home directory (whichever is
+// reached first) to avoid accidentally adopting a parent project's DB.
+func findProjectDB() (string, bool) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", false
+	}
+	home, _ := os.UserHomeDir()
+	dir := cwd
+	for {
+		candidate := filepath.Join(dir, ".mnemos")
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return filepath.Join(candidate, "mnemos.db"), true
+		}
+		if home != "" && dir == home {
+			return "", false
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", false
+		}
+		dir = parent
+	}
 }
 
 func printProgress(format string, args ...any) {
@@ -93,6 +125,8 @@ func main() {
 	args = args[1:]
 
 	switch command {
+	case "init":
+		handleInit(args, flags)
 	case "ingest":
 		handleIngest(args, flags)
 	case "extract":
@@ -116,6 +150,38 @@ func main() {
 		printUsage()
 		os.Exit(int(ExitUsage))
 	}
+}
+
+func handleInit(args []string, _ Flags) {
+	if len(args) > 0 {
+		fmt.Fprintln(os.Stderr, "error: init takes no arguments")
+		fmt.Fprintln(os.Stderr, "  mnemos init")
+		os.Exit(int(ExitUsage))
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "failed to determine working directory"))
+		return
+	}
+
+	dir := filepath.Join(cwd, ".mnemos")
+	dbPath := filepath.Join(dir, "mnemos.db")
+
+	if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		fmt.Printf("already initialized: %s\n", dir)
+		fmt.Printf("db=%s\n", dbPath)
+		os.Exit(int(ExitSuccess))
+	}
+
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "failed to create %s", dir))
+		return
+	}
+
+	fmt.Printf("initialized empty mnemos project in %s\n", dir)
+	fmt.Printf("db=%s\n", dbPath)
+	fmt.Println("\nNext: 'mnemos process <path>' to ingest content, or 'mnemos mcp' to start the server.")
 }
 
 func handleIngest(args []string, f Flags) {
@@ -752,6 +818,7 @@ func printUsage() {
 	fmt.Println("Mnemos CLI — local-first knowledge engine")
 	fmt.Println("")
 	fmt.Println("Quick Start:")
+	fmt.Println("  mnemos init                          Create .mnemos/ in the current directory")
 	fmt.Println("  mnemos process --text \"Your text here\"")
 	fmt.Println("  mnemos query --human \"Your question\"")
 	fmt.Println("")
@@ -784,7 +851,8 @@ func printUsage() {
 	fmt.Println("  --embed        generate embeddings for semantic search")
 	fmt.Println("")
 	fmt.Println("Environment Variables:")
-	fmt.Println("  MNEMOS_DB_PATH         database path (default: ~/.local/share/mnemos/mnemos.db)")
+	fmt.Println("  MNEMOS_DB_PATH         database path (overrides project and global defaults)")
+	fmt.Println("                         resolution order: env → ./.mnemos/mnemos.db (walked up) → ~/.local/share/mnemos/mnemos.db")
 	fmt.Println("  MNEMOS_LLM_PROVIDER    anthropic, openai, gemini, ollama, openai-compat")
 	fmt.Println("  MNEMOS_LLM_API_KEY     API key (required for cloud providers)")
 	fmt.Println("  MNEMOS_LLM_MODEL       model override (optional)")

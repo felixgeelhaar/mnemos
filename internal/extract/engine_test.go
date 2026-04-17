@@ -147,6 +147,29 @@ func TestEngineExtractMarksSamePolarityContradictions(t *testing.T) {
 	}
 }
 
+func TestCleanMarkdownStripsFormatting(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+	}{
+		{"bold asterisks", "We **migrated** to SQLite.", "We migrated to SQLite."},
+		{"bold underscores", "We __migrated__ to SQLite.", "We migrated to SQLite."},
+		{"strikethrough", "We use ~~MongoDB~~ SQLite.", "We use MongoDB SQLite."},
+		{"checkbox done", "- [x] Ship v0.4", "Ship v0.4"},
+		{"checkbox open", "- [ ] Ship v0.5", "Ship v0.5"},
+		{"bullet", "- Item content", "Item content"},
+		{"numbered", "1. First item", "First item"},
+		{"link", "See [docs](https://example.com) for more.", "See docs for more."},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := cleanMarkdown(c.in)
+			if got != c.want {
+				t.Fatalf("cleanMarkdown(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
 func seqClaimIDs() func() (string, error) {
 	i := 0
 	return func() (string, error) {

@@ -523,14 +523,3 @@ func buildAnswerText(question string, claims []domain.Claim, contradictions []do
 	return strings.Join(parts, " ")
 }
 
-func tokenSet(text string) map[string]struct{} {
-	tokens := map[string]struct{}{}
-	for _, token := range strings.Fields(strings.ToLower(text)) {
-		token = strings.Trim(token, ",.;:!?()[]{}\"'")
-		if token == "" {
-			continue
-		}
-		tokens[token] = struct{}{}
-	}
-	return tokens
-}

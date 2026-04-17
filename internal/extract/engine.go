@@ -144,9 +144,6 @@ func inferConfidence(text string, claimType domain.ClaimType) float64 {
 // markdownBoldRE matches **bold** and __bold__ markers.
 var markdownBoldRE = regexp.MustCompile(`\*\*([^*]+)\*\*|__([^_]+)__`)
 
-// markdownItalicRE matches *italic* and _italic_ markers (single).
-var markdownItalicRE = regexp.MustCompile(`(?:^|[^*])\*([^*]+)\*(?:[^*]|$)|(?:^|[^_])_([^_]+)_(?:[^_]|$)`)
-
 // markdownStrikethroughRE matches ~~strikethrough~~ markers.
 var markdownStrikethroughRE = regexp.MustCompile(`~~([^~]+)~~`)
 

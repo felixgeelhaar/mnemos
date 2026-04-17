@@ -41,7 +41,7 @@
 - [x] Auto-ingest project docs on MCP startup — README, PRD, CHANGELOG, Roadmap, CLAUDE.md, ARCHITECTURE, top-level `docs/`, recursive ADR conventions
 - [x] File watch MCP tool (`watch_file`) — polling-based, sha256 content comparison, in-memory state
 - [x] Browsing MCP tools (`list_claims`, `list_decisions`, `list_contradictions`) — paginated, filtered, hydrated
-- [x] Git-aware context — commit auto-ingest at MCP startup + `ingest_git_log` tool. PR descriptions deferred (needs gh CLI auth)
+- [x] Git-aware context — commit auto-ingest at MCP startup + `ingest_git_log` tool. Merged PR auto-ingest via `gh` CLI + `ingest_git_prs` tool
 
 ### Success Metrics
 

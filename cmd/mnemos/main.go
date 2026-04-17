@@ -72,6 +72,14 @@ func main() {
 		}
 	}
 
+	// Auto-enable LLM and embeddings when Ollama is detected locally
+	// and no explicit provider is configured.
+	if !flags.LLM && os.Getenv("MNEMOS_LLM_PROVIDER") == "" && llm.OllamaAvailable() {
+		flags.LLM = true
+		flags.Embed = true
+		printProgress("ollama detected: enabling LLM extraction and embeddings")
+	}
+
 	if flags.Help {
 		printUsage()
 		os.Exit(int(ExitSuccess))

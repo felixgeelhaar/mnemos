@@ -103,7 +103,12 @@ func DefaultBaseURL(p Provider) string {
 func ConfigFromEnv() (Config, error) {
 	raw := strings.TrimSpace(os.Getenv("MNEMOS_LLM_PROVIDER"))
 	if raw == "" {
-		return Config{}, errors.New("MNEMOS_LLM_PROVIDER is not set")
+		// Auto-detect Ollama running locally.
+		if OllamaAvailable() {
+			raw = string(ProviderOllama)
+		} else {
+			return Config{}, errors.New("MNEMOS_LLM_PROVIDER is not set (tip: install Ollama for zero-config local inference)")
+		}
 	}
 
 	p := Provider(strings.ToLower(raw))

@@ -59,7 +59,12 @@ func ConfigFromEnv() (Config, error) {
 		raw = strings.TrimSpace(os.Getenv("MNEMOS_LLM_PROVIDER"))
 	}
 	if raw == "" {
-		return Config{}, errors.New("MNEMOS_EMBED_PROVIDER (or MNEMOS_LLM_PROVIDER) is not set")
+		// Auto-detect Ollama running locally.
+		if llm.OllamaAvailable() {
+			raw = string(llm.ProviderOllama)
+		} else {
+			return Config{}, errors.New("MNEMOS_EMBED_PROVIDER (or MNEMOS_LLM_PROVIDER) is not set (tip: install Ollama for zero-config local inference)")
+		}
 	}
 
 	p := llm.Provider(strings.ToLower(raw))

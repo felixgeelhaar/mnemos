@@ -155,8 +155,16 @@ func TestConfigFromEnv(t *testing.T) {
 	t.Run("missing provider", func(t *testing.T) {
 		t.Setenv("MNEMOS_LLM_PROVIDER", "")
 		_, err := ConfigFromEnv()
-		if err == nil {
-			t.Fatal("expected error when provider is not set")
+		// When Ollama is running locally, ConfigFromEnv auto-detects it
+		// and returns a valid config instead of an error.
+		if OllamaAvailable() {
+			if err != nil {
+				t.Fatalf("expected Ollama auto-detect to succeed, got: %v", err)
+			}
+		} else {
+			if err == nil {
+				t.Fatal("expected error when provider is not set and Ollama is unavailable")
+			}
 		}
 	})
 

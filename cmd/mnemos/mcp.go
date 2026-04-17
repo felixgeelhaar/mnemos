@@ -85,6 +85,16 @@ type mcpMetricsOutput struct {
 	Embeddings      int64 `json:"embeddings"`
 }
 
+type mcpIngestGitLogInput struct {
+	Limit int    `json:"limit,omitempty" jsonschema:"description=Max number of commits to ingest (default 50, cap 1000)"`
+	Since string `json:"since,omitempty" jsonschema:"description=Optional date string passed to git --since (e.g. '2026-01-01' or '2 weeks ago')"`
+}
+
+type mcpIngestGitLogOutput struct {
+	Ingested int `json:"ingested"`
+	Skipped  int `json:"skipped"`
+}
+
 type mcpWatchFileInput struct {
 	Path string `json:"path" jsonschema:"required,description=Absolute or relative path to the file to watch for changes"`
 }
@@ -106,6 +116,9 @@ func handleMCP() {
 	// every startup.
 	if _, projectRoot, ok := findProjectDB(); ok {
 		runAutoIngest(projectRoot)
+		if repoIsGit(projectRoot) {
+			runGitContextIngest(projectRoot)
+		}
 	}
 
 	srv := mcp.NewServer(mcp.ServerInfo{
@@ -190,6 +203,14 @@ func handleMCP() {
 			return mcpRunListContradictions(ctx, input)
 		})
 
+	srv.Tool("ingest_git_log").
+		Description("Ingest recent git commits from the project repository as events so they appear in queries. Idempotent — already-ingested commits are skipped by SHA.").
+		OutputSchema(mcpIngestGitLogOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpIngestGitLogInput) (mcpIngestGitLogOutput, error) {
+			return mcpRunIngestGitLog(ctx, input)
+		})
+
 	srv.Tool("watch_file").
 		Description("Register a file to be re-ingested when its content changes. Polls every few seconds; in-memory only — restart drops all watches.").
 		OutputSchema(mcpWatchFileOutput{}).
@@ -213,6 +234,48 @@ func handleMCP() {
 	if err := mcp.ServeStdio(context.Background(), srv, mcp.WithMiddleware(mcp.DefaultMiddlewareWithTimeout(mcpBoltLogger{logger: logger}, 30*time.Second)...)); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func runGitContextIngest(projectRoot string) {
+	db, err := sqlite.Open(resolveDBPath())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "git: failed to open DB: %v\n", err)
+		return
+	}
+	defer func() { _ = db.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	ingested, skipped, err := ingestGitLog(ctx, db, projectRoot, defaultGitLogLimit, "")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "git: %v\n", err)
+		return
+	}
+	if ingested > 0 || skipped > 0 {
+		fmt.Fprintf(os.Stderr, "git-context: ingested=%d skipped=%d root=%s\n", ingested, skipped, projectRoot)
+	}
+}
+
+func mcpRunIngestGitLog(ctx context.Context, input mcpIngestGitLogInput) (mcpIngestGitLogOutput, error) {
+	_, projectRoot, ok := findProjectDB()
+	if !ok {
+		return mcpIngestGitLogOutput{}, fmt.Errorf("no project (.mnemos/) found — run 'mnemos init' first")
+	}
+	if !repoIsGit(projectRoot) {
+		return mcpIngestGitLogOutput{}, fmt.Errorf("project root %s is not a git repository", projectRoot)
+	}
+	db, err := sqlite.Open(resolveDBPath())
+	if err != nil {
+		return mcpIngestGitLogOutput{}, err
+	}
+	defer func() { _ = db.Close() }()
+
+	ingested, skipped, err := ingestGitLog(ctx, db, projectRoot, input.Limit, input.Since)
+	if err != nil {
+		return mcpIngestGitLogOutput{}, err
+	}
+	return mcpIngestGitLogOutput{Ingested: ingested, Skipped: skipped}, nil
 }
 
 func runAutoIngest(projectRoot string) {

@@ -140,6 +140,21 @@ mnemos mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over
 | `mnemos query --llm <question>` | Query with LLM-grounded answer generation |
 | `mnemos metrics` | Knowledge base statistics |
 | `mnemos mcp` | Start MCP server over stdio |
+| `mnemos serve [--port N]` | Start read-only HTTP registry (default `:7777`) |
+
+### HTTP Registry (Phase 2B preview)
+
+`mnemos serve` exposes the local knowledge base as a read-only HTTP API so other tools, dashboards, or scripts can pull claims and relationships without speaking SQLite. Push semantics, namespacing, and authentication land in subsequent commits — this first cut is intentionally read-only.
+
+| Endpoint | Description |
+|---|---|
+| `GET /health` | Liveness probe + version |
+| `GET /v1/events` | List events (`?limit`, `?offset`) |
+| `GET /v1/claims` | List claims (`?type=fact\|hypothesis\|decision`, `?status=active\|contested\|deprecated`, `?limit`, `?offset`) |
+| `GET /v1/relationships` | List relationships (`?type=supports\|contradicts`, `?limit`, `?offset`) |
+| `GET /v1/metrics` | Counts mirroring `mnemos metrics` |
+
+Defaults: `limit=50`, capped at `200`. Port can also be set via `MNEMOS_SERVE_PORT`.
 
 ## Architecture
 

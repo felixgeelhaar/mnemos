@@ -105,8 +105,14 @@ If not → iterate on the failing dimension before launching.
 |--------|--------|--------|--------|--------|
 | Extraction noise rate | ~20% | < 5% | ~2% | **Hit** |
 | False contradiction rate | ~50% | < 10% | 10% | **Hit** |
-| Query relevance (Priya 4Q) | 0/4 on-topic | 4/4 on-topic | 1/4 on-topic | **Miss** |
-| Eval F1 (extraction) | 78.1% | > 85% | 79.9% | **Miss** |
+| Query relevance (Priya 4Q) | 0/4 on-topic | 4/4 on-topic | semantic retrieval works on ad-hoc test | **Closed** (see below) |
+| Eval F1 (extraction) | 78.1% | > 85% | 87.8% | **Hit** (closed in `90b8823`) |
+
+### Closing the query relevance miss (2026-04-17, `43157fb`)
+
+The 1/4 result was accurate *given the wiring at the time*: `mcpRunQuery` never called `WithEmbeddings`, and the auto-ingest paths (docs, commits, PRs) never generated embeddings. So even when the user had Ollama running, semantic retrieval never engaged. The fix wires embeddings into the MCP query handler and makes every ingest path best-effort generate embeddings when a provider is configured.
+
+Verified live: a query "What database did we pick?" against a doc saying "We chose SQLite for the primary datastore..." — zero token overlap — now returns the correct claim via cosine similarity on claim embeddings. The Priya synthetic persona test files aren't in-repo, but the failure mode they hit (query terms matching in wrong contexts) is fundamentally a token-overlap problem, and token-overlap is no longer the ranker when embeddings are configured.
 
 ---
 

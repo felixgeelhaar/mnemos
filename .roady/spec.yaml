@@ -62,5 +62,73 @@ features:
       title: LLM-Powered Claim Extraction
       description: Replace/augment rule-based extraction with LLM-powered claim extraction. Supports Anthropic, OpenAI, Google Gemini, Ollama, and any OpenAI-compatible provider. Activated via --llm flag with env var configuration. Falls back to rule-based extraction on LLM failure.
       requirements: []
+    - id: markdown-preprocessing-and-structural-noise-filters
+      title: Markdown Preprocessing and Structural Noise Filters
+      description: Strip markdown formatting (bold, italic, strikethrough, links, bullets, checkboxes, headers) before claim extraction, and reject structural noise like label-value metadata rows, pipe-separated table rows, JSON fragments, short title-case headers, and email salutations. Raises extraction F1 on real-world documents from 79.9% to 87.8%.
+      requirements: []
+    - id: grounded-llm-answer-generation
+      title: Grounded LLM Answer Generation
+      description: When an LLM provider is configured, synthesize query answers from retrieved claims with inline citations instead of returning fixed templates. Falls back to template answers on LLM failure so offline/zero-config queries still work.
+      requirements: []
+    - id: claim-level-embeddings-and-cosine-reranking
+      title: Claim-Level Embeddings and Cosine Reranking
+      description: Generate vector embeddings for events and claims, store as little-endian float32 BLOBs in SQLite, and rerank query results by cosine similarity against the question embedding. Falls back to token-overlap ranking when no embedding provider is configured.
+      requirements: []
+    - id: project-scoped-database-with-init-subcommand
+      title: Project-Scoped Database with Init Subcommand
+      description: Add `mnemos init` to create a `.mnemos/` directory in the working directory. Database resolution walks up from CWD looking for `.mnemos/mnemos.db`, falling back to the XDG global default. MNEMOS_DB_PATH still wins outright. Discovery stops at the user's HOME to avoid adopting an unrelated parent project's DB.
+      requirements: []
+    - id: mcp-project-document-auto-ingest
+      title: MCP Project Document Auto-Ingest
+      description: When the MCP server starts inside a project (`.mnemos/` exists), bulk-ingest standard project documents — README, PRD, CHANGELOG, Roadmap, CLAUDE.md, ARCHITECTURE — plus the top level of `docs/` and recursive ADR conventions. Deduped via SQLite json_extract on event metadata source paths.
+      requirements: []
+    - id: file-watch-mcp-tool
+      title: File Watch MCP Tool
+      description: Expose a `watch_file` MCP tool that registers a path for re-ingestion when its content changes. Polling-based (5s, sha256 content comparison), in-memory state. Re-ingest reuses the same extract+relate pipeline as auto-ingest so agent edits flow into queryable claims with no manual step.
+      requirements: []
+    - id: knowledge-browsing-mcp-tools
+      title: Knowledge Browsing MCP Tools
+      description: Expose `list_claims`, `list_decisions`, and `list_contradictions` MCP tools for paginated read-only browsing of the knowledge base. Supports type/status filtering, pagination with sensible defaults, and claim-text hydration on the contradiction list via SQL JOIN.
+      requirements: []
+    - id: git-commit-context-auto-ingest
+      title: Git Commit Context Auto-Ingest
+      description: When the project root has a `.git` directory, read the most recent 50 commits via `git log` on MCP startup and persist each as an event with metadata (SHA, author, committed_at, subject). Commits flow through extract+relate so subjects and bodies become queryable claims. Deduped by SHA. Explicit `ingest_git_log` MCP tool exposes deeper history via limit/since.
+      requirements: []
+    - id: merged-pr-auto-ingest-via-gh-cli
+      title: Merged PR Auto-Ingest via gh CLI
+      description: When the gh CLI is installed and authenticated for github.com, auto-ingest the 20 most recent merged pull requests on MCP startup. PR titles and bodies flow through extract+relate so they become queryable claims. Deduped by PR number. Explicit `ingest_git_prs` MCP tool exposes configurable limit for deeper history. Silent no-op when gh is missing, unauth, or the repo is not on GitHub.
+      requirements: []
+    - id: knowledge-registry-server-(mnemos-serve)
+      title: Knowledge Registry Server (mnemos serve)
+      description: Add a `mnemos serve` subcommand that starts an HTTP API registry server backed by the same SQLite schema as the local client. The registry is the "remote origin" to each local project's "local repo" — users can push knowledge to a shared registry and pull from it at query time. Core endpoints cover event append, claim lookup, and relationship reads. Runs standalone or in a container.
+      requirements: []
+    - id: push/pull-synchronization-with-remote-registry
+      title: Push/Pull Synchronization with Remote Registry
+      description: Add `mnemos registry connect <url>` to wire a local project to a remote registry, plus push and pull semantics that mirror git's model. Push sends local events/claims/relationships to the registry; pull fetches remote knowledge and merges by source hash + run_id. Automatic sync hooks into process/query when enabled. Depends on Knowledge Registry Server.
+      requirements: []
+    - id: cross-project-query-federation
+      title: Cross-Project Query Federation
+      description: Extend the query engine to federate across the local database and one or more connected registries. Results include source provenance (local vs registry-name) so claims can be weighed by trust. Ranks cross-project results using the same cosine + token-overlap logic as local queries. Depends on Push/Pull Synchronization.
+      requirements: []
+    - id: registry-namespace-and-scope-isolation
+      title: Registry Namespace and Scope Isolation
+      description: Add namespace/scope primitives to the registry (team, org, project) so multiple tenants share a single server without leaking claims across boundaries. Push and pull operations carry a namespace context. Query federation respects the caller's accessible namespaces. Depends on Knowledge Registry Server.
+      requirements: []
+    - id: graphrag-multi-hop-query-support
+      title: GraphRAG Multi-Hop Query Support
+      description: Extend the query engine to traverse relationship edges at query time, enabling multi-hop questions like "what decisions contradict the current approach to auth?" that require walking from a seed claim through supports/contradicts chains. Reports the traversal path as part of the evidence trail.
+      requirements: []
+    - id: governance-and-compliance-layer
+      title: Governance and Compliance Layer
+      description: 'Add governance features to Mnemos as an enterprise-ready evidence layer: bias detection on claim sources, audit trails tracking who/when/why for every event and claim change, retention policies for aging out or archiving old events, and compliance export formats (CSV/JSON) for regulated environments.'
+      requirements: []
+    - id: enterprise-integration-adapters
+      title: Enterprise Integration Adapters
+      description: 'Adapters that ingest content from common team knowledge surfaces: Slack threads, Microsoft Teams channels, Jira tickets, and Notion pages. Each adapter maps the source''s identifiers into Mnemos event metadata so traceability survives the round trip. Adapters run as periodic jobs rather than real-time listeners to avoid webhook complexity.'
+      requirements: []
+    - id: web-interface-on-registry-api
+      title: Web Interface on Registry API
+      description: Build a web UI that sits on top of the Phase 2B registry HTTP API — not a standalone app. Surfaces query, browsing, contradictions, and timeline views. Deferred until the registry API is proven with the CLI and MCP surfaces, per the "API before UI" principle established in the Phase 2A rewrite.
+      requirements: []
 constraints: []
 version: 0.1.0

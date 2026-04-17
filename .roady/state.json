@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 36,
+  "version": 57,
   "task_states": {
     "task-append-only-event-store": {
       "status": "done",
@@ -35,6 +35,17 @@
       "completed_at": "2026-04-12T13:35:47.092813+02:00",
       "elapsed_minutes": 3
     },
+    "task-claim-level-embeddings-and-cosine-reranking": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Initial event/claim embeddings with cosine reranking in commit 30f3ceb. Wiring completed in commit 43157fb: WithEmbeddings plumbed into MCP query handler and generateEmbeddingsBestEffort called after PersistArtifacts in auto-ingest, watch re-ingest, git commit ingest, and PR ingest. Verified live with Ollama — query 'What database did we pick?' returns 'We chose SQLite...' with zero lexical overlap."
+      ],
+      "started_at": "2026-04-17T22:30:16.225022+02:00",
+      "completed_at": "2026-04-17T22:30:25.882726+02:00",
+      "elapsed_minutes": 0
+    },
     "task-cli-query-interface": {
       "status": "done",
       "path": "",
@@ -57,6 +68,11 @@
       "completed_at": "2026-04-12T11:25:48.965828+02:00",
       "elapsed_minutes": 3
     },
+    "task-cross-project-query-federation": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
     "task-documentation-ingestion-pipeline": {
       "status": "done",
       "path": "",
@@ -66,6 +82,114 @@
       ],
       "started_at": "2026-04-12T11:05:47.064027+02:00",
       "completed_at": "2026-04-12T11:05:51.209434+02:00",
+      "elapsed_minutes": 0
+    },
+    "task-enterprise-integration-adapters": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
+    "task-file-watch-mcp-tool": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Shipped in commit e7a3105. Polling Watcher (default 5s interval, sha256 content comparison) lazy-starts on first watch_file MCP tool call and lives for the duration of the MCP server. Missing files get dropped from the watch set; per-path errors are logged and loop continues. In-memory state — restarts wipe watches. Tests in cmd/mnemos/watch_test.go."
+      ],
+      "started_at": "2026-04-17T22:30:17.879884+02:00",
+      "completed_at": "2026-04-17T22:30:33.771283+02:00",
+      "elapsed_minutes": 0
+    },
+    "task-git-commit-context-auto-ingest": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Shipped in commit 1fd1004. When project root has .git/, MCP startup reads the most recent 50 commits via git log and persists each as an event with metadata { source=git, git_commit_sha, git_author_name, git_author_email, git_committed_at, git_commit_subject }. Commits flow through extract+relate. SHA is the dedup key (json_extract on metadata). Explicit ingest_git_log MCP tool exposes deeper history (limit up to 1000) and date filtering via git --since. Tests in cmd/mnemos/gitcontext_test.go."
+      ],
+      "started_at": "2026-04-18T01:05:17.466844+02:00",
+      "completed_at": "2026-04-18T01:05:31.470061+02:00",
+      "elapsed_minutes": 0
+    },
+    "task-governance-and-compliance-layer": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
+    "task-graphrag-multi-hop-query-support": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
+    "task-grounded-llm-answer-generation": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Shipped in commit 30f3ceb ('feat: Phase 2 quality bets — extraction, contradictions, and ranking'). Query --llm path uses the configured LLM client to synthesize answers from retrieved claims with inline citations; falls back to template answer on LLM failure. Wired via engine.WithLLM() in both CLI (main.go:327) and MCP (mcp.go)."
+      ],
+      "started_at": "2026-04-17T22:29:46.030239+02:00",
+      "completed_at": "2026-04-17T22:30:10.377087+02:00",
+      "elapsed_minutes": 0
+    },
+    "task-knowledge-browsing-mcp-tools": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Shipped in commit 692efbf. Three read-only tools: list_claims (paginated, optional type/status filter), list_decisions (shorthand for list_claims with type=decision), list_contradictions (paginated, JOIN-hydrated with both claims' text). Default 50 / cap 200 pagination via normalizePagination; type/status validated against domain enums. Implemented in cmd/mnemos/browse.go with tests in cmd/mnemos/browse_test.go."
+      ],
+      "started_at": "2026-04-18T01:05:16.615811+02:00",
+      "completed_at": "2026-04-18T01:05:26.508874+02:00",
+      "elapsed_minutes": 0
+    },
+    "task-knowledge-registry-server-(mnemos-serve)": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
+    "task-llm-powered-claim-extraction": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Shipped in commit d0cc9e9 ('feat: add AI quality improvements and integration guide'). Added --llm flag with pluggable providers (anthropic, openai, gemini, ollama, openai-compat), prompt version v1.2 with few-shot examples, LLM extraction cache in data/cache/llm-extraction/, and fallback to rule-based extraction on LLM failure."
+      ],
+      "started_at": "2026-04-17T22:29:44.15894+02:00",
+      "completed_at": "2026-04-17T22:30:02.826686+02:00",
+      "elapsed_minutes": 0
+    },
+    "task-markdown-preprocessing-and-structural-noise-filters": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Initial markdown cleanup in commit 30f3ceb ('feat: Phase 2 quality bets'). Structural noise filters completing the F1 gap in commit 90b8823: labelPrefixRE, pipe-separated rows, JSON fragments, short title-case headers, per-sentence list-marker trim. Extraction F1 79.9% → 87.8% on the 90-case eval."
+      ],
+      "started_at": "2026-04-17T22:29:44.938125+02:00",
+      "completed_at": "2026-04-17T22:30:07.796111+02:00",
+      "elapsed_minutes": 0
+    },
+    "task-mcp-project-document-auto-ingest": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Shipped in commit f7ed37a. When MCP server launches in a project with .mnemos/, autoIngestProjectDocs scans for README, PRD, CHANGELOG, Roadmap, CLAUDE.md, ARCHITECTURE at root; top-level docs/*.md; and recursive ADR conventions (adr/, docs/adr/, decisions/, docs/decisions/). Dedups via SQLite json_extract on metadata.input_source_path. Tests in cmd/mnemos/autoingest_test.go."
+      ],
+      "started_at": "2026-04-17T22:30:17.272065+02:00",
+      "completed_at": "2026-04-17T22:30:30.424068+02:00",
+      "elapsed_minutes": 0
+    },
+    "task-merged-pr-auto-ingest-via-gh-cli": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Shipped in commit dde9fe2. ghAvailable() probes for gh CLI on PATH and authentication for github.com; if both present, runGhPRs invokes 'gh pr list --state merged --json number,title,body,mergedAt,author' and persists each PR as an event under schema git.pr.v1. Default limit 20 on startup, configurable up to 200 via the ingest_git_prs MCP tool. Deduped by PR number via json_extract on metadata.github_pr_number. Best-effort failures logged; never blocks MCP startup. Tests in cmd/mnemos/prcontext_test.go."
+      ],
+      "started_at": "2026-04-18T01:05:18.294624+02:00",
+      "completed_at": "2026-04-18T01:05:35.842051+02:00",
       "elapsed_minutes": 0
     },
     "task-multi-format-input-service": {
@@ -100,6 +224,27 @@
       "started_at": "2026-04-12T11:29:37.866304+02:00",
       "completed_at": "2026-04-12T11:31:59.45509+02:00",
       "elapsed_minutes": 2
+    },
+    "task-project-scoped-database-with-init-subcommand": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Shipped in commit 2963f79: project-scoped DB discovery walking up from CWD (stops at HOME) plus idempotent mnemos init subcommand. MNEMOS_DB_PATH env var still overrides. Covered by tests in cmd/mnemos/main_test.go."
+      ],
+      "started_at": "2026-04-17T22:29:21.134588+02:00",
+      "completed_at": "2026-04-17T22:29:27.167939+02:00",
+      "elapsed_minutes": 0
+    },
+    "task-push/pull-synchronization-with-remote-registry": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
+    "task-registry-namespace-and-scope-isolation": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
     },
     "task-relationship-detection-engine": {
       "status": "done",
@@ -145,6 +290,11 @@
       "completed_at": "2026-04-12T14:37:50.063802+02:00",
       "elapsed_minutes": 3
     },
+    "task-web-interface-on-registry-api": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
     "task-workflow-orchestration-and-observability": {
       "status": "done",
       "path": "",
@@ -157,5 +307,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-04-12T15:15:29.580044+02:00"
+  "updated_at": "2026-04-18T01:05:35.842052+02:00"
 }

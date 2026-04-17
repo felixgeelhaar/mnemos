@@ -45,6 +45,7 @@ brews:
     repository:
       owner: felixgeelhaar
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     homepage: https://github.com/felixgeelhaar/mnemos
     description: "Local-first evidence layer that grounds AI in truth"

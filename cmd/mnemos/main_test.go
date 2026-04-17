@@ -11,7 +11,7 @@ func TestFindProjectDB_NoMnemosDirReturnsFalse(t *testing.T) {
 	t.Setenv("HOME", root)
 	t.Chdir(root)
 
-	got, ok := findProjectDB()
+	got, _, ok := findProjectDB()
 	if ok {
 		t.Fatalf("expected no project DB, got %q", got)
 	}
@@ -25,7 +25,7 @@ func TestFindProjectDB_FindsInCurrentDirectory(t *testing.T) {
 	}
 	t.Chdir(root)
 
-	got, ok := findProjectDB()
+	got, _, ok := findProjectDB()
 	if !ok {
 		t.Fatal("expected project DB, got none")
 	}
@@ -47,7 +47,7 @@ func TestFindProjectDB_WalksUpToAncestor(t *testing.T) {
 	}
 	t.Chdir(deep)
 
-	got, ok := findProjectDB()
+	got, _, ok := findProjectDB()
 	if !ok {
 		t.Fatal("expected project DB, got none")
 	}
@@ -73,7 +73,7 @@ func TestFindProjectDB_PrefersNearestAncestor(t *testing.T) {
 	}
 	t.Chdir(deep)
 
-	got, ok := findProjectDB()
+	got, _, ok := findProjectDB()
 	if !ok {
 		t.Fatal("expected project DB, got none")
 	}
@@ -96,7 +96,7 @@ func TestFindProjectDB_StopsAtHomeDirectory(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Chdir(home)
 
-	if got, ok := findProjectDB(); ok {
+	if got, _, ok := findProjectDB(); ok {
 		t.Fatalf("expected discovery to stop at HOME, got %q", got)
 	}
 }

@@ -31,7 +31,7 @@ func resolveDBPath() string {
 	if p := os.Getenv("MNEMOS_DB_PATH"); p != "" {
 		return p
 	}
-	if p, ok := findProjectDB(); ok {
+	if p, _, ok := findProjectDB(); ok {
 		return p
 	}
 	dataHome := os.Getenv("XDG_DATA_HOME")
@@ -46,27 +46,28 @@ func resolveDBPath() string {
 }
 
 // findProjectDB walks up from the current working directory looking for a
-// .mnemos directory and, if found, returns the path to mnemos.db within it.
-// Stops at the filesystem root or the user's home directory (whichever is
-// reached first) to avoid accidentally adopting a parent project's DB.
-func findProjectDB() (string, bool) {
+// .mnemos directory. When found, returns the path to mnemos.db inside it,
+// the project root (the directory containing .mnemos), and true. Stops at
+// the filesystem root or the user's home directory (whichever is reached
+// first) to avoid accidentally adopting a parent project's DB.
+func findProjectDB() (dbPath, projectRoot string, ok bool) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return "", false
+		return "", "", false
 	}
 	home, _ := os.UserHomeDir()
 	dir := cwd
 	for {
 		candidate := filepath.Join(dir, ".mnemos")
 		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return filepath.Join(candidate, "mnemos.db"), true
+			return filepath.Join(candidate, "mnemos.db"), dir, true
 		}
 		if home != "" && dir == home {
-			return "", false
+			return "", "", false
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", false
+			return "", "", false
 		}
 		dir = parent
 	}

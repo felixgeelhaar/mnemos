@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -87,6 +88,15 @@ type mcpMetricsOutput struct {
 // that blocks until the connection is closed.
 func handleMCP() {
 	logger := bolt.New(bolt.NewJSONHandler(os.Stderr))
+
+	// When launched inside a project (.mnemos/ exists), bulk-ingest the
+	// standard project documents so the agent has context immediately. New
+	// or unchanged source paths are skipped, so this is safe to run on
+	// every startup.
+	if _, projectRoot, ok := findProjectDB(); ok {
+		runAutoIngest(projectRoot)
+	}
+
 	srv := mcp.NewServer(mcp.ServerInfo{
 		Name:    "mnemos",
 		Version: version,
@@ -126,6 +136,23 @@ func handleMCP() {
 
 	if err := mcp.ServeStdio(context.Background(), srv, mcp.WithMiddleware(mcp.DefaultMiddlewareWithTimeout(mcpBoltLogger{logger: logger}, 30*time.Second)...)); err != nil {
 		log.Fatal(err)
+	}
+}
+
+func runAutoIngest(projectRoot string) {
+	db, err := sqlite.Open(resolveDBPath())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "auto-ingest: failed to open DB: %v\n", err)
+		return
+	}
+	defer func() { _ = db.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	ingested, skipped := autoIngestProjectDocs(ctx, db, projectRoot)
+	if ingested > 0 || skipped > 0 {
+		fmt.Fprintf(os.Stderr, "auto-ingest: ingested=%d skipped=%d root=%s\n", ingested, skipped, projectRoot)
 	}
 }
 

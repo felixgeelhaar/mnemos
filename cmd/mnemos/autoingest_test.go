@@ -28,7 +28,7 @@ func TestDiscoverProjectDocs_FindsStandardRootFiles(t *testing.T) {
 	writeFile(t, filepath.Join(root, "Roadmap.md"), "roadmap")
 	writeFile(t, filepath.Join(root, "CLAUDE.md"), "claude")
 	writeFile(t, filepath.Join(root, "src", "main.go"), "package main") // should be ignored
-	writeFile(t, filepath.Join(root, "random.md"), "noise")              // should be ignored
+	writeFile(t, filepath.Join(root, "random.md"), "noise")             // should be ignored
 
 	got := discoverProjectDocs(root)
 	want := []string{

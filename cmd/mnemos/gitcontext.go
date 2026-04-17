@@ -246,12 +246,12 @@ func buildCommitEvent(runID string, c commitRecord, ingestedAt time.Time) domain
 		SourceInputID: "git_" + c.SHA[:16],
 		Timestamp:     c.CommittedAt.UTC(),
 		Metadata: map[string]string{
-			"source":              "git",
-			"git_commit_sha":      c.SHA,
-			"git_author_name":     c.AuthorName,
-			"git_author_email":    c.AuthorEmail,
-			"git_committed_at":    c.CommittedAt.UTC().Format(time.RFC3339),
-			"git_commit_subject":  c.Subject,
+			"source":             "git",
+			"git_commit_sha":     c.SHA,
+			"git_author_name":    c.AuthorName,
+			"git_author_email":   c.AuthorEmail,
+			"git_committed_at":   c.CommittedAt.UTC().Format(time.RFC3339),
+			"git_commit_subject": c.Subject,
 		},
 		IngestedAt: ingestedAt,
 	}

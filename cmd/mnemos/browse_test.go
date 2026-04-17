@@ -44,7 +44,7 @@ func seedRelationship(t *testing.T, db *sql.DB, id, rtype, from, to string, crea
 
 func TestNormalizePagination(t *testing.T) {
 	cases := []struct {
-		inLimit, inOffset   int
+		inLimit, inOffset     int
 		wantLimit, wantOffset int
 	}{
 		{0, 0, defaultListLimit, 0},

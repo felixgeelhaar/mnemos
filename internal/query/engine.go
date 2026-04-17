@@ -522,4 +522,3 @@ func buildAnswerText(question string, claims []domain.Claim, contradictions []do
 	parts = append(parts, fmt.Sprintf("Context used %d event(s) and %d claim(s).", eventCount, len(claims)))
 	return strings.Join(parts, " ")
 }
-

@@ -229,6 +229,7 @@ func ingestGitLog(ctx context.Context, db *sql.DB, repoRoot string, limit int, s
 	if persistErr := pipeline.PersistArtifacts(ctx, db, newEvents, newClaims, newLinks, rels); persistErr != nil {
 		return 0, skipped, fmt.Errorf("persist commits: %w", persistErr)
 	}
+	generateEmbeddingsBestEffort(ctx, db, newEvents, newClaims)
 
 	return ingested, skipped, nil
 }

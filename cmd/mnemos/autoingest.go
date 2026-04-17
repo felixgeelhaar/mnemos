@@ -10,12 +10,37 @@ import (
 	"strings"
 	"time"
 
+	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/embedding"
 	"github.com/felixgeelhaar/mnemos/internal/ingest"
 	"github.com/felixgeelhaar/mnemos/internal/parser"
 	"github.com/felixgeelhaar/mnemos/internal/pipeline"
 	"github.com/felixgeelhaar/mnemos/internal/relate"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
+
+// generateEmbeddingsBestEffort creates event and claim embeddings when an
+// embedding provider is configured. When no provider is configured (no
+// Ollama, no MNEMOS_EMBED_PROVIDER), it silently no-ops so that auto-ingest
+// still works in zero-config environments. Any actual provider call failure
+// is logged to stderr but does not propagate — persisted events and claims
+// remain queryable via token-overlap fallback.
+func generateEmbeddingsBestEffort(ctx context.Context, db *sql.DB, events []domain.Event, claims []domain.Claim) {
+	if _, err := embedding.ConfigFromEnv(); err != nil {
+		return
+	}
+	if len(events) > 0 {
+		if _, err := pipeline.GenerateEmbeddings(ctx, db, events); err != nil {
+			fmt.Fprintf(os.Stderr, "embeddings: event batch failed: %v\n", err)
+			return
+		}
+	}
+	if len(claims) > 0 {
+		if _, err := pipeline.GenerateClaimEmbeddings(ctx, db, claims); err != nil {
+			fmt.Fprintf(os.Stderr, "embeddings: claim batch failed: %v\n", err)
+		}
+	}
+}
 
 // rootDocBasenames are exact (case-insensitive) filenames at the project root
 // that auto-ingest will pick up.
@@ -221,5 +246,6 @@ func ingestSingleDoc(
 	if err := pipeline.PersistArtifacts(ctx, db, events, claims, links, rels); err != nil {
 		return fmt.Errorf("persist: %w", err)
 	}
+	generateEmbeddingsBestEffort(ctx, db, events, claims)
 	return nil
 }

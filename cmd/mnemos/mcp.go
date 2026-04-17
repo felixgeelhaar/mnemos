@@ -13,6 +13,7 @@ import (
 	"github.com/felixgeelhaar/bolt"
 	mcp "github.com/felixgeelhaar/mcp-go"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/embedding"
 	"github.com/felixgeelhaar/mnemos/internal/ingest"
 	"github.com/felixgeelhaar/mnemos/internal/llm"
 	"github.com/felixgeelhaar/mnemos/internal/parser"
@@ -373,6 +374,19 @@ func mcpRunQuery(_ context.Context, input mcpQueryInput) (mcpQueryOutput, error)
 		sqlite.NewClaimRepository(db),
 		sqlite.NewRelationshipRepository(db),
 	)
+
+	// Enable semantic ranking when an embedding provider is configured —
+	// auto-detected via Ollama or env vars. Without this the engine falls
+	// back to token-overlap ranking and semantic matches are missed even
+	// when the DB has embeddings.
+	if embCfg, err := embedding.ConfigFromEnv(); err == nil {
+		if embClient, err := embedding.NewClient(embCfg); err == nil {
+			engine = engine.WithEmbeddings(
+				sqlite.NewEmbeddingRepository(db),
+				embClient,
+			)
+		}
+	}
 
 	if llmCfg, err := llm.ConfigFromEnv(); err == nil {
 		if llmClient, err := llm.NewClient(llmCfg); err == nil {

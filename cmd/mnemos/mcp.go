@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/felixgeelhaar/bolt"
@@ -84,6 +85,16 @@ type mcpMetricsOutput struct {
 	Embeddings      int64 `json:"embeddings"`
 }
 
+type mcpWatchFileInput struct {
+	Path string `json:"path" jsonschema:"required,description=Absolute or relative path to the file to watch for changes"`
+}
+
+type mcpWatchFileOutput struct {
+	Watching      bool   `json:"watching"`
+	Path          string `json:"path"`
+	ActiveWatches int    `json:"activeWatches"`
+}
+
 // handleMCP starts the MCP server over stdio. This is a long-lived process
 // that blocks until the connection is closed.
 func handleMCP() {
@@ -108,7 +119,7 @@ func handleMCP() {
 		mcp.WithDescription("Query and update evidence-backed local knowledge with Mnemos."),
 		mcp.WithWebsiteURL("https://github.com/felixgeelhaar/mnemos"),
 		mcp.WithBuildInfo(commit, buildDate),
-		mcp.WithInstructions("Use query_knowledge to read the knowledge base and process_text to ingest raw text into Mnemos. Prefer process_text before querying when no knowledge exists yet."),
+		mcp.WithInstructions("Use query_knowledge to read the knowledge base, process_text to ingest raw text, and watch_file to keep a specific file's claims fresh as it changes. Prefer process_text before querying when no knowledge exists yet."),
 	)
 
 	srv.Tool("query_knowledge").
@@ -132,6 +143,46 @@ func handleMCP() {
 		OutputSchema(mcpMetricsOutput{}).
 		Handler(func(_ context.Context, _ struct{}) (mcpMetricsOutput, error) {
 			return mcpRunMetrics()
+		})
+
+	// watch_file uses a long-lived DB connection separate from the
+	// per-call connections in the other handlers. Opened lazily so
+	// startup doesn't fail just because the watcher isn't needed.
+	var (
+		watcherOnce sync.Once
+		watcher     *Watcher
+		watcherErr  error
+	)
+	getWatcher := func() (*Watcher, error) {
+		watcherOnce.Do(func() {
+			db, err := sqlite.Open(resolveDBPath())
+			if err != nil {
+				watcherErr = err
+				return
+			}
+			watcher = NewWatcher(db)
+		})
+		return watcher, watcherErr
+	}
+
+	srv.Tool("watch_file").
+		Description("Register a file to be re-ingested when its content changes. Polls every few seconds; in-memory only — restart drops all watches.").
+		OutputSchema(mcpWatchFileOutput{}).
+		ValidateInput().
+		Handler(func(_ context.Context, input mcpWatchFileInput) (mcpWatchFileOutput, error) {
+			w, err := getWatcher()
+			if err != nil {
+				return mcpWatchFileOutput{}, err
+			}
+			count, err := w.Add(input.Path)
+			if err != nil {
+				return mcpWatchFileOutput{}, err
+			}
+			return mcpWatchFileOutput{
+				Watching:      true,
+				Path:          input.Path,
+				ActiveWatches: count,
+			}, nil
 		})
 
 	if err := mcp.ServeStdio(context.Background(), srv, mcp.WithMiddleware(mcp.DefaultMiddlewareWithTimeout(mcpBoltLogger{logger: logger}, 30*time.Second)...)); err != nil {

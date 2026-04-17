@@ -2,25 +2,19 @@
 
 test_cases:
   - id: edge-001
-    description: "Very short input - minimum length is 4 chars"
+    description: "Very short input - filtered as not meaningful"
     tags: [edge_cases, short_input]
     input: "OK."
-    expected_claims:
-      - text: "OK"
-        type: fact
-        min_confidence: 0.75
-    expected_count: 1
+    expected_claims: []
+    expected_count: 0
     not_expected_claims: []
 
   - id: edge-002
-    description: "Single character - fallback behavior returns it despite < 4 char filter"
+    description: "Single character - filtered as not meaningful"
     tags: [edge_cases, short_input]
     input: "A"
-    expected_claims:
-      - text: "A"
-        type: fact
-        min_confidence: 0.75
-    expected_count: 1
+    expected_claims: []
+    expected_count: 0
     not_expected_claims: []
 
   - id: edge-003
@@ -57,20 +51,14 @@ test_cases:
     not_expected_claims: []
 
   - id: edge-006
-    description: "Multiple punctuation marks handled as sentence breaks - short words filtered"
+    description: "Multiple punctuation - single-word fragments filtered, multi-word kept"
     tags: [edge_cases, punctuation]
     input: "Wait... Really??? Yes indeed!!!"
     expected_claims:
-      - text: "Wait"
-        type: fact
-        min_confidence: 0.75
-      - text: "Really"
-        type: fact
-        min_confidence: 0.75
       - text: "Yes indeed"
         type: fact
         min_confidence: 0.75
-    expected_count: 3
+    expected_count: 1
     not_expected_claims: []
 
   - id: edge-007

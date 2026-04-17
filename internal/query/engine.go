@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -104,6 +105,9 @@ func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents
 
 	// Re-rank claims by semantic similarity when embeddings are available.
 	claims = e.rankClaimsByCosine(ctx, q, claims)
+
+	// Boost claims matching the question's intent (e.g., "decisions" → decision type).
+	claims = boostClaimsByQuestionIntent(q, claims)
 
 	contradictions, err := collectContradictions(ctx, e.relationships, claims)
 	if err != nil {
@@ -267,49 +271,147 @@ func (e Engine) rankClaimsByCosine(ctx context.Context, question string, claims 
 	return result
 }
 
-func rankEvents(question string, events []domain.Event, limit int) []domain.Event {
-	qTokens := tokenSet(question)
+// inferQuestionIntent returns a preferred claim type based on question keywords,
+// or empty string if no clear intent is detected.
+func inferQuestionIntent(question string) domain.ClaimType {
+	q := strings.ToLower(question)
+	decisionWords := []string{"decision", "decide", "chose", "choose", "pick", "selected", "approve", "commit"}
+	hypothesisWords := []string{"risk", "might", "could", "possibly", "hypothesis", "maybe", "uncertain", "assume"}
+	factWords := []string{"what happened", "did we", "how many", "status", "metric", "measure"}
 
-	// Build document frequency for IDF-like weighting.
-	df := map[string]int{}
-	for _, event := range events {
-		seen := map[string]struct{}{}
-		for _, token := range strings.Fields(strings.ToLower(event.Content)) {
-			token = strings.Trim(token, ",.;:!?()[]{}\"'")
-			if _, ok := seen[token]; ok {
-				continue
-			}
-			seen[token] = struct{}{}
-			df[token]++
+	for _, w := range decisionWords {
+		if strings.Contains(q, w) {
+			return domain.ClaimTypeDecision
 		}
 	}
+	for _, w := range hypothesisWords {
+		if strings.Contains(q, w) {
+			return domain.ClaimTypeHypothesis
+		}
+	}
+	for _, w := range factWords {
+		if strings.Contains(q, w) {
+			return domain.ClaimTypeFact
+		}
+	}
+	return ""
+}
+
+// boostClaimsByQuestionIntent reorders claims so those matching the question's
+// intent (decision/hypothesis/fact) appear first. Preserves relative order
+// within each group.
+func boostClaimsByQuestionIntent(question string, claims []domain.Claim) []domain.Claim {
+	intent := inferQuestionIntent(question)
+	if intent == "" || len(claims) <= 1 {
+		return claims
+	}
+
+	matched := make([]domain.Claim, 0)
+	other := make([]domain.Claim, 0)
+	for _, c := range claims {
+		if c.Type == intent {
+			matched = append(matched, c)
+		} else {
+			other = append(other, c)
+		}
+	}
+	if len(matched) == 0 {
+		return claims
+	}
+	return append(matched, other...)
+}
+
+// BM25 parameters tuned for short-to-medium technical documents.
+const (
+	bm25K1 = 1.5
+	bm25B  = 0.75
+)
+
+// docTokens returns all tokens (including duplicates) from text, normalized.
+func docTokens(text string) []string {
+	out := []string{}
+	for _, token := range strings.Fields(strings.ToLower(text)) {
+		token = strings.Trim(token, ",.;:!?()[]{}\"'")
+		if token == "" {
+			continue
+		}
+		out = append(out, token)
+	}
+	return out
+}
+
+// rankEvents scores events against the question using BM25, a standard
+// information retrieval algorithm that accounts for term frequency,
+// inverse document frequency, and document length normalization.
+func rankEvents(question string, events []domain.Event, limit int) []domain.Event {
+	if len(events) == 0 {
+		return nil
+	}
+
+	qTokens := docTokens(question)
+	if len(qTokens) == 0 {
+		return nil
+	}
+
+	// Build document frequency for BM25 IDF.
+	df := map[string]int{}
+	docLens := make([]int, len(events))
+	totalLen := 0
+	for i, event := range events {
+		tokens := docTokens(event.Content)
+		docLens[i] = len(tokens)
+		totalLen += len(tokens)
+		seen := map[string]struct{}{}
+		for _, t := range tokens {
+			if _, ok := seen[t]; ok {
+				continue
+			}
+			seen[t] = struct{}{}
+			df[t]++
+		}
+	}
+	avgDocLen := float64(totalLen) / float64(len(events))
 	n := float64(len(events))
+
+	// Deduplicate query tokens (BM25 treats each query term once).
+	qUnique := map[string]struct{}{}
+	for _, t := range qTokens {
+		qUnique[t] = struct{}{}
+	}
 
 	type scored struct {
 		event domain.Event
 		score float64
 	}
 	scoredEvents := make([]scored, 0, len(events))
-	for _, event := range events {
-		eTokens := tokenSet(event.Content)
-		s := float64(0)
-		for token := range qTokens {
-			if _, ok := eTokens[token]; ok {
-				// IDF weight: rare query terms score higher.
-				idf := 1.0
-				if freq, ok := df[token]; ok && freq > 0 {
-					idf = n / float64(freq)
-				}
-				s += idf
-			}
+	for i, event := range events {
+		tokens := docTokens(event.Content)
+		tf := map[string]int{}
+		for _, t := range tokens {
+			tf[t]++
 		}
+
+		s := 0.0
+		docLen := float64(docLens[i])
+		for qt := range qUnique {
+			freq := tf[qt]
+			if freq == 0 {
+				continue
+			}
+			dfQT := df[qt]
+			// BM25 IDF: log((N - df + 0.5) / (df + 0.5) + 1)
+			idf := math.Log((n-float64(dfQT)+0.5)/(float64(dfQT)+0.5) + 1)
+			numerator := float64(freq) * (bm25K1 + 1)
+			denominator := float64(freq) + bm25K1*(1-bm25B+bm25B*docLen/avgDocLen)
+			s += idf * numerator / denominator
+		}
+
 		if s > 0 {
 			scoredEvents = append(scoredEvents, scored{event: event, score: s})
 		}
 	}
 
 	if len(scoredEvents) == 0 {
-		// No matching events — return empty so the answer can say "no relevant results."
 		return nil
 	}
 

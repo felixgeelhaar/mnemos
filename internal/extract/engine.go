@@ -141,8 +141,66 @@ func inferConfidence(text string, claimType domain.ClaimType) float64 {
 	return clamp(value, 0.5, 0.95)
 }
 
+// markdownBoldRE matches **bold** and __bold__ markers.
+var markdownBoldRE = regexp.MustCompile(`\*\*([^*]+)\*\*|__([^_]+)__`)
+
+// markdownItalicRE matches *italic* and _italic_ markers (single).
+var markdownItalicRE = regexp.MustCompile(`(?:^|[^*])\*([^*]+)\*(?:[^*]|$)|(?:^|[^_])_([^_]+)_(?:[^_]|$)`)
+
+// markdownStrikethroughRE matches ~~strikethrough~~ markers.
+var markdownStrikethroughRE = regexp.MustCompile(`~~([^~]+)~~`)
+
+// cleanMarkdown strips markdown formatting from text, returning plain content.
+func cleanMarkdown(text string) string {
+	s := text
+
+	// Strip bold markers: **text** → text
+	s = markdownBoldRE.ReplaceAllString(s, "$1$2")
+	// Strip strikethrough: ~~text~~ → text
+	s = markdownStrikethroughRE.ReplaceAllString(s, "$1")
+	// Strip checkbox markers: - [x] or - [ ]
+	s = strings.ReplaceAll(s, "- [x] ", "")
+	s = strings.ReplaceAll(s, "- [ ] ", "")
+	s = strings.ReplaceAll(s, "[x] ", "")
+	s = strings.ReplaceAll(s, "[ ] ", "")
+	// Strip leading bullet/list markers: - , * , > , 1.
+	s = strings.TrimSpace(s)
+	if len(s) > 2 && (s[0] == '-' || s[0] == '*' || s[0] == '>') && s[1] == ' ' {
+		s = strings.TrimSpace(s[2:])
+	}
+	// Strip leading numbered list: "1. ", "2. ", etc.
+	if len(s) > 3 && s[0] >= '0' && s[0] <= '9' {
+		dotIdx := strings.Index(s, ". ")
+		if dotIdx > 0 && dotIdx <= 3 {
+			s = strings.TrimSpace(s[dotIdx+2:])
+		}
+	}
+	// Strip link syntax: [text](url) → text
+	for {
+		start := strings.Index(s, "[")
+		if start == -1 {
+			break
+		}
+		mid := strings.Index(s[start:], "](")
+		if mid == -1 {
+			break
+		}
+		end := strings.Index(s[start+mid:], ")")
+		if end == -1 {
+			break
+		}
+		linkText := s[start+1 : start+mid]
+		s = s[:start] + linkText + s[start+mid+end+1:]
+	}
+
+	return strings.TrimSpace(s)
+}
+
 func splitCandidates(content string) []string {
-	raw := sentenceSplitRE.Split(content, -1)
+	// Pre-clean markdown formatting.
+	cleaned := cleanMarkdown(content)
+
+	raw := sentenceSplitRE.Split(cleaned, -1)
 	out := make([]string, 0, len(raw))
 	for _, piece := range raw {
 		candidate := strings.TrimSpace(piece)
@@ -155,13 +213,29 @@ func splitCandidates(content string) []string {
 		}
 		out = append(out, candidate)
 	}
-	if len(out) == 0 {
-		fallback := strings.TrimSpace(content)
-		if fallback != "" && !isStructuralNoise(fallback) {
-			return []string{fallback}
-		}
-	}
 	return out
+}
+
+// contentWordCount returns the number of meaningful words (excluding stop words
+// and short tokens) for use as a minimum claim quality threshold.
+func contentWordCount(text string) int {
+	shortStops := map[string]struct{}{
+		"the": {}, "a": {}, "an": {}, "is": {}, "are": {}, "was": {}, "were": {},
+		"be": {}, "been": {}, "to": {}, "of": {}, "in": {}, "for": {}, "on": {},
+		"and": {}, "or": {}, "but": {}, "it": {}, "we": {}, "by": {}, "as": {},
+	}
+	count := 0
+	for _, w := range strings.Fields(strings.ToLower(text)) {
+		w = strings.Trim(w, ",.;:!?()[]{}\"'-")
+		if len(w) < 2 {
+			continue
+		}
+		if _, ok := shortStops[w]; ok {
+			continue
+		}
+		count++
+	}
+	return count
 }
 
 // isStructuralNoise returns true for markdown artifacts and formatting
@@ -173,7 +247,7 @@ func isStructuralNoise(text string) bool {
 	if strings.HasPrefix(trimmed, "#") {
 		return true
 	}
-	// Markdown list markers without substantive content (just "-" or "* ").
+	// Empty after stripping list markers.
 	stripped := strings.TrimLeft(trimmed, "-*> ")
 	if stripped == "" {
 		return true
@@ -185,6 +259,14 @@ func isStructuralNoise(text string) bool {
 	}
 	// Code fences.
 	if strings.HasPrefix(trimmed, "```") {
+		return true
+	}
+	// Label-only lines: "Deliverables:", "Status:", "Goal:" etc.
+	if strings.HasSuffix(trimmed, ":") && len(strings.Fields(trimmed)) <= 2 {
+		return true
+	}
+	// Too few content words (after stop-word removal) to be a meaningful claim.
+	if contentWordCount(trimmed) < 2 {
 		return true
 	}
 	return false

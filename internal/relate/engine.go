@@ -3,6 +3,7 @@ package relate
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"regexp"
 	"strings"
 	"time"
 
@@ -66,13 +67,18 @@ func (e Engine) Detect(claims []domain.Claim) ([]domain.Relationship, error) {
 
 	// Pre-compute normalized content tokens and polarity for each claim.
 	type analyzed struct {
-		tokens map[string]struct{}
-		neg    bool
+		tokens       map[string]struct{}
+		neg          bool
+		isEnumerated bool
 	}
 	cache := make([]analyzed, len(claims))
 	for i := range claims {
 		tokens, neg := contentTokensAndPolarity(claims[i].Text)
-		cache[i] = analyzed{tokens: tokens, neg: neg}
+		cache[i] = analyzed{
+			tokens:       tokens,
+			neg:          neg,
+			isEnumerated: isEnumeratedItem(claims[i].Text),
+		}
 	}
 
 	for i := 0; i < len(claims); i++ {
@@ -84,7 +90,11 @@ func (e Engine) Detect(claims []domain.Claim) ([]domain.Relationship, error) {
 				continue
 			}
 
-			relType, ok := inferRelationship(cache[i].tokens, cache[i].neg, cache[j].tokens, cache[j].neg)
+			// Skip value-divergence for pairs of enumerated list items
+			// (Phase 1 vs Phase 2 are parallel, not competing).
+			bothEnumerated := cache[i].isEnumerated && cache[j].isEnumerated
+
+			relType, ok := inferRelationshipWithContext(cache[i].tokens, cache[i].neg, cache[j].tokens, cache[j].neg, bothEnumerated)
 			if !ok {
 				continue
 			}
@@ -206,6 +216,10 @@ func stemWord(word string) string {
 }
 
 func inferRelationship(aTokens map[string]struct{}, aNeg bool, bTokens map[string]struct{}, bNeg bool) (domain.RelationshipType, bool) {
+	return inferRelationshipWithContext(aTokens, aNeg, bTokens, bNeg, false)
+}
+
+func inferRelationshipWithContext(aTokens map[string]struct{}, aNeg bool, bTokens map[string]struct{}, bNeg bool, skipValueDivergence bool) (domain.RelationshipType, bool) {
 	overlap := contentOverlap(aTokens, bTokens)
 
 	// Primary path: sufficient token overlap.
@@ -218,7 +232,14 @@ func inferRelationship(aTokens map[string]struct{}, aNeg bool, bTokens map[strin
 			ratio := float64(overlap) / float64(shorter)
 			if ratio >= minOverlapRatio {
 				if aNeg != bNeg {
-					return domain.RelationshipTypeContradicts, true
+					// Contradictions require stricter overlap: the claims must
+					// be about the same topic, not just share a few tokens.
+					// Prevents "without X" structural phrases from flagging
+					// as contradictions with unrelated claims.
+					if ratio >= 0.5 {
+						return domain.RelationshipTypeContradicts, true
+					}
+					return "", false
 				}
 				return domain.RelationshipTypeSupports, true
 			}
@@ -228,16 +249,33 @@ func inferRelationship(aTokens map[string]struct{}, aNeg bool, bTokens map[strin
 	// Secondary path: value-divergence detection.
 	// Claims that share most tokens but differ on 1 key token are competing
 	// alternatives (e.g., "use PostgreSQL" vs "prefers MySQL").
-	if detectValueDivergence(aTokens, bTokens) {
+	// Skipped for pairs of enumerated list items (Phase 1 vs Phase 2).
+	if !skipValueDivergence && detectValueDivergence(aTokens, bTokens) {
 		return domain.RelationshipTypeContradicts, true
 	}
 
 	return "", false
 }
 
+// enumeratedListRE matches claims that look like enumerated list items
+// (e.g., "Phase 1: ...", "Outcome 2: ...", "Use Case 3: ..."). These are
+// parallel items, not competing alternatives, so value-divergence detection
+// should not flag them as contradictions.
+var enumeratedListRE = regexp.MustCompile(`(?i)^(?:- )?(?:phase|outcome|step|milestone|use\s*case|task|objective|deliverable|feature|requirement)\s*\d+`)
+
+// isEnumeratedItem returns true if the text looks like a parallel enumerated
+// list item that shouldn't be compared for value-divergence.
+func isEnumeratedItem(text string) bool {
+	return enumeratedListRE.MatchString(strings.TrimSpace(text))
+}
+
 // detectValueDivergence returns true when two claims share a structural
 // pattern but differ on a key value. This catches "use React frontend" vs
 // "use Vue frontend" where claims share most tokens but differ on one.
+//
+// Uses strict ratio-based rules to avoid false positives on enumerated list
+// items (e.g., "Phase 1: ..." vs "Phase 2: ...") which share tokens but are
+// parallel items, not competing alternatives.
 func detectValueDivergence(a, b map[string]struct{}) bool {
 	la, lb := len(a), len(b)
 	if la < 2 || lb < 2 {
@@ -248,18 +286,38 @@ func detectValueDivergence(a, b map[string]struct{}) bool {
 	onlyA := la - overlap
 	onlyB := lb - overlap
 
-	// Both claims must share at least 1 token AND each must have
-	// exactly 1 unique token (the divergent value).
-	if overlap >= 1 && onlyA == 1 && onlyB == 1 {
-		return true
+	// Must share at least 1 token AND each has at least 1 unique token.
+	if overlap < 1 || onlyA < 1 || onlyB < 1 {
+		return false
 	}
 
-	// Looser: share >= 2 tokens and each has 1-2 unique tokens.
-	if overlap >= 2 && onlyA <= 2 && onlyB <= 2 && onlyA >= 1 && onlyB >= 1 {
-		return true
+	// For short claims (both <= 4 tokens), require exactly 1 unique token on each side.
+	// Catches "use React frontend" vs "use Vue frontend" style.
+	shorter := la
+	if lb < shorter {
+		shorter = lb
+	}
+	longer := la
+	if lb > longer {
+		longer = lb
 	}
 
-	return false
+	// Very short claims (both <= 2 tokens) are too ambiguous for value-divergence.
+	if shorter <= 2 {
+		return false
+	}
+
+	if longer <= 4 {
+		return onlyA == 1 && onlyB == 1
+	}
+
+	// For longer claims, use an overlap ratio of the shorter claim's tokens.
+	// Claims are competing alternatives only if they share MOST (>= 70%) of the
+	// shorter claim's content and differ on a small fraction.
+	overlapRatio := float64(overlap) / float64(shorter)
+	divergenceRatio := float64(onlyA+onlyB) / float64(la+lb)
+
+	return overlapRatio >= 0.7 && divergenceRatio <= 0.25
 }
 
 func contentOverlap(a, b map[string]struct{}) int {

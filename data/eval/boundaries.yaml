@@ -2,25 +2,19 @@
 
 test_cases:
   - id: boundary-001
-    description: "Four-character minimum claim length - exact boundary"
+    description: "Single-word input filtered as not a meaningful claim"
     tags: [edge_cases, boundary]
     input: "Go!"
-    expected_claims:
-      - text: "Go"
-        type: fact
-        min_confidence: 0.75
-    expected_count: 1
+    expected_claims: []
+    expected_count: 0
     not_expected_claims: []
 
   - id: boundary-002
-    description: "Three-character minimum - words under 4 chars filtered"
+    description: "Short single-word fragments filtered as not meaningful"
     tags: [edge_cases, boundary]
     input: "Yes. No. Maybe."
-    expected_claims:
-      - text: "Maybe"
-        type: hypothesis
-        min_confidence: 0.50
-    expected_count: 1
+    expected_claims: []
+    expected_count: 0
     not_expected_claims: []
 
   - id: boundary-003

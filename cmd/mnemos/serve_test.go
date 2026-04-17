@@ -208,14 +208,14 @@ func TestServe_MetricsCountsSchemaCorrectly(t *testing.T) {
 	}
 }
 
-func TestServe_NonGetMethodReturns405(t *testing.T) {
+func TestServe_UnsupportedMethodReturns405(t *testing.T) {
 	srv := httptest.NewServer(newServerMux(newServerTestDB(t)))
 	defer srv.Close()
 
-	req, _ := http.NewRequest(http.MethodPost, srv.URL+"/v1/events", nil)
+	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/v1/events", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("post: %v", err)
+		t.Fatalf("delete: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusMethodNotAllowed {

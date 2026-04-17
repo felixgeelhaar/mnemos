@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 58,
+  "version": 59,
   "task_states": {
     "task-append-only-event-store": {
       "status": "done",
@@ -144,11 +144,15 @@
       "elapsed_minutes": 0
     },
     "task-knowledge-registry-server-(mnemos-serve)": {
-      "status": "in_progress",
+      "status": "done",
       "path": "",
       "owner": "ai-agent",
+      "evidence": [
+        "Read-only HTTP API foundation in commit 3c422d9; POST endpoints (events/claims/relationships) and bearer-token auth in this commit. mnemos serve now exposes GET+POST on /v1/events, /v1/claims, /v1/relationships plus GET /v1/metrics and /health. Authentication: MNEMOS_REGISTRY_TOKEN env var; constant-time compare; reads remain open even when token is set. Live-tested: open POST returns 201, invalid timestamp returns 400 with helpful message, missing/wrong tokens return 401, correct token returns 201. Tests in cmd/mnemos/serve_test.go and cmd/mnemos/serve_write_test.go cover pagination, filtering, validation, batch upserts, and all four auth states."
+      ],
       "started_at": "2026-04-18T01:08:45.47228+02:00",
-      "elapsed_minutes": 0
+      "completed_at": "2026-04-18T01:33:19.282223+02:00",
+      "elapsed_minutes": 24
     },
     "task-llm-powered-claim-extraction": {
       "status": "done",
@@ -309,5 +313,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-04-18T01:08:45.47228+02:00"
+  "updated_at": "2026-04-18T01:33:19.282224+02:00"
 }

@@ -142,19 +142,24 @@ mnemos mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over
 | `mnemos mcp` | Start MCP server over stdio |
 | `mnemos serve [--port N]` | Start read-only HTTP registry (default `:7777`) |
 
-### HTTP Registry (Phase 2B preview)
+### HTTP Registry (Phase 2B)
 
-`mnemos serve` exposes the local knowledge base as a read-only HTTP API so other tools, dashboards, or scripts can pull claims and relationships without speaking SQLite. Push semantics, namespacing, and authentication land in subsequent commits — this first cut is intentionally read-only.
+`mnemos serve` exposes the local knowledge base as a small HTTP API so other tools, dashboards, or scripts can read and write without speaking SQLite. Cross-project federation and namespace scoping land in subsequent commits.
 
-| Endpoint | Description |
-|---|---|
-| `GET /health` | Liveness probe + version |
-| `GET /v1/events` | List events (`?limit`, `?offset`) |
-| `GET /v1/claims` | List claims (`?type=fact\|hypothesis\|decision`, `?status=active\|contested\|deprecated`, `?limit`, `?offset`) |
-| `GET /v1/relationships` | List relationships (`?type=supports\|contradicts`, `?limit`, `?offset`) |
-| `GET /v1/metrics` | Counts mirroring `mnemos metrics` |
+| Endpoint | Method | Description |
+|---|---|---|
+| `/health` | GET | Liveness probe + version |
+| `/v1/events` | GET | List events (`?limit`, `?offset`) |
+| `/v1/events` | POST | Append a batch of events |
+| `/v1/claims` | GET | List claims (`?type=fact\|hypothesis\|decision`, `?status=active\|contested\|deprecated`, `?limit`, `?offset`) |
+| `/v1/claims` | POST | Upsert a batch of claims (with optional `evidence` links) |
+| `/v1/relationships` | GET | List relationships (`?type=supports\|contradicts`, `?limit`, `?offset`) |
+| `/v1/relationships` | POST | Upsert a batch of relationships |
+| `/v1/metrics` | GET | Counts mirroring `mnemos metrics` |
 
-Defaults: `limit=50`, capped at `200`. Port can also be set via `MNEMOS_SERVE_PORT`.
+Defaults: `limit=50`, capped at `200`. Port also accepts `MNEMOS_SERVE_PORT`. Request bodies cap at 5 MB.
+
+**Authentication.** Set `MNEMOS_REGISTRY_TOKEN=<your-secret>` to require `Authorization: Bearer <your-secret>` on all write methods (POST/PUT/DELETE). Reads stay open by default — useful for browse-only dashboards. When the env var is unset, the registry is fully open (suitable for local dev and trusted networks).
 
 ## Architecture
 

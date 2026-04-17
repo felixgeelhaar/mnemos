@@ -2,17 +2,21 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
@@ -103,11 +107,44 @@ func handleServe(args []string, _ Flags) {
 func newServerMux(db *sql.DB) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", handleHealth)
-	mux.HandleFunc("/v1/events", makeListEventsHandler(db))
-	mux.HandleFunc("/v1/claims", makeListClaimsHandler(db))
-	mux.HandleFunc("/v1/relationships", makeListRelationshipsHandler(db))
+	mux.HandleFunc("/v1/events", makeEventsHandler(db))
+	mux.HandleFunc("/v1/claims", makeClaimsHandler(db))
+	mux.HandleFunc("/v1/relationships", makeRelationshipsHandler(db))
 	mux.HandleFunc("/v1/metrics", makeMetricsHandler(db))
-	return logMiddleware(mux)
+	token := os.Getenv("MNEMOS_REGISTRY_TOKEN")
+	return logMiddleware(authMiddleware(token, mux))
+}
+
+// authMiddleware enforces bearer-token auth on write methods (POST/PUT/
+// DELETE) when a token is configured. Reads are always allowed — the
+// registry's first job is to be browsable; tightening reads is a future
+// commit when multi-tenant scopes land. constant-time comparison avoids
+// timing oracles even for a single shared token.
+func authMiddleware(token string, h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+			h.ServeHTTP(w, r)
+			return
+		}
+		if token == "" {
+			// No token configured → registry is fully open. Useful for
+			// local dev; production deploys should always set the env var.
+			h.ServeHTTP(w, r)
+			return
+		}
+		auth := r.Header.Get("Authorization")
+		const prefix = "Bearer "
+		if !strings.HasPrefix(auth, prefix) {
+			writeError(w, http.StatusUnauthorized, "missing bearer token")
+			return
+		}
+		provided := strings.TrimPrefix(auth, prefix)
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
+			writeError(w, http.StatusUnauthorized, "invalid bearer token")
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 // logMiddleware writes a one-line access log to stderr per request. Keeps
@@ -159,46 +196,53 @@ type eventDTO struct {
 	IngestedAt    string            `json:"ingested_at"`
 }
 
-func makeListEventsHandler(db *sql.DB) http.HandlerFunc {
+func makeEventsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
+		switch r.Method {
+		case http.MethodGet:
+			listEventsHandler(db, w, r)
+		case http.MethodPost:
+			appendEventsHandler(db, w, r)
+		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
 		}
-		limit, offset := parsePaginationFromQuery(r)
-		ctx := r.Context()
-
-		var total int
-		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&total); err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("count events: %v", err))
-			return
-		}
-
-		rows, err := db.QueryContext(ctx,
-			`SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at
-			 FROM events ORDER BY timestamp DESC LIMIT ? OFFSET ?`, limit, offset)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("list events: %v", err))
-			return
-		}
-		defer func() { _ = rows.Close() }()
-
-		var events []eventDTO
-		for rows.Next() {
-			var (
-				e        eventDTO
-				metaJSON string
-			)
-			if err := rows.Scan(&e.ID, &e.RunID, &e.SchemaVersion, &e.Content, &e.SourceInputID, &e.Timestamp, &metaJSON, &e.IngestedAt); err != nil {
-				writeError(w, http.StatusInternalServerError, fmt.Sprintf("scan event: %v", err))
-				return
-			}
-			e.Metadata = map[string]string{}
-			_ = json.Unmarshal([]byte(metaJSON), &e.Metadata)
-			events = append(events, e)
-		}
-		writeJSON(w, http.StatusOK, eventsResponse{Events: events, Total: total, Limit: limit, Offset: offset})
 	}
+}
+
+func listEventsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	limit, offset := parsePaginationFromQuery(r)
+	ctx := r.Context()
+
+	var total int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&total); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("count events: %v", err))
+		return
+	}
+
+	rows, err := db.QueryContext(ctx,
+		`SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at
+		 FROM events ORDER BY timestamp DESC LIMIT ? OFFSET ?`, limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("list events: %v", err))
+		return
+	}
+	defer func() { _ = rows.Close() }()
+
+	var events []eventDTO
+	for rows.Next() {
+		var (
+			e        eventDTO
+			metaJSON string
+		)
+		if err := rows.Scan(&e.ID, &e.RunID, &e.SchemaVersion, &e.Content, &e.SourceInputID, &e.Timestamp, &metaJSON, &e.IngestedAt); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("scan event: %v", err))
+			return
+		}
+		e.Metadata = map[string]string{}
+		_ = json.Unmarshal([]byte(metaJSON), &e.Metadata)
+		events = append(events, e)
+	}
+	writeJSON(w, http.StatusOK, eventsResponse{Events: events, Total: total, Limit: limit, Offset: offset})
 }
 
 type claimsResponse struct {
@@ -217,68 +261,75 @@ type claimDTO struct {
 	CreatedAt  string  `json:"created_at"`
 }
 
-func makeListClaimsHandler(db *sql.DB) http.HandlerFunc {
+func makeClaimsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
+		switch r.Method {
+		case http.MethodGet:
+			listClaimsHandler(db, w, r)
+		case http.MethodPost:
+			appendClaimsHandler(db, w, r)
+		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
 		}
-		limit, offset := parsePaginationFromQuery(r)
-		typeFilter := r.URL.Query().Get("type")
-		statusFilter := r.URL.Query().Get("status")
-		if typeFilter != "" && !validClaimType(typeFilter) {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid type %q", typeFilter))
-			return
-		}
-		if statusFilter != "" && !validClaimStatus(statusFilter) {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid status %q", statusFilter))
-			return
-		}
-		ctx := r.Context()
-
-		var (
-			where string
-			args  []any
-		)
-		if typeFilter != "" && statusFilter != "" {
-			where = " WHERE type = ? AND status = ?"
-			args = []any{typeFilter, statusFilter}
-		} else if typeFilter != "" {
-			where = " WHERE type = ?"
-			args = []any{typeFilter}
-		} else if statusFilter != "" {
-			where = " WHERE status = ?"
-			args = []any{statusFilter}
-		}
-
-		var total int
-		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM claims"+where, args...).Scan(&total); err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("count claims: %v", err))
-			return
-		}
-
-		rowArgs := append(append([]any{}, args...), limit, offset)
-		//nolint:gosec // G202: where clause is built from validated constant fragments only; values pass through ? placeholders
-		rows, err := db.QueryContext(ctx,
-			"SELECT id, text, type, confidence, status, created_at FROM claims"+where+" ORDER BY created_at DESC LIMIT ? OFFSET ?",
-			rowArgs...)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("list claims: %v", err))
-			return
-		}
-		defer func() { _ = rows.Close() }()
-
-		var claims []claimDTO
-		for rows.Next() {
-			var c claimDTO
-			if err := rows.Scan(&c.ID, &c.Text, &c.Type, &c.Confidence, &c.Status, &c.CreatedAt); err != nil {
-				writeError(w, http.StatusInternalServerError, fmt.Sprintf("scan claim: %v", err))
-				return
-			}
-			claims = append(claims, c)
-		}
-		writeJSON(w, http.StatusOK, claimsResponse{Claims: claims, Total: total, Limit: limit, Offset: offset})
 	}
+}
+
+func listClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	limit, offset := parsePaginationFromQuery(r)
+	typeFilter := r.URL.Query().Get("type")
+	statusFilter := r.URL.Query().Get("status")
+	if typeFilter != "" && !validClaimType(typeFilter) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid type %q", typeFilter))
+		return
+	}
+	if statusFilter != "" && !validClaimStatus(statusFilter) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid status %q", statusFilter))
+		return
+	}
+	ctx := r.Context()
+
+	var (
+		where string
+		args  []any
+	)
+	if typeFilter != "" && statusFilter != "" {
+		where = " WHERE type = ? AND status = ?"
+		args = []any{typeFilter, statusFilter}
+	} else if typeFilter != "" {
+		where = " WHERE type = ?"
+		args = []any{typeFilter}
+	} else if statusFilter != "" {
+		where = " WHERE status = ?"
+		args = []any{statusFilter}
+	}
+
+	var total int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM claims"+where, args...).Scan(&total); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("count claims: %v", err))
+		return
+	}
+
+	rowArgs := append(append([]any{}, args...), limit, offset)
+	//nolint:gosec // G202: where clause is built from validated constant fragments only; values pass through ? placeholders
+	rows, err := db.QueryContext(ctx,
+		"SELECT id, text, type, confidence, status, created_at FROM claims"+where+" ORDER BY created_at DESC LIMIT ? OFFSET ?",
+		rowArgs...)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("list claims: %v", err))
+		return
+	}
+	defer func() { _ = rows.Close() }()
+
+	var claims []claimDTO
+	for rows.Next() {
+		var c claimDTO
+		if err := rows.Scan(&c.ID, &c.Text, &c.Type, &c.Confidence, &c.Status, &c.CreatedAt); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("scan claim: %v", err))
+			return
+		}
+		claims = append(claims, c)
+	}
+	writeJSON(w, http.StatusOK, claimsResponse{Claims: claims, Total: total, Limit: limit, Offset: offset})
 }
 
 type relationshipsResponse struct {
@@ -296,57 +347,272 @@ type relationshipDTO struct {
 	CreatedAt   string `json:"created_at"`
 }
 
-func makeListRelationshipsHandler(db *sql.DB) http.HandlerFunc {
+func makeRelationshipsHandler(db *sql.DB) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
+		switch r.Method {
+		case http.MethodGet:
+			listRelationshipsHandler(db, w, r)
+		case http.MethodPost:
+			appendRelationshipsHandler(db, w, r)
+		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
 		}
-		limit, offset := parsePaginationFromQuery(r)
-		typeFilter := r.URL.Query().Get("type")
-		ctx := r.Context()
-
-		var (
-			where string
-			args  []any
-		)
-		if typeFilter != "" {
-			if typeFilter != "supports" && typeFilter != "contradicts" {
-				writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid type %q (want supports or contradicts)", typeFilter))
-				return
-			}
-			where = " WHERE type = ?"
-			args = []any{typeFilter}
-		}
-
-		var total int
-		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM relationships"+where, args...).Scan(&total); err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("count relationships: %v", err))
-			return
-		}
-
-		rowArgs := append(append([]any{}, args...), limit, offset)
-		//nolint:gosec // G202: where clause is built from validated constant fragments only; values pass through ? placeholders
-		rows, err := db.QueryContext(ctx,
-			"SELECT id, type, from_claim_id, to_claim_id, created_at FROM relationships"+where+" ORDER BY created_at DESC LIMIT ? OFFSET ?",
-			rowArgs...)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("list relationships: %v", err))
-			return
-		}
-		defer func() { _ = rows.Close() }()
-
-		var rels []relationshipDTO
-		for rows.Next() {
-			var rel relationshipDTO
-			if err := rows.Scan(&rel.ID, &rel.Type, &rel.FromClaimID, &rel.ToClaimID, &rel.CreatedAt); err != nil {
-				writeError(w, http.StatusInternalServerError, fmt.Sprintf("scan relationship: %v", err))
-				return
-			}
-			rels = append(rels, rel)
-		}
-		writeJSON(w, http.StatusOK, relationshipsResponse{Relationships: rels, Total: total, Limit: limit, Offset: offset})
 	}
+}
+
+func listRelationshipsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	limit, offset := parsePaginationFromQuery(r)
+	typeFilter := r.URL.Query().Get("type")
+	ctx := r.Context()
+
+	var (
+		where string
+		args  []any
+	)
+	if typeFilter != "" {
+		if typeFilter != "supports" && typeFilter != "contradicts" {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid type %q (want supports or contradicts)", typeFilter))
+			return
+		}
+		where = " WHERE type = ?"
+		args = []any{typeFilter}
+	}
+
+	var total int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM relationships"+where, args...).Scan(&total); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("count relationships: %v", err))
+		return
+	}
+
+	rowArgs := append(append([]any{}, args...), limit, offset)
+	//nolint:gosec // G202: where clause is built from validated constant fragments only; values pass through ? placeholders
+	rows, err := db.QueryContext(ctx,
+		"SELECT id, type, from_claim_id, to_claim_id, created_at FROM relationships"+where+" ORDER BY created_at DESC LIMIT ? OFFSET ?",
+		rowArgs...)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("list relationships: %v", err))
+		return
+	}
+	defer func() { _ = rows.Close() }()
+
+	var rels []relationshipDTO
+	for rows.Next() {
+		var rel relationshipDTO
+		if err := rows.Scan(&rel.ID, &rel.Type, &rel.FromClaimID, &rel.ToClaimID, &rel.CreatedAt); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("scan relationship: %v", err))
+			return
+		}
+		rels = append(rels, rel)
+	}
+	writeJSON(w, http.StatusOK, relationshipsResponse{Relationships: rels, Total: total, Limit: limit, Offset: offset})
+}
+
+// appendEventsRequest is the body for POST /v1/events. Single-event submits
+// are common (raw streams) but a batch shape future-proofs the endpoint and
+// keeps DTOs symmetric with claims/relationships.
+type appendEventsRequest struct {
+	Events []eventDTO `json:"events"`
+}
+
+type appendResponse struct {
+	Accepted int `json:"accepted"`
+	Skipped  int `json:"skipped"`
+}
+
+const maxRequestBytes = 5 * 1024 * 1024 // 5 MB; bigger payloads should chunk
+
+func decodeJSON(r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(nil, r.Body, maxRequestBytes)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
+		if errors.Is(err, io.EOF) {
+			return errors.New("request body is empty")
+		}
+		return err
+	}
+	if dec.More() {
+		return errors.New("request body has trailing content after the JSON object")
+	}
+	return nil
+}
+
+func parseTimeFlexible(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unrecognized time format %q (want RFC3339)", s)
+}
+
+func appendEventsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	var req appendEventsRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
+		return
+	}
+	if len(req.Events) == 0 {
+		writeError(w, http.StatusBadRequest, "events array is empty")
+		return
+	}
+
+	repo := sqlite.NewEventRepository(db)
+	ctx := r.Context()
+	now := time.Now().UTC()
+	accepted := 0
+	for i, e := range req.Events {
+		ts, err := parseTimeFlexible(e.Timestamp)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("events[%d].timestamp: %v", i, err))
+			return
+		}
+		ingested, err := parseTimeFlexible(e.IngestedAt)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("events[%d].ingested_at: %v", i, err))
+			return
+		}
+		if ingested.IsZero() {
+			ingested = now
+		}
+		event := domain.Event{
+			ID:            e.ID,
+			RunID:         e.RunID,
+			SchemaVersion: e.SchemaVersion,
+			Content:       e.Content,
+			SourceInputID: e.SourceInputID,
+			Timestamp:     ts,
+			Metadata:      e.Metadata,
+			IngestedAt:    ingested,
+		}
+		if err := repo.Append(ctx, event); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("events[%d]: %v", i, err))
+			return
+		}
+		accepted++
+	}
+	writeJSON(w, http.StatusCreated, appendResponse{Accepted: accepted})
+}
+
+type appendClaimsRequest struct {
+	Claims   []claimDTO          `json:"claims"`
+	Evidence []claimEvidenceItem `json:"evidence,omitempty"`
+}
+
+type claimEvidenceItem struct {
+	ClaimID string `json:"claim_id"`
+	EventID string `json:"event_id"`
+}
+
+func appendClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	var req appendClaimsRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
+		return
+	}
+	if len(req.Claims) == 0 {
+		writeError(w, http.StatusBadRequest, "claims array is empty")
+		return
+	}
+
+	claims := make([]domain.Claim, 0, len(req.Claims))
+	now := time.Now().UTC()
+	for i, c := range req.Claims {
+		if c.Type != "" && !validClaimType(c.Type) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("claims[%d].type %q invalid", i, c.Type))
+			return
+		}
+		if c.Status != "" && !validClaimStatus(c.Status) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("claims[%d].status %q invalid", i, c.Status))
+			return
+		}
+		created, err := parseTimeFlexible(c.CreatedAt)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("claims[%d].created_at: %v", i, err))
+			return
+		}
+		if created.IsZero() {
+			created = now
+		}
+		claim := domain.Claim{
+			ID:         c.ID,
+			Text:       c.Text,
+			Type:       domain.ClaimType(c.Type),
+			Confidence: c.Confidence,
+			Status:     domain.ClaimStatus(c.Status),
+			CreatedAt:  created,
+		}
+		claims = append(claims, claim)
+	}
+
+	repo := sqlite.NewClaimRepository(db)
+	ctx := r.Context()
+	if err := repo.Upsert(ctx, claims); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("upsert claims: %v", err))
+		return
+	}
+
+	if len(req.Evidence) > 0 {
+		links := make([]domain.ClaimEvidence, 0, len(req.Evidence))
+		for _, e := range req.Evidence {
+			links = append(links, domain.ClaimEvidence{ClaimID: e.ClaimID, EventID: e.EventID})
+		}
+		if err := repo.UpsertEvidence(ctx, links); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("upsert evidence: %v", err))
+			return
+		}
+	}
+	writeJSON(w, http.StatusCreated, appendResponse{Accepted: len(claims)})
+}
+
+type appendRelationshipsRequest struct {
+	Relationships []relationshipDTO `json:"relationships"`
+}
+
+func appendRelationshipsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	var req appendRelationshipsRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
+		return
+	}
+	if len(req.Relationships) == 0 {
+		writeError(w, http.StatusBadRequest, "relationships array is empty")
+		return
+	}
+
+	rels := make([]domain.Relationship, 0, len(req.Relationships))
+	now := time.Now().UTC()
+	for i, rel := range req.Relationships {
+		if rel.Type != "supports" && rel.Type != "contradicts" {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("relationships[%d].type %q invalid (want supports or contradicts)", i, rel.Type))
+			return
+		}
+		created, err := parseTimeFlexible(rel.CreatedAt)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("relationships[%d].created_at: %v", i, err))
+			return
+		}
+		if created.IsZero() {
+			created = now
+		}
+		rels = append(rels, domain.Relationship{
+			ID:          rel.ID,
+			Type:        domain.RelationshipType(rel.Type),
+			FromClaimID: rel.FromClaimID,
+			ToClaimID:   rel.ToClaimID,
+			CreatedAt:   created,
+		})
+	}
+
+	repo := sqlite.NewRelationshipRepository(db)
+	if err := repo.Upsert(r.Context(), rels); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("upsert relationships: %v", err))
+		return
+	}
+	writeJSON(w, http.StatusCreated, appendResponse{Accepted: len(rels)})
 }
 
 type metricsResponse struct {

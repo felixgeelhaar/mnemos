@@ -58,24 +58,22 @@ mnemos process meeting-notes.md
 mnemos query "What decisions were made?"
 ```
 
-No API keys required — rule-based extraction works out of the box. Add `--llm` for LLM-powered extraction and `--llm` on query for grounded answer generation.
+No API keys required — rule-based extraction and contradiction detection work out of the box.
 
-### Optional: LLM-powered extraction
+### Recommended: Add an LLM provider for best results
+
+For querying real documents, set up an LLM provider. This enables semantic search, better extraction, and grounded answers:
 
 ```bash
 export MNEMOS_LLM_PROVIDER=openai   # or: anthropic, gemini, ollama, openai-compat
 export MNEMOS_LLM_API_KEY=sk-...
-mnemos process --llm --text "Customers may prefer annual billing. We decided to test it in Q3."
+
+# LLM extraction + embeddings + grounded query answers
+mnemos process --llm --embed meeting-notes.md
+mnemos query --llm "What decisions were made?"
 ```
 
-### Optional: Semantic search with embeddings
-
-```bash
-export MNEMOS_EMBED_PROVIDER=openai
-export MNEMOS_EMBED_API_KEY=sk-...
-mnemos process --llm --embed --text "Support tickets dropped after the onboarding rewrite."
-mnemos query --embed --human "What improved after onboarding changed?"
-```
+Without a provider, extraction and contradiction detection still work via rule-based heuristics. Queries use BM25 keyword matching, which works well for simple questions but may miss nuance on longer documents.
 
 ### Optional: MCP server for AI agents
 

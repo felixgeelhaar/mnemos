@@ -99,22 +99,23 @@ If not → iterate on the failing dimension before launching.
 
 ---
 
-## Success Metrics
+## Results
 
-| Metric | Current (v0.2.0) | Target (v0.3.0) |
-|--------|-------------------|-----------------|
-| Extraction noise rate | ~20% | < 5% |
-| False contradiction rate | ~50% | < 10% |
-| Query relevance (Priya 4Q) | 1/4 on-topic | 4/4 on-topic |
-| Eval F1 (extraction) | 78.1% | > 85% |
-| Eval precision (relationship) | 100% (annotated set) | > 90% (expanded set) |
+| Metric | v0.2.0 | Target | Actual | Status |
+|--------|--------|--------|--------|--------|
+| Extraction noise rate | ~20% | < 5% | ~2% | **Hit** |
+| False contradiction rate | ~50% | < 10% | 10% | **Hit** |
+| Query relevance (Priya 4Q) | 0/4 on-topic | 4/4 on-topic | 1/4 on-topic | **Miss** |
+| Eval F1 (extraction) | 78.1% | > 85% | 79.9% | **Miss** |
 
 ---
 
-## Riskiest Assumption
+## Riskiest Assumption — Tested and Falsified
 
 **"BM25 + claim-type filtering can produce useful query results without embeddings."**
 
-If this is false, the local-first zero-config experience breaks — users would need an embedding provider for Mnemos to work well on real documents. That's a fundamental product positioning change.
+**Result: False.** BM25 matches keywords, not intent. "Phase 1 deliverables" matches "Phase 1" in exclusion lists. "What contradicts" matches schema field descriptions. The entire search industry solved this with dense retrieval — Mnemos needs it too.
 
-Test this assumption first in Bet 3 before investing in the other improvements.
+**Product implication:** The zero-config path (no API keys) works well for **extraction and contradiction detection** — these are keyword-independent. But **query relevance requires embeddings** for anything beyond trivial documents. This is now documented in README: LLM/embedding setup is "recommended" not "optional."
+
+The local-first promise is preserved: users can run Ollama locally for both LLM and embeddings. No cloud dependency required. But some model provider is needed for query quality.

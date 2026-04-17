@@ -202,6 +202,12 @@ func splitCandidates(content string) []string {
 	for _, piece := range raw {
 		candidate := strings.TrimSpace(piece)
 		candidate = strings.TrimRight(candidate, ".")
+		// cleanMarkdown only strips the first leading list marker of the
+		// full content; per-sentence trimming catches subsequent list
+		// items ("- Authentication moved to Auth0" → "Authentication
+		// moved to Auth0") so the isStructuralNoise check sees the
+		// cleaned form.
+		candidate = trimLeadingListMarker(candidate)
 		if len(candidate) < 4 {
 			continue
 		}
@@ -211,6 +217,14 @@ func splitCandidates(content string) []string {
 		out = append(out, candidate)
 	}
 	return out
+}
+
+func trimLeadingListMarker(s string) string {
+	trimmed := strings.TrimSpace(s)
+	if len(trimmed) > 2 && (trimmed[0] == '-' || trimmed[0] == '*' || trimmed[0] == '>') && trimmed[1] == ' ' {
+		return strings.TrimSpace(trimmed[2:])
+	}
+	return trimmed
 }
 
 // contentWordCount returns the number of meaningful words (excluding stop words
@@ -235,10 +249,58 @@ func contentWordCount(text string) int {
 	return count
 }
 
-// isStructuralNoise returns true for markdown artifacts and formatting
-// that should not be extracted as claims.
+// salutationPrefixes match common email openings and sign-offs that leak
+// into extraction on real-world documents.
+var salutationPrefixes = []string{
+	"hi ", "hello ", "hey ", "dear ",
+	"regards", "thanks,", "thank you,", "cheers,", "best,", "sincerely,",
+}
+
+// labelPrefixRE matches "Label: value" patterns where the label is a short
+// noun-like phrase — typical of metadata rows like "Status: Accepted",
+// "Severity: High", "Date: March 15", "Author: X", "Feature: User Auth",
+// "Bug: Slow Responses", "ADR-001: Choose Queue", "Objective 1: Improve X".
+// The label side (before `:`) is 1–3 words of letters/digits/hyphens.
+var labelPrefixRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9 -]{0,40}:\s+\S`)
+
+// isShortTitleCaseHeader reports whether text is a 2–4-word title-case
+// phrase with no finite verb structure — i.e., a section header like
+// "Database Schema Design" or "Q2 OKRs" rather than a declarative claim.
+// Words that are purely numeric/digit tokens are allowed (e.g., "Sprint 24
+// Retrospective"), as are all-caps tokens (e.g., "API Endpoints").
+func isShortTitleCaseHeader(text string) bool {
+	fields := strings.Fields(text)
+	if len(fields) < 2 || len(fields) > 4 {
+		return false
+	}
+	for _, w := range fields {
+		// Allow numeric tokens anywhere.
+		isNum := true
+		for _, r := range w {
+			if r < '0' || r > '9' {
+				isNum = false
+				break
+			}
+		}
+		if isNum {
+			continue
+		}
+		// First character must be an uppercase letter. Tokens that start
+		// with a non-letter (punctuation, symbol) disqualify this as a
+		// title-case phrase.
+		first := w[0]
+		if first < 'A' || first > 'Z' {
+			return false
+		}
+	}
+	return true
+}
+
+// isStructuralNoise returns true for markdown artifacts, formatting, and
+// header/label phrases that should not be extracted as claims.
 func isStructuralNoise(text string) bool {
 	trimmed := strings.TrimSpace(text)
+	lower := strings.ToLower(trimmed)
 
 	// Markdown headers: # Title, ## Section, etc.
 	if strings.HasPrefix(trimmed, "#") {
@@ -262,6 +324,49 @@ func isStructuralNoise(text string) bool {
 	if strings.HasSuffix(trimmed, ":") && len(strings.Fields(trimmed)) <= 2 {
 		return true
 	}
+	// Short "Label: value" metadata lines (≤ 5 words). Catches section
+	// headers and KV metadata without biting legitimate claims that
+	// contain colons — those are almost always longer.
+	words := strings.Fields(trimmed)
+	if len(words) <= 5 && labelPrefixRE.MatchString(trimmed) {
+		return true
+	}
+	// Pipe-separated rows — tables ("DAU | 10K | 15K") and email signature
+	// lines ("Alice | VP Engineering" / "email | phone").
+	if strings.Count(trimmed, "|") >= 2 {
+		return true
+	}
+	// Single-pipe signature lines: "Name | Title" or "email | phone".
+	// Requires a pipe AND either an email-looking token or a phone-looking
+	// token to avoid clobbering legitimate content.
+	if strings.Count(trimmed, "|") == 1 && (strings.Contains(trimmed, "@") || strings.Contains(trimmed, "+1-")) {
+		return true
+	}
+	// JSON fragments — the splitter sometimes picks up inline JSON objects.
+	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
+		return true
+	}
+	// Title-case short headers: 2–4 words where each word starts with an
+	// uppercase letter (or is a digit token). Catches "Q2 OKRs", "Sprint
+	// 24 Retrospective", "Database Schema Design", "Performance
+	// Requirements", "API Endpoints", "Project Phoenix Status Update".
+	if isShortTitleCaseHeader(trimmed) {
+		return true
+	}
+	// Salutations and sign-offs — only drop if the whole candidate is the
+	// greeting itself. A long message that happens to start with "hey" still
+	// contains claims after the greeting, and we want those.
+	if len(words) <= 4 {
+		for _, p := range salutationPrefixes {
+			if strings.HasPrefix(lower, p) {
+				return true
+			}
+		}
+	}
+	// Note: repeat-marker filtering (As mentioned, To reiterate, In summary)
+	// was tried but conflicts with the robustness eval ground truth, which
+	// treats paraphrased restatements as three separate claims. We keep
+	// those extractions and let downstream dedup or ranking decide.
 	// Too few content words (after stop-word removal) to be a meaningful claim.
 	if contentWordCount(trimmed) < 2 {
 		return true

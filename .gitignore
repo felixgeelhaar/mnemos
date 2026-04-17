@@ -11,6 +11,10 @@ data/ingestion/*
 bin/
 dist/
 /mnemos
+/mnemos-mcp
+
+# Editor/tool local state
+.claude/
 
 # Coverage and test outputs
 *.out

@@ -30,18 +30,18 @@
 
 ---
 
-## Phase 2A: MCP Project Memory (NEXT)
+## Phase 2A: MCP Project Memory (SHIPPED)
 
-**Status:** Next (v0.4)
+**Status:** Shipped on `main`, awaiting v0.4 tag
 **Goal:** Make Mnemos the default persistent knowledge layer for AI coding agents.
 
 ### Milestones
 
-- [ ] Project-scoped DB (`.mnemos/mnemos.db` in working directory)
-- [ ] Auto-ingest project docs on MCP startup (README, PRD, ADRs, CHANGELOG)
-- [ ] File watch MCP tool (`watch_file`)
-- [ ] Browsing MCP tools (`list_claims`, `list_decisions`, `list_contradictions`)
-- [ ] Git-aware context (commit messages, PR descriptions)
+- [x] Project-scoped DB (`.mnemos/mnemos.db` in working directory) — `mnemos init` + git-style discovery walking up from CWD
+- [x] Auto-ingest project docs on MCP startup — README, PRD, CHANGELOG, Roadmap, CLAUDE.md, ARCHITECTURE, top-level `docs/`, recursive ADR conventions
+- [x] File watch MCP tool (`watch_file`) — polling-based, sha256 content comparison, in-memory state
+- [x] Browsing MCP tools (`list_claims`, `list_decisions`, `list_contradictions`) — paginated, filtered, hydrated
+- [x] Git-aware context — commit auto-ingest at MCP startup + `ingest_git_log` tool. PR descriptions deferred (needs gh CLI auth)
 
 ### Success Metrics
 

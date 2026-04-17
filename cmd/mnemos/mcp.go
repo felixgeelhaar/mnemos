@@ -95,6 +95,15 @@ type mcpIngestGitLogOutput struct {
 	Skipped  int `json:"skipped"`
 }
 
+type mcpIngestGitPRsInput struct {
+	Limit int `json:"limit,omitempty" jsonschema:"description=Max number of merged PRs to ingest (default 20, cap 200)"`
+}
+
+type mcpIngestGitPRsOutput struct {
+	Ingested int `json:"ingested"`
+	Skipped  int `json:"skipped"`
+}
+
 type mcpWatchFileInput struct {
 	Path string `json:"path" jsonschema:"required,description=Absolute or relative path to the file to watch for changes"`
 }
@@ -118,6 +127,7 @@ func handleMCP() {
 		runAutoIngest(projectRoot)
 		if repoIsGit(projectRoot) {
 			runGitContextIngest(projectRoot)
+			runPRContextIngest(projectRoot)
 		}
 	}
 
@@ -203,6 +213,14 @@ func handleMCP() {
 			return mcpRunListContradictions(ctx, input)
 		})
 
+	srv.Tool("ingest_git_prs").
+		Description("Ingest merged GitHub pull requests from the project as events. Requires gh CLI authenticated for the repo's remote. Idempotent — already-ingested PR numbers are skipped.").
+		OutputSchema(mcpIngestGitPRsOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpIngestGitPRsInput) (mcpIngestGitPRsOutput, error) {
+			return mcpRunIngestGitPRs(ctx, input)
+		})
+
 	srv.Tool("ingest_git_log").
 		Description("Ingest recent git commits from the project repository as events so they appear in queries. Idempotent — already-ingested commits are skipped by SHA.").
 		OutputSchema(mcpIngestGitLogOutput{}).
@@ -255,6 +273,54 @@ func runGitContextIngest(projectRoot string) {
 	if ingested > 0 || skipped > 0 {
 		fmt.Fprintf(os.Stderr, "git-context: ingested=%d skipped=%d root=%s\n", ingested, skipped, projectRoot)
 	}
+}
+
+func runPRContextIngest(projectRoot string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Avoid shelling out to gh if it isn't available or isn't authed —
+	// ghAvailable is the cheap probe.
+	if !ghAvailable(ctx) {
+		return
+	}
+
+	db, err := sqlite.Open(resolveDBPath())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "git-prs: failed to open DB: %v\n", err)
+		return
+	}
+	defer func() { _ = db.Close() }()
+
+	ingested, skipped, err := ingestGhPRs(ctx, db, projectRoot, defaultGitPRLimit)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "git-prs: %v\n", err)
+		return
+	}
+	if ingested > 0 || skipped > 0 {
+		fmt.Fprintf(os.Stderr, "git-prs: ingested=%d skipped=%d root=%s\n", ingested, skipped, projectRoot)
+	}
+}
+
+func mcpRunIngestGitPRs(ctx context.Context, input mcpIngestGitPRsInput) (mcpIngestGitPRsOutput, error) {
+	_, projectRoot, ok := findProjectDB()
+	if !ok {
+		return mcpIngestGitPRsOutput{}, fmt.Errorf("no project (.mnemos/) found — run 'mnemos init' first")
+	}
+	if !ghAvailable(ctx) {
+		return mcpIngestGitPRsOutput{}, fmt.Errorf("gh CLI not installed or not authenticated for github.com")
+	}
+	db, err := sqlite.Open(resolveDBPath())
+	if err != nil {
+		return mcpIngestGitPRsOutput{}, err
+	}
+	defer func() { _ = db.Close() }()
+
+	ingested, skipped, err := ingestGhPRs(ctx, db, projectRoot, input.Limit)
+	if err != nil {
+		return mcpIngestGitPRsOutput{}, err
+	}
+	return mcpIngestGitPRsOutput{Ingested: ingested, Skipped: skipped}, nil
 }
 
 func mcpRunIngestGitLog(ctx context.Context, input mcpIngestGitLogInput) (mcpIngestGitLogOutput, error) {

@@ -140,7 +140,10 @@ mnemos mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over
 | `mnemos query --llm <question>` | Query with LLM-grounded answer generation |
 | `mnemos metrics` | Knowledge base statistics |
 | `mnemos mcp` | Start MCP server over stdio |
-| `mnemos serve [--port N]` | Start read-only HTTP registry (default `:7777`) |
+| `mnemos serve [--port N]` | Start HTTP registry server (default `:7777`) |
+| `mnemos registry connect <url>` | Wire this project to a remote registry |
+| `mnemos push` | Send local knowledge to the registry |
+| `mnemos pull` | Fetch knowledge from the registry into the local DB |
 
 ### HTTP Registry (Phase 2B)
 
@@ -160,6 +163,20 @@ mnemos mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over
 Defaults: `limit=50`, capped at `200`. Port also accepts `MNEMOS_SERVE_PORT`. Request bodies cap at 5 MB.
 
 **Authentication.** Set `MNEMOS_REGISTRY_TOKEN=<your-secret>` to require `Authorization: Bearer <your-secret>` on all write methods (POST/PUT/DELETE). Reads stay open by default — useful for browse-only dashboards. When the env var is unset, the registry is fully open (suitable for local dev and trusted networks).
+
+### Push / Pull
+
+Once a project is connected to a registry, knowledge flows like git:
+
+```bash
+mnemos registry connect https://registry.example.com --token <secret>
+mnemos push                       # send local events/claims/relationships
+mnemos pull                       # fetch remote knowledge into the local DB
+```
+
+`registry connect` writes `.mnemos/config.json`. Resolution precedence for `push`/`pull` is **CLI flags (`--url`, `--token`) > env vars (`MNEMOS_REGISTRY_URL`, `MNEMOS_REGISTRY_TOKEN`) > config file**, so CI can override per-job without editing the file.
+
+Sync is idempotent — IDs are the dedup key, so running `push`/`pull` twice is safe. Embedding vectors do not transfer (BLOB serialization is a future concern); regenerate them locally with `mnemos process --embed` after a pull if you need semantic ranking on the pulled content.
 
 ## Architecture
 

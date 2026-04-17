@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 59,
+  "version": 61,
   "task_states": {
     "task-append-only-event-store": {
       "status": "done",
@@ -243,9 +243,15 @@
       "elapsed_minutes": 0
     },
     "task-push/pull-synchronization-with-remote-registry": {
-      "status": "pending",
+      "status": "done",
       "path": "",
-      "elapsed_minutes": 0
+      "owner": "ai-agent",
+      "evidence": [
+        "cmd/mnemos/registry.go and cmd/mnemos/registry_test.go. Three new CLI commands: 'mnemos registry connect \u003curl\u003e [--token T]' writes .mnemos/config.json; 'mnemos push' batches all local events/claims/relationships to the configured registry via the POST endpoints; 'mnemos pull' paginates through GET endpoints (limit=100/page) and INSERTs with ON CONFLICT DO NOTHING for idempotency. Resolution precedence CLI flag \u003e env (MNEMOS_REGISTRY_URL/TOKEN) \u003e config file. Live-tested: push 1 event/1 claim → pull into fresh DB recovers same content; second pull = 0/0/0. Embedding BLOBs intentionally not transferred (regenerable via mnemos process --embed after pull); documented as a known limit. Tests cover precedence rules, batch boundaries, evidence-on-first-batch heuristic, server-error propagation, auth-header passthrough, and pagination beyond a single page."
+      ],
+      "started_at": "2026-04-18T01:38:25.30929+02:00",
+      "completed_at": "2026-04-18T01:46:00.848245+02:00",
+      "elapsed_minutes": 7
     },
     "task-registry-namespace-and-scope-isolation": {
       "status": "pending",
@@ -313,5 +319,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-04-18T01:33:19.282224+02:00"
+  "updated_at": "2026-04-18T01:46:00.848246+02:00"
 }

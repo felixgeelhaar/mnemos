@@ -6,7 +6,7 @@
 
 ## Phase 1: Developer Primitive (COMPLETE)
 
-**Status:** Complete (v0.1)
+**Status:** Complete (v0.2)
 **Goal:** Establish Mnemos as a local-first, open-source knowledge engine for AI agents and developer tooling.
 
 ### Milestones
@@ -16,44 +16,72 @@
 - [x] Append-only SQLite event store
 - [x] Claim extraction engine with evidence mapping
 - [x] Relationship detection (supports/contradicts)
-- [x] CLI query interface
+- [x] CLI query interface with BM25 ranking
 - [x] Workflow orchestration with structured logs
 - [x] SQLC typed data access
-- [x] 102 eval test cases
-- [x] First-run UX polish
-- [x] LLM-powered extraction
-- [x] Embeddings for semantic search
+- [x] 102 eval test cases with precision/recall metrics
+- [x] LLM-powered extraction with few-shot prompt
+- [x] Embeddings for semantic search (event + claim level)
+- [x] Query-time grounded generation (--llm)
+- [x] Incremental relationship detection
+- [x] Ollama auto-detect for zero-config LLM/embeddings
+- [x] MCP server (`mnemos mcp`) with 3 tools
+- [x] Distribution: Homebrew, Docker, go install
 
 ---
 
-## Phase 2: Team Knowledge Engine
+## Phase 2A: MCP Project Memory (NEXT)
 
-**Status:** Planned (v0.2)
-**Goal:** Enable non-technical knowledge workers to get value from Mnemos without CLI proficiency.
+**Status:** Next (v0.4)
+**Goal:** Make Mnemos the default persistent knowledge layer for AI coding agents.
 
-### Outcomes
+### Milestones
 
-- **Outcome 1: Accessible querying** — Non-technical users can query knowledge without JSON knowledge
-  - [ ] Web interface for non-technical users
-  - [ ] Human-readable query output mode
-- **Outcome 2: Team knowledge retention** — Knowledge persists across project lifecycles and team changes
-  - [ ] Team collaboration (shared knowledge bases)
-  - [ ] Decision tracking with status workflows
-- **Outcome 3: Zero-friction ingestion** — Users can connect existing document sources
-  - [ ] Cloud document ingestion (Drive, Notion, Confluence)
-- **Outcome 4: Trust and governance** — Teams can verify and approve extracted knowledge
-  - [ ] Evidence review and approval UI
-  - [ ] Programmatic REST API
+- [ ] Project-scoped DB (`.mnemos/mnemos.db` in working directory)
+- [ ] Auto-ingest project docs on MCP startup (README, PRD, ADRs, CHANGELOG)
+- [ ] File watch MCP tool (`watch_file`)
+- [ ] Browsing MCP tools (`list_claims`, `list_decisions`, `list_contradictions`)
+- [ ] Git-aware context (commit messages, PR descriptions)
 
 ### Success Metrics
 
-- Time-to-first-query for non-technical users < 2 minutes
-- 50% reduction in "when did we decide X?" questions within teams
-- 80% of ingested documents produce actionable claims
+- AI agent correctly answers project decision questions
+- Zero manual `mnemos process` commands after MCP setup
+- Knowledge persists across agent sessions
 
 ---
 
-## Phase 3: Cognitive Infrastructure
+## Phase 2B: Knowledge Registry (FUTURE)
+
+**Status:** Planned (v0.5)
+**Goal:** Enable knowledge to flow across projects and teams through a shared registry.
+
+### Concept
+
+```
+Local DB    = local repo     (per-project, local-first)
+Registry    = remote origin  (shared team knowledge)
+mnemos push = share knowledge to registry
+mnemos pull = query team knowledge alongside local
+```
+
+### Milestones
+
+- [ ] `mnemos serve` — HTTP API registry server
+- [ ] `mnemos registry connect <url>` — wire local to registry
+- [ ] Automatic sync on process/query
+- [ ] Cross-project queries
+- [ ] REST API for programmatic access
+- [ ] Namespace/scope isolation (team, org, project)
+
+### Success Metrics
+
+- Cross-project query returns relevant answers with source provenance
+- 50% reduction in "when did we decide X?" questions within teams
+
+---
+
+## Phase 3: Cognitive Infrastructure (FUTURE)
 
 **Status:** Future (v1.0)
 **Goal:** Backend standard for enterprise AI and decision systems.
@@ -61,11 +89,10 @@
 ### Milestones
 
 - [ ] GraphRAG integration (multi-hop queries)
-- [x] Semantic search with embeddings (shipped in Phase 1)
-- [ ] Multi-agent pipeline orchestration
 - [ ] Governance and bias detection
 - [ ] Enterprise integrations (Slack, Teams, Jira)
 - [ ] Compliance and audit trails
+- [ ] Web interface (built on Phase 2B API)
 
 ---
 

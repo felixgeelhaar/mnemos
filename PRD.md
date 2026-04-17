@@ -68,25 +68,53 @@ AI systems are becoming decision-makers, but they forget context, invent facts, 
 
 ---
 
-### Phase 2: Team Knowledge Engine — v0.2
+### Phase 2A: MCP Project Memory — v0.4
 
-**Goal:** Expand to auditable, traceable institutional memory for knowledge workers and product teams.
+**Goal:** Make Mnemos the default persistent knowledge layer for AI coding agents, providing project-scoped memory that survives across sessions.
 
-**Target Users:** Knowledge workers, product teams with decision debt
+**Target Users:** Developers using AI coding agents (Claude Code, Cursor, Copilot)
 
 **Deliverables:**
-- [ ] Web interface for non-technical users
-- [ ] Human-readable query output mode
-- [ ] Team collaboration features (shared knowledge bases)
-- [ ] Document ingestion from cloud sources (Google Drive, Notion, Confluence)
-- [ ] Decision tracking with status workflows
-- [ ] Evidence review and approval UI
-- [ ] API for programmatic access
+- [ ] Project-scoped DB — `mnemos mcp` auto-resolves to `.mnemos/mnemos.db` in working directory
+- [ ] Auto-ingest on startup — scan for project docs (README, PRD, ADRs, CHANGELOG) and ingest new/changed files
+- [ ] File watch MCP tool — `watch_file` to track specific files for changes
+- [ ] Browsing MCP tools — `list_claims`, `list_decisions`, `list_contradictions` for agent exploration
+- [ ] Git-aware context — ingest recent commit messages and PR descriptions as decision trail
+- [x] Ollama auto-detect — zero-config LLM and embeddings when Ollama is running locally
 
 **Success Metrics:**
-- Non-technical users can query without JSON knowledge
-- Team knowledge retention across project lifecycles
-- Reduction in "when did we decide X?" questions
+- AI agent answers "what was decided about X?" correctly on real project docs
+- Zero manual `mnemos process` commands needed after MCP setup
+- Knowledge persists across agent sessions without re-ingestion
+
+---
+
+### Phase 2B: Knowledge Registry — v0.5
+
+**Goal:** Enable knowledge to flow across projects and team members through a shared registry, completing the "Git for knowledge" analogy.
+
+**Target Users:** Teams of developers working across multiple repositories
+
+**Concept:**
+```
+Local DB    = local repo     (per-project, local-first)
+Registry    = remote origin  (shared team knowledge)
+mnemos push = share claims, decisions, contradictions to registry
+mnemos pull = query team knowledge alongside local knowledge
+```
+
+**Deliverables:**
+- [ ] `mnemos serve` — run Mnemos as an HTTP API (the registry server)
+- [ ] `mnemos registry connect <url>` — wire a local instance to a registry
+- [ ] Automatic sync — claims pushed on process, registry queried on query
+- [ ] Cross-project queries — "What did we decide about auth across ALL projects?"
+- [ ] REST API for programmatic access
+- [ ] Namespace/scope isolation — team-level, org-level, project-level
+
+**Open Questions:**
+- Push semantics: all claims or only high-confidence/decisions?
+- Conflict resolution: when local and registry claims contradict, who wins?
+- Access control: read-only vs read-write registry access per project?
 
 ---
 
@@ -99,10 +127,10 @@ AI systems are becoming decision-makers, but they forget context, invent facts, 
 **Deliverables:**
 - [ ] GraphRAG integration for multi-hop queries
 - [x] Embeddings for semantic search (shipped in Phase 1)
-- [ ] Multi-agent pipeline orchestration
 - [ ] Governance and bias detection
 - [ ] Enterprise integrations (Slack, Teams, Jira)
 - [ ] Compliance and audit trails
+- [ ] Web interface for non-technical users (built on Phase 2B API)
 
 ## 5. Core Use Cases
 
@@ -114,21 +142,29 @@ AI systems are becoming decision-makers, but they forget context, invent facts, 
 **Output:** Evidence-backed claims with contradiction detection
 **Tool:** CLI, programmatic API
 
-### Use Case 2: Product Team (Phase 2)
+### Use Case 2: AI Coding Agent (Phase 2A)
 
-**Scenario:** "What decisions were made about feature X and why?"
+**Scenario:** "My Claude Code agent needs to know what decisions our team made about the API design"
 
-**Inputs:** PRDs, meeting notes, Slack threads, metrics
-**Output:** Timeline of decisions with evidence and contradictions
-**Tool:** Web interface, natural language queries
+**Inputs:** Project docs auto-ingested via MCP (PRD, ADRs, commit history)
+**Output:** Persistent project memory that grounds agent responses across sessions
+**Tool:** MCP server, zero-config with Ollama
 
-### Use Case 3: Enterprise AI (Phase 3)
+### Use Case 3: Cross-Project Team Knowledge (Phase 2B)
+
+**Scenario:** "What did we decide about authentication across all our services?"
+
+**Inputs:** Multiple project knowledge bases synced to a shared registry
+**Output:** Cross-project answers with evidence provenance per source project
+**Tool:** CLI + registry API
+
+### Use Case 4: Enterprise AI (Phase 3)
 
 **Scenario:** "Ground AI decisions in verified organizational knowledge"
 
-**Inputs:** All organizational data sources
+**Inputs:** All organizational data sources via registry
 **Output:** Trusted, auditable AI responses
-**Tool:** Backend API, SDK
+**Tool:** REST API, SDK, web interface
 
 ## 6. Product Principles
 
@@ -148,8 +184,11 @@ AI systems are becoming decision-makers, but they forget context, invent facts, 
 
 - [ ] How should contradiction detection be tuned per domain?
 - [ ] When to introduce governance vs. let knowledge evolve organically?
+- [ ] Registry push semantics: all claims or only high-confidence/decisions?
+- [ ] Registry conflict resolution: local vs registry when claims contradict?
 - [x] ~~What embedding model balances speed vs. accuracy?~~ (Defaults: text-embedding-3-small for OpenAI, text-embedding-004 for Gemini, nomic-embed-text for Ollama)
-- [x] ~~What is the threshold for acceptable claim accuracy?~~ (78 eval test cases, rule-based + LLM extraction)
+- [x] ~~What is the threshold for acceptable claim accuracy?~~ (102 eval cases, F1 79.9%)
+- [x] ~~Can BM25 alone produce useful query results?~~ (No — semantic search via embeddings required for real documents)
 
 ## 9. Definition of Success
 

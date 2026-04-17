@@ -165,6 +165,31 @@ func handleMCP() {
 		return watcher, watcherErr
 	}
 
+	srv.Tool("list_claims").
+		Description("List claims with optional type/status filtering and pagination. Useful for browsing the knowledge base without a specific question.").
+		OutputSchema(mcpListClaimsOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpListClaimsInput) (mcpListClaimsOutput, error) {
+			return mcpRunListClaims(ctx, input)
+		})
+
+	srv.Tool("list_decisions").
+		Description("List claims classified as decisions (shorthand for list_claims with type=decision).").
+		OutputSchema(mcpListClaimsOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpListClaimsInput) (mcpListClaimsOutput, error) {
+			input.Type = string(domain.ClaimTypeDecision)
+			return mcpRunListClaims(ctx, input)
+		})
+
+	srv.Tool("list_contradictions").
+		Description("List contradiction relationships hydrated with both claims' text. Pagination supported.").
+		OutputSchema(mcpListContradictionsOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpListContradictionsInput) (mcpListContradictionsOutput, error) {
+			return mcpRunListContradictions(ctx, input)
+		})
+
 	srv.Tool("watch_file").
 		Description("Register a file to be re-ingested when its content changes. Polls every few seconds; in-memory only — restart drops all watches.").
 		OutputSchema(mcpWatchFileOutput{}).

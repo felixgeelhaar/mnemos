@@ -140,6 +140,7 @@ mnemos mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over
 | `mnemos query --hops <N> <question>` | Expand result claims by N supports/contradicts hops (max 5) |
 | `mnemos query --llm <question>` | Query with LLM-grounded answer generation |
 | `mnemos metrics` | Knowledge base statistics |
+| `mnemos audit [--include-embeddings]` | Export the full knowledge base as JSON for compliance/backup |
 | `mnemos mcp` | Start MCP server over stdio |
 | `mnemos serve [--port N]` | Start HTTP registry server (default `:7777`) |
 | `mnemos registry connect <url>` | Wire this project to a remote registry |

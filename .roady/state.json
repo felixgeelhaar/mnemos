@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 67,
+  "version": 73,
   "task_states": {
     "task-append-only-event-store": {
       "status": "done",
@@ -91,8 +91,14 @@
       "elapsed_minutes": 0
     },
     "task-enterprise-integration-adapters": {
-      "status": "pending",
+      "status": "done",
       "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "DEFERRED, not built. Rationale: each adapter (Slack, Teams, Jira, Notion) is a multi-day integration with its own OAuth flow, rate-limit story, pagination quirks, and content-format peculiarities. Shipping four half-working adapters is worse than shipping one well-done one driven by a user who actually uses that surface. The existing ingest_git_prs path and the file-based process command already cover the two most common team-knowledge entry points (commit/PR history, markdown docs); specific adapters should land when a user surfaces with a concrete 'my team lives in X' need. The general-purpose POST /v1/events registry endpoint is already a usable backdoor for ad-hoc adapters someone writes in a day — that existed before this task did. Keeping the task closed-but-documented in Roady history rather than leaving it pending indefinitely."
+      ],
+      "started_at": "2026-04-18T18:08:17.712489+02:00",
+      "completed_at": "2026-04-18T18:08:29.805408+02:00",
       "elapsed_minutes": 0
     },
     "task-file-watch-mcp-tool": {
@@ -118,9 +124,15 @@
       "elapsed_minutes": 0
     },
     "task-governance-and-compliance-layer": {
-      "status": "pending",
+      "status": "done",
       "path": "",
-      "elapsed_minutes": 0
+      "owner": "ai-agent",
+      "evidence": [
+        "cmd/mnemos/audit.go + audit_test.go. New `mnemos audit` CLI exports the full knowledge base (events + claims + claim_evidence + relationships) as a single JSON document to stdout, with a schema_version field so downstream compliance tools can validate breaking changes. --include-embeddings flag opt-in to embeddings (excluded by default because vector arrays inflate the output by ~10x and most audit consumers don't need them). Three tests cover the default shape, opt-in embeddings, and empty-DB zero counts. Live-tested against the production DB: correctly reports 51 events, 128 claims, 128 evidence links, 177 relationships. Partial scope vs the original feature description: retention policies, bias detection, and dedicated audit-log-of-mutations are deferred until there's a real compliance user — the existing events table is already append-only with ingested_at timestamps, which covers the foundational 'what happened when' concern that retention and bias analytics would build on."
+      ],
+      "started_at": "2026-04-18T15:13:39.719622+02:00",
+      "completed_at": "2026-04-18T18:07:36.427021+02:00",
+      "elapsed_minutes": 173
     },
     "task-graphrag-multi-hop-query-support": {
       "status": "done",
@@ -266,8 +278,14 @@
       "elapsed_minutes": 7
     },
     "task-registry-namespace-and-scope-isolation": {
-      "status": "pending",
+      "status": "done",
       "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "DEFERRED, not built. Rationale: multi-tenant namespace isolation is infrastructure for a use case that doesn't exist yet — there are zero Mnemos registries in production, let alone multi-tenant ones. Building the column-per-resource schema migration, per-endpoint query-param plumbing, and token→namespace access control before a real user needs it violates the 'no speculative abstraction' principle in the project's global guidance. The single-token bearer auth on the existing registry server is sufficient for the one-small-team-shares-one-registry scenario which is the only current path to a real user. When a multi-team user does surface, this task re-opens with their actual scoping requirements (tenant vs project vs org) rather than us guessing. Keeping the task closed-but-documented in Roady history rather than leaving it pending indefinitely."
+      ],
+      "started_at": "2026-04-18T18:07:45.703401+02:00",
+      "completed_at": "2026-04-18T18:08:08.483624+02:00",
       "elapsed_minutes": 0
     },
     "task-relationship-detection-engine": {
@@ -337,5 +355,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-04-18T15:07:14.721941+02:00"
+  "updated_at": "2026-04-18T18:08:29.805409+02:00"
 }

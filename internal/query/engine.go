@@ -151,8 +151,9 @@ func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents
 	}
 
 	provenance := e.computeClaimProvenance(ctx, claims, topEvents)
+	narratives := e.buildClaimNarratives(ctx, claims)
 
-	answerText := e.generateAnswer(ctx, q, claims, contradictions, len(topEvents), provenance)
+	answerText := e.generateAnswer(ctx, q, claims, contradictions, len(topEvents), provenance, narratives)
 	if opts.Hops > 0 {
 		expandedCount := 0
 		for _, c := range claims {
@@ -222,6 +223,82 @@ func (e Engine) expandClaimsByHops(ctx context.Context, seed []domain.Claim, max
 		frontier = ids
 	}
 	return expanded, nil
+}
+
+// buildClaimNarratives returns a per-claim lifecycle sentence for claims
+// that have non-trivial history (at least one real status transition after
+// the initial insert). Claims whose status never changed from their first
+// recording have no narrative — there's no story to tell.
+//
+// Format example:
+//
+//	"First recorded as active on 2026-04-12; became contested on 2026-04-15
+//	 (auto: contradiction detected); resolved on 2026-04-18 (evidence
+//	 review by jane)."
+//
+// This is the narrative layer from issue #6 — turning the claim_status_history
+// rows into a prose explanation so the query answer carries a temporal
+// summary instead of just a current snapshot.
+func (e Engine) buildClaimNarratives(ctx context.Context, claims []domain.Claim) map[string]string {
+	if len(claims) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(claims))
+	// Only narrate the top few claims — a query for 50 claims shouldn't
+	// dump 50 timelines into the answer.
+	limit := 3
+	if len(claims) < limit {
+		limit = len(claims)
+	}
+	for i := 0; i < limit; i++ {
+		c := claims[i]
+		hist, err := e.claims.ListStatusHistoryByClaimID(ctx, c.ID)
+		if err != nil || len(hist) == 0 {
+			continue
+		}
+		// Narrative is only interesting when the status actually changed at
+		// some point. A single initial-insert row (from_status="") has
+		// nothing to tell beyond the current status snapshot, which the
+		// main answer already shows.
+		hasRealTransition := false
+		for _, t := range hist {
+			if t.FromStatus != "" {
+				hasRealTransition = true
+				break
+			}
+		}
+		if !hasRealTransition {
+			continue
+		}
+		out[c.ID] = formatNarrative(hist)
+	}
+	return out
+}
+
+func formatNarrative(hist []domain.ClaimStatusTransition) string {
+	if len(hist) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, t := range hist {
+		switch {
+		case i == 0 && t.FromStatus == "":
+			// Fresh history: we saw the insert.
+			fmt.Fprintf(&b, "First recorded as %s on %s", t.ToStatus, t.ChangedAt.Format("2006-01-02"))
+		case i == 0:
+			// Backfilled / pre-existing: first recorded transition was
+			// from an already-known status. Phrase it as an update rather
+			// than as an initial creation.
+			fmt.Fprintf(&b, "Transitioned from %s to %s on %s", t.FromStatus, t.ToStatus, t.ChangedAt.Format("2006-01-02"))
+		default:
+			fmt.Fprintf(&b, "; became %s on %s", t.ToStatus, t.ChangedAt.Format("2006-01-02"))
+		}
+		if t.Reason != "" {
+			fmt.Fprintf(&b, " (%s)", t.Reason)
+		}
+	}
+	b.WriteString(".")
+	return b.String()
 }
 
 // computeClaimProvenance builds a per-claim origin map: "local" for claims
@@ -601,15 +678,15 @@ func collectContradictions(ctx context.Context, repo ports.RelationshipRepositor
 // generateAnswer produces the answer text. When an LLM client is configured,
 // it synthesizes a grounded answer from the retrieved claims. Falls back to
 // the template-based answer on LLM failure or when no client is set.
-func (e Engine) generateAnswer(ctx context.Context, question string, claims []domain.Claim, contradictions []domain.Relationship, eventCount int, provenance map[string]string) string {
+func (e Engine) generateAnswer(ctx context.Context, question string, claims []domain.Claim, contradictions []domain.Relationship, eventCount int, provenance map[string]string, narratives map[string]string) string {
 	if e.llmClient == nil || len(claims) == 0 {
-		return buildAnswerText(question, claims, contradictions, eventCount, provenance)
+		return buildAnswerText(question, claims, contradictions, eventCount, provenance, narratives)
 	}
 
 	answer, err := e.groundedAnswer(ctx, question, claims, contradictions)
 	if err != nil {
 		// Fall back to template on any LLM error.
-		return buildAnswerText(question, claims, contradictions, eventCount, provenance)
+		return buildAnswerText(question, claims, contradictions, eventCount, provenance, narratives)
 	}
 	return answer
 }
@@ -648,16 +725,22 @@ func (e Engine) groundedAnswer(ctx context.Context, question string, claims []do
 	return strings.TrimSpace(resp.Content), nil
 }
 
-func buildAnswerText(question string, claims []domain.Claim, contradictions []domain.Relationship, eventCount int, provenance map[string]string) string {
+func buildAnswerText(question string, claims []domain.Claim, contradictions []domain.Relationship, eventCount int, provenance map[string]string, narratives map[string]string) string {
 	if len(claims) == 0 {
 		return fmt.Sprintf("I could not find claims yet for %q. Try running extract/relate first.", question)
 	}
 
 	parts := []string{}
 	parts = append(parts, fmt.Sprintf("For %q, the strongest signal is: %s%s.", question, claims[0].Text, provenanceSuffix(claims[0].ID, provenance)))
+	if n, ok := narratives[claims[0].ID]; ok {
+		parts = append(parts, "Evolution: "+n)
+	}
 
 	if len(claims) > 1 {
 		parts = append(parts, fmt.Sprintf("Other relevant claim: %s%s.", claims[1].Text, provenanceSuffix(claims[1].ID, provenance)))
+		if n, ok := narratives[claims[1].ID]; ok {
+			parts = append(parts, "Evolution: "+n)
+		}
 	}
 
 	if len(contradictions) > 0 {

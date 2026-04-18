@@ -270,6 +270,75 @@ func (r hopFakeClaimRepo) ListByIDs(_ context.Context, ids []string) ([]domain.C
 	return out, nil
 }
 
+func TestAnswer_NarrativeSurfacesStatusTransitions(t *testing.T) {
+	now := time.Date(2026, 4, 12, 10, 0, 0, 0, time.UTC)
+
+	events := fakeEventRepo{events: []domain.Event{
+		{ID: "ev1", RunID: "r", Content: "Cache eviction policy.", Timestamp: now},
+	}}
+	claim := domain.Claim{
+		ID: "cl_evo", Text: "Cache eviction is LRU",
+		Type: domain.ClaimTypeDecision, Status: domain.ClaimStatusResolved,
+		Confidence: 0.9, CreatedAt: now,
+	}
+	repo := narrativeFakeClaimRepo{
+		base: fakeClaimRepo{
+			claims:   []domain.Claim{claim},
+			evidence: []domain.ClaimEvidence{{ClaimID: "cl_evo", EventID: "ev1"}},
+		},
+		history: map[string][]domain.ClaimStatusTransition{
+			"cl_evo": {
+				{ClaimID: "cl_evo", FromStatus: "", ToStatus: domain.ClaimStatusActive, ChangedAt: now, Reason: ""},
+				{ClaimID: "cl_evo", FromStatus: domain.ClaimStatusActive, ToStatus: domain.ClaimStatusContested, ChangedAt: now.Add(72 * time.Hour), Reason: "auto: conflict with cl_fifo"},
+				{ClaimID: "cl_evo", FromStatus: domain.ClaimStatusContested, ToStatus: domain.ClaimStatusResolved, ChangedAt: now.Add(144 * time.Hour), Reason: "evidence review"},
+			},
+		},
+	}
+
+	engine := NewEngine(events, repo, fakeRelationshipRepo{rels: map[string][]domain.Relationship{}})
+	answer, err := engine.Answer("cache eviction policy")
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	if !strings.Contains(answer.AnswerText, "Evolution:") {
+		t.Fatalf("missing Evolution section: %q", answer.AnswerText)
+	}
+	if !strings.Contains(answer.AnswerText, "First recorded as active") {
+		t.Errorf("missing initial state in narrative")
+	}
+	if !strings.Contains(answer.AnswerText, "became contested") {
+		t.Errorf("missing contested transition")
+	}
+	if !strings.Contains(answer.AnswerText, "became resolved") {
+		t.Errorf("missing resolved transition")
+	}
+	if !strings.Contains(answer.AnswerText, "evidence review") {
+		t.Errorf("missing reason text")
+	}
+}
+
+type narrativeFakeClaimRepo struct {
+	base    fakeClaimRepo
+	history map[string][]domain.ClaimStatusTransition
+}
+
+func (r narrativeFakeClaimRepo) Upsert(ctx context.Context, c []domain.Claim) error {
+	return r.base.Upsert(ctx, c)
+}
+func (r narrativeFakeClaimRepo) ListByEventIDs(ctx context.Context, ids []string) ([]domain.Claim, error) {
+	return r.base.ListByEventIDs(ctx, ids)
+}
+func (r narrativeFakeClaimRepo) ListEvidenceByClaimIDs(ctx context.Context, ids []string) ([]domain.ClaimEvidence, error) {
+	return r.base.ListEvidenceByClaimIDs(ctx, ids)
+}
+func (r narrativeFakeClaimRepo) ListByIDs(ctx context.Context, ids []string) ([]domain.Claim, error) {
+	return r.base.ListByIDs(ctx, ids)
+}
+func (r narrativeFakeClaimRepo) ListStatusHistoryByClaimID(_ context.Context, id string) ([]domain.ClaimStatusTransition, error) {
+	return r.history[id], nil
+}
+
 func TestAnswer_AttributesProvenanceFromPulledEvent(t *testing.T) {
 	now := time.Date(2026, 4, 18, 9, 0, 0, 0, time.UTC)
 

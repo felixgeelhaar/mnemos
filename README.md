@@ -141,6 +141,11 @@ mnemos mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over
 | `mnemos query --llm <question>` | Query with LLM-grounded answer generation |
 | `mnemos metrics` | Knowledge base statistics |
 | `mnemos audit [--include-embeddings]` | Export the full knowledge base as JSON for compliance/backup |
+| `mnemos resolve <winner> --over <loser> [--reason "..."]` | Resolve a contradiction: winner → resolved, loser → deprecated |
+
+### Claim lifecycle
+
+Every claim carries a status: `active`, `contested`, `resolved`, or `deprecated`. Status changes are recorded in `claim_status_history` (from, to, when, why) so the lifecycle of every claim is auditable. When a query surfaces a claim whose status changed at some point, the answer text includes an `Evolution:` line summarizing the timeline — e.g. _"Transitioned from contested to resolved on 2026-04-18 (evidence review by jane)."_
 | `mnemos mcp` | Start MCP server over stdio |
 | `mnemos serve [--port N]` | Start HTTP registry server (default `:7777`) |
 | `mnemos registry connect <url>` | Wire this project to a remote registry |

@@ -212,6 +212,131 @@ func TestPushBatched_PassesAuthHeader(t *testing.T) {
 	}
 }
 
+func TestPushPull_EmbeddingsRoundTripBitExact(t *testing.T) {
+	regURL, _, closeReg := newFakeRegistry(t)
+	defer closeReg()
+
+	localDB, err := sqlite.Open(filepath.Join(t.TempDir(), "local.db"))
+	if err != nil {
+		t.Fatalf("open local: %v", err)
+	}
+	defer func() { _ = localDB.Close() }()
+
+	// Seed two embeddings — one event, one claim — with vectors that include
+	// edge cases: zero, negative, tiny fraction, a value that requires the
+	// full float32 mantissa for round-trip equality.
+	now := time.Now().UTC()
+	seedEvent(t, localDB, "ev_emb", "r", "x", "in", `{}`, now)
+	seedClaim(t, localDB, "cl_emb", "x", "fact", "active", 0.7, now)
+	repo := sqlite.NewEmbeddingRepository(localDB)
+	ctx := context.Background()
+	v1 := []float32{0.0, -1.5, 0.123456789, 3.14159265, -0.0001}
+	v2 := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0}
+	if err := repo.Upsert(ctx, "ev_emb", "event", v1, "test-model"); err != nil {
+		t.Fatalf("upsert v1: %v", err)
+	}
+	if err := repo.Upsert(ctx, "cl_emb", "claim", v2, "test-model"); err != nil {
+		t.Fatalf("upsert v2: %v", err)
+	}
+
+	// === push ===
+	embeddings, err := loadAllEmbeddingsForPush(ctx, localDB)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(embeddings) != 2 {
+		t.Fatalf("loaded %d embeddings, want 2", len(embeddings))
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+	if n, err := pushBatched(ctx, client, regURL+"/v1/embeddings", "", "embeddings", embeddingsToBatches(embeddings)); err != nil || n != 2 {
+		t.Fatalf("push n=%d err=%v", n, err)
+	}
+
+	// === pull into a fresh DB ===
+	pullDB, err := sqlite.Open(filepath.Join(t.TempDir(), "pull.db"))
+	if err != nil {
+		t.Fatalf("open pull: %v", err)
+	}
+	defer func() { _ = pullDB.Close() }()
+
+	pulled, err := pullEmbeddings(ctx, client, regURL, "")
+	if err != nil {
+		t.Fatalf("pull: %v", err)
+	}
+	if len(pulled) != 2 {
+		t.Fatalf("pulled %d, want 2", len(pulled))
+	}
+	if n, err := persistPulledEmbeddings(ctx, pullDB, pulled); err != nil || n != 2 {
+		t.Fatalf("persist n=%d err=%v", n, err)
+	}
+
+	// === verify bit-exact round trip via the pull DB ===
+	pullRepo := sqlite.NewEmbeddingRepository(pullDB)
+	gotV1, err := pullRepo.GetByEntityID(ctx, "ev_emb", "event")
+	if err != nil {
+		t.Fatalf("get v1: %v", err)
+	}
+	gotV2, err := pullRepo.GetByEntityID(ctx, "cl_emb", "claim")
+	if err != nil {
+		t.Fatalf("get v2: %v", err)
+	}
+	if !equalFloat32Slice(gotV1.Vector, v1) {
+		t.Errorf("v1 round-trip mismatch:\n  got:  %v\n  want: %v", gotV1.Vector, v1)
+	}
+	if !equalFloat32Slice(gotV2.Vector, v2) {
+		t.Errorf("v2 round-trip mismatch:\n  got:  %v\n  want: %v", gotV2.Vector, v2)
+	}
+	if gotV1.Model != "test-model" {
+		t.Errorf("model lost in transit: got %q", gotV1.Model)
+	}
+}
+
+func TestAppendEmbeddings_RejectsLengthMismatch(t *testing.T) {
+	regURL, _, closeReg := newFakeRegistry(t)
+	defer closeReg()
+
+	body := map[string]any{
+		"embeddings": []map[string]any{{
+			"entity_id": "x", "entity_type": "event",
+			"vector": []float32{1.0, 2.0}, "model": "m", "dimensions": 5,
+		}},
+	}
+	resp := postJSON(t, regURL+"/v1/embeddings", body, nil)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestAppendEmbeddings_RejectsBadEntityType(t *testing.T) {
+	regURL, _, closeReg := newFakeRegistry(t)
+	defer closeReg()
+
+	body := map[string]any{
+		"embeddings": []map[string]any{{
+			"entity_id": "x", "entity_type": "relationship",
+			"vector": []float32{1.0}, "model": "m",
+		}},
+	}
+	resp := postJSON(t, regURL+"/v1/embeddings", body, nil)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func equalFloat32Slice(a, b []float32) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestPullEvents_PaginatesUntilExhausted(t *testing.T) {
 	regDB, err := sqlite.Open(filepath.Join(t.TempDir(), "registry.db"))
 	if err != nil {

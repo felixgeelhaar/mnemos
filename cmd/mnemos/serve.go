@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/embedding"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
@@ -110,6 +111,7 @@ func newServerMux(db *sql.DB) http.Handler {
 	mux.HandleFunc("/v1/events", makeEventsHandler(db))
 	mux.HandleFunc("/v1/claims", makeClaimsHandler(db))
 	mux.HandleFunc("/v1/relationships", makeRelationshipsHandler(db))
+	mux.HandleFunc("/v1/embeddings", makeEmbeddingsHandler(db))
 	mux.HandleFunc("/v1/metrics", makeMetricsHandler(db))
 	token := os.Getenv("MNEMOS_REGISTRY_TOKEN")
 	return logMiddleware(authMiddleware(token, mux))
@@ -613,6 +615,140 @@ func appendRelationshipsHandler(db *sql.DB, w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusCreated, appendResponse{Accepted: len(rels)})
+}
+
+// embeddingDTO carries a vector as a JSON array of float32. Larger on the
+// wire than a binary blob (typically 5–8× the raw byte size for 768-dim
+// vectors), but debuggable, language-agnostic, and bit-exact through the
+// encode/decode cycle since float32 has well-defined JSON behavior.
+type embeddingDTO struct {
+	EntityID   string    `json:"entity_id"`
+	EntityType string    `json:"entity_type"`
+	Vector     []float32 `json:"vector"`
+	Model      string    `json:"model"`
+	Dimensions int       `json:"dimensions"`
+}
+
+type embeddingsResponse struct {
+	Embeddings []embeddingDTO `json:"embeddings"`
+	Total      int            `json:"total"`
+	Limit      int            `json:"limit"`
+	Offset     int            `json:"offset"`
+}
+
+type appendEmbeddingsRequest struct {
+	Embeddings []embeddingDTO `json:"embeddings"`
+}
+
+func makeEmbeddingsHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			listEmbeddingsHandler(db, w, r)
+		case http.MethodPost:
+			appendEmbeddingsHandler(db, w, r)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	}
+}
+
+func listEmbeddingsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	limit, offset := parsePaginationFromQuery(r)
+	typeFilter := r.URL.Query().Get("entity_type")
+	ctx := r.Context()
+
+	var (
+		where string
+		args  []any
+	)
+	if typeFilter != "" {
+		if typeFilter != "event" && typeFilter != "claim" {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid entity_type %q (want event or claim)", typeFilter))
+			return
+		}
+		where = " WHERE entity_type = ?"
+		args = []any{typeFilter}
+	}
+
+	var total int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM embeddings"+where, args...).Scan(&total); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("count embeddings: %v", err))
+		return
+	}
+
+	rowArgs := append(append([]any{}, args...), limit, offset)
+	//nolint:gosec // G202: where clause is built from validated constant fragments only; values pass through ? placeholders
+	rows, err := db.QueryContext(ctx,
+		"SELECT entity_id, entity_type, vector, model, dimensions FROM embeddings"+where+" ORDER BY entity_type, entity_id LIMIT ? OFFSET ?",
+		rowArgs...)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("list embeddings: %v", err))
+		return
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []embeddingDTO
+	for rows.Next() {
+		var (
+			e    embeddingDTO
+			blob []byte
+			dims int64
+		)
+		if err := rows.Scan(&e.EntityID, &e.EntityType, &blob, &e.Model, &dims); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("scan embedding: %v", err))
+			return
+		}
+		vec, err := embedding.DecodeVector(blob)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("decode embedding for %s/%s: %v", e.EntityID, e.EntityType, err))
+			return
+		}
+		e.Vector = vec
+		e.Dimensions = int(dims)
+		out = append(out, e)
+	}
+	writeJSON(w, http.StatusOK, embeddingsResponse{Embeddings: out, Total: total, Limit: limit, Offset: offset})
+}
+
+func appendEmbeddingsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	var req appendEmbeddingsRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
+		return
+	}
+	if len(req.Embeddings) == 0 {
+		writeError(w, http.StatusBadRequest, "embeddings array is empty")
+		return
+	}
+
+	repo := sqlite.NewEmbeddingRepository(db)
+	ctx := r.Context()
+	accepted := 0
+	for i, e := range req.Embeddings {
+		if e.EntityID == "" {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("embeddings[%d].entity_id is required", i))
+			return
+		}
+		if e.EntityType != "event" && e.EntityType != "claim" {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("embeddings[%d].entity_type %q invalid (want event or claim)", i, e.EntityType))
+			return
+		}
+		if len(e.Vector) == 0 {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("embeddings[%d].vector is empty", i))
+			return
+		}
+		if e.Dimensions != 0 && e.Dimensions != len(e.Vector) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("embeddings[%d]: dimensions=%d but vector length=%d", i, e.Dimensions, len(e.Vector)))
+			return
+		}
+		if err := repo.Upsert(ctx, e.EntityID, e.EntityType, e.Vector, e.Model); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("upsert embedding %s/%s: %v", e.EntityID, e.EntityType, err))
+			return
+		}
+		accepted++
+	}
+	writeJSON(w, http.StatusCreated, appendResponse{Accepted: accepted})
 }
 
 type metricsResponse struct {

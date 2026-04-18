@@ -158,6 +158,8 @@ mnemos mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over
 | `/v1/claims` | POST | Upsert a batch of claims (with optional `evidence` links) |
 | `/v1/relationships` | GET | List relationships (`?type=supports\|contradicts`, `?limit`, `?offset`) |
 | `/v1/relationships` | POST | Upsert a batch of relationships |
+| `/v1/embeddings` | GET | List embeddings (`?entity_type=event\|claim`, `?limit`, `?offset`) |
+| `/v1/embeddings` | POST | Upsert a batch of embeddings (vector as JSON float array) |
 | `/v1/metrics` | GET | Counts mirroring `mnemos metrics` |
 
 Defaults: `limit=50`, capped at `200`. Port also accepts `MNEMOS_SERVE_PORT`. Request bodies cap at 5 MB.
@@ -176,7 +178,7 @@ mnemos pull                       # fetch remote knowledge into the local DB
 
 `registry connect` writes `.mnemos/config.json`. Resolution precedence for `push`/`pull` is **CLI flags (`--url`, `--token`) > env vars (`MNEMOS_REGISTRY_URL`, `MNEMOS_REGISTRY_TOKEN`) > config file**, so CI can override per-job without editing the file.
 
-Sync is idempotent — IDs are the dedup key, so running `push`/`pull` twice is safe. Embedding vectors do not transfer (BLOB serialization is a future concern); regenerate them locally with `mnemos process --embed` after a pull if you need semantic ranking on the pulled content.
+Sync is idempotent — IDs are the dedup key, so running `push`/`pull` twice is safe. Vectors transfer too: embeddings ride on the same wire as JSON float arrays and round-trip bit-exact, so semantic ranking on pulled content works without re-embedding.
 
 ## Architecture
 

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/felixgeelhaar/mnemos/internal/embedding"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
@@ -218,11 +219,22 @@ func handlePush(args []string, _ Flags) {
 		exitWithMnemosError(false, NewSystemError(err, "push relationships"))
 		return
 	}
+	embeddings, err := loadAllEmbeddingsForPush(ctx, db)
+	if err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "load embeddings"))
+		return
+	}
+	pushedEmbeddings, err := pushBatched(ctx, client, regURL+"/v1/embeddings", token, "embeddings", batchToAny(embeddingsToBatches(embeddings)))
+	if err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "push embeddings"))
+		return
+	}
 
 	fmt.Printf("pushed to %s\n", regURL)
 	fmt.Printf("  events:        %d\n", pushedEvents)
 	fmt.Printf("  claims:        %d\n", pushedClaims)
 	fmt.Printf("  relationships: %d\n", pushedRels)
+	fmt.Printf("  embeddings:    %d\n", pushedEmbeddings)
 }
 
 // handlePull downloads all events, claims, and relationships from the
@@ -280,11 +292,22 @@ func handlePull(args []string, _ Flags) {
 		exitWithMnemosError(false, NewSystemError(err, "persist relationships"))
 		return
 	}
+	embeddings, err := pullEmbeddings(ctx, client, regURL, token)
+	if err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "pull embeddings"))
+		return
+	}
+	insertedEmbeddings, err := persistPulledEmbeddings(ctx, db, embeddings)
+	if err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "persist embeddings"))
+		return
+	}
 
 	fmt.Printf("pulled from %s\n", regURL)
 	fmt.Printf("  events:        %d\n", insertedEvents)
 	fmt.Printf("  claims:        %d\n", insertedClaims)
 	fmt.Printf("  relationships: %d\n", insertedRels)
+	fmt.Printf("  embeddings:    %d\n", insertedEmbeddings)
 }
 
 func parseRegistryFlags(args []string) (string, string) {
@@ -593,6 +616,83 @@ func persistPulledClaims(ctx context.Context, db *sql.DB, claims []claimDTO) (in
 		}
 	}
 	return inserted, nil
+}
+
+func loadAllEmbeddingsForPush(ctx context.Context, db *sql.DB) ([]embeddingDTO, error) {
+	rows, err := db.QueryContext(ctx, `SELECT entity_id, entity_type, vector, model, dimensions FROM embeddings`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var out []embeddingDTO
+	for rows.Next() {
+		var (
+			e    embeddingDTO
+			blob []byte
+			dims int64
+		)
+		if err := rows.Scan(&e.EntityID, &e.EntityType, &blob, &e.Model, &dims); err != nil {
+			return nil, err
+		}
+		vec, err := embedding.DecodeVector(blob)
+		if err != nil {
+			return nil, fmt.Errorf("decode embedding %s/%s: %w", e.EntityID, e.EntityType, err)
+		}
+		e.Vector = vec
+		e.Dimensions = int(dims)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func embeddingsToBatches(records []embeddingDTO) []map[string]any {
+	var out []map[string]any
+	for i := 0; i < len(records); i += pushBatchSize {
+		end := i + pushBatchSize
+		if end > len(records) {
+			end = len(records)
+		}
+		out = append(out, map[string]any{"embeddings": records[i:end]})
+	}
+	return out
+}
+
+func pullEmbeddings(ctx context.Context, client *http.Client, regURL, token string) ([]embeddingDTO, error) {
+	var out []embeddingDTO
+	offset := 0
+	for {
+		page, err := fetchPage(ctx, client, fmt.Sprintf("%s/v1/embeddings?limit=%d&offset=%d", regURL, pullPageSize, offset), token)
+		if err != nil {
+			return nil, err
+		}
+		var body embeddingsResponse
+		if err := json.Unmarshal(page, &body); err != nil {
+			return nil, fmt.Errorf("decode embeddings: %w", err)
+		}
+		out = append(out, body.Embeddings...)
+		if len(body.Embeddings) == 0 || offset+len(body.Embeddings) >= body.Total {
+			break
+		}
+		offset += len(body.Embeddings)
+	}
+	return out, nil
+}
+
+// persistPulledEmbeddings upserts pulled embeddings via the existing repo,
+// which encodes the vector back to a binary BLOB. We don't track "newly
+// inserted vs updated" separately — embeddings are derived data, last
+// write wins is the right semantic.
+func persistPulledEmbeddings(ctx context.Context, db *sql.DB, records []embeddingDTO) (int, error) {
+	repo := sqlite.NewEmbeddingRepository(db)
+	persisted := 0
+	for _, e := range records {
+		if err := repo.Upsert(ctx, e.EntityID, e.EntityType, e.Vector, e.Model); err != nil {
+			return persisted, fmt.Errorf("upsert embedding %s/%s: %w", e.EntityID, e.EntityType, err)
+		}
+		persisted++
+	}
+	return persisted, nil
 }
 
 func persistPulledRelationships(ctx context.Context, db *sql.DB, rels []relationshipDTO) (int, error) {

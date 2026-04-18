@@ -4,9 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +33,48 @@ func seedEvent(t *testing.T, db *sql.DB, id, runID, content, srcInputID, metaJSO
 	)
 	if err != nil {
 		t.Fatalf("insert event: %v", err)
+	}
+}
+
+func TestServe_WebRootReturnsHTML(t *testing.T) {
+	srv := httptest.NewServer(newServerMux(newServerTestDB(t)))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" || ct[:9] != "text/html" {
+		t.Fatalf("Content-Type = %q, want text/html...", ct)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if len(body) < 100 {
+		t.Fatalf("body suspiciously small: %d bytes", len(body))
+	}
+	if !strings.Contains(string(body), "Mnemos Registry") {
+		t.Errorf("body missing expected title")
+	}
+}
+
+func TestServe_WebRootRejectsNonGetWithoutCatchAll(t *testing.T) {
+	srv := httptest.NewServer(newServerMux(newServerTestDB(t)))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/random-path-not-a-route")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (root handler shouldn't catch-all)", resp.StatusCode)
 	}
 }
 

@@ -165,6 +165,8 @@ mnemos mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over
 
 Defaults: `limit=50`, capped at `200`. Port also accepts `MNEMOS_SERVE_PORT`. Request bodies cap at 5 MB.
 
+**Web UI.** `mnemos serve` also serves a minimal single-page UI at `GET /`. It renders the metrics, paginated claims (with type/status filters), and the contradiction list by hitting the same `/v1/*` endpoints above. The HTML is embedded via `//go:embed` so there's no separate deploy step — one binary, one port.
+
 **Authentication.** Set `MNEMOS_REGISTRY_TOKEN=<your-secret>` to require `Authorization: Bearer <your-secret>` on all write methods (POST/PUT/DELETE). Reads stay open by default — useful for browse-only dashboards. When the env var is unset, the registry is fully open (suitable for local dev and trusted networks).
 
 ### Push / Pull

@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 65,
+  "version": 67,
   "task_states": {
     "task-append-only-event-store": {
       "status": "done",
@@ -315,9 +315,15 @@
       "elapsed_minutes": 3
     },
     "task-web-interface-on-registry-api": {
-      "status": "pending",
+      "status": "done",
       "path": "",
-      "elapsed_minutes": 0
+      "owner": "ai-agent",
+      "evidence": [
+        "Single-page web UI embedded in the Go binary via //go:embed web/index.html. Served by mnemos serve at GET /. Calls the existing /v1/metrics, /v1/claims, and /v1/relationships endpoints — no new API surface, no build tooling, no external assets. Three sections: a metrics strip (events, claims, contested, relationships, contradictions, embeddings with warn styling when \u003e 0), a claims list with type and status filter dropdowns and pagination, and a contradictions list with left-border highlighting. Vanilla JS, CSS custom properties, ~280 lines including styles. Root handler does NOT catch-all so /v1/wrong still 404s. HEAD supported. Cache-Control: no-cache on the HTML so UI changes don't get stuck in browser caches across releases. Tests cover 200+text/html content-type at /, title substring match on the body, and 404 on unrelated paths. Live-tested against the production DB: page renders with live metrics and claims."
+      ],
+      "started_at": "2026-04-18T14:13:56.06459+02:00",
+      "completed_at": "2026-04-18T15:07:14.72194+02:00",
+      "elapsed_minutes": 53
     },
     "task-workflow-orchestration-and-observability": {
       "status": "done",
@@ -331,5 +337,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-04-18T14:13:17.732787+02:00"
+  "updated_at": "2026-04-18T15:07:14.721941+02:00"
 }

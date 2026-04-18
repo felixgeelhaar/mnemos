@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"database/sql"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,9 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/embedding"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
+
+//go:embed web/index.html
+var webIndexHTML []byte
 
 const (
 	defaultServePort   = 7777
@@ -107,6 +111,7 @@ func handleServe(args []string, _ Flags) {
 // serve_test.go without booting a real listener.
 func newServerMux(db *sql.DB) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/", handleWebRoot)
 	mux.HandleFunc("/health", handleHealth)
 	mux.HandleFunc("/v1/events", makeEventsHandler(db))
 	mux.HandleFunc("/v1/claims", makeClaimsHandler(db))
@@ -178,6 +183,29 @@ type healthResponse struct {
 
 func handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, healthResponse{Status: "ok", Version: version})
+}
+
+// handleWebRoot serves the embedded single-page UI at GET /. Any other
+// path returns 404 — we don't want catch-all behavior masking real route
+// typos like /v1/clams. Unsupported methods get 405.
+func handleWebRoot(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if _, err := w.Write(webIndexHTML); err != nil {
+		fmt.Fprintf(os.Stderr, "serve web: %v\n", err)
+	}
 }
 
 type eventsResponse struct {

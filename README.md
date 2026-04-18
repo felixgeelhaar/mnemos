@@ -178,7 +178,9 @@ mnemos pull                       # fetch remote knowledge into the local DB
 
 `registry connect` writes `.mnemos/config.json`. Resolution precedence for `push`/`pull` is **CLI flags (`--url`, `--token`) > env vars (`MNEMOS_REGISTRY_URL`, `MNEMOS_REGISTRY_TOKEN`) > config file**, so CI can override per-job without editing the file.
 
-Sync is idempotent — IDs are the dedup key, so running `push`/`pull` twice is safe. Vectors transfer too: embeddings ride on the same wire as JSON float arrays and round-trip bit-exact, so semantic ranking on pulled content works without re-embedding.
+Sync is idempotent — IDs are the dedup key, so running `push`/`pull` twice is safe. Vectors transfer too: embeddings ride on the same wire as JSON float arrays and round-trip bit-exact, so semantic ranking on pulled content works without re-embedding. Claim-evidence links travel with the claims so the local query engine can resolve pulled claims back to their source events.
+
+**Federation provenance.** Pulled events get stamped with `pulled_from_registry: <url>` in their metadata. The query engine surfaces this in the answer text — claims sourced from a registry appear as `… (from https://reg.example.com)` and the summary line counts them: `Context used 5 event(s) and 8 claim(s) (3 from a connected registry).` Local claims are unmarked (the no-registry case stays uncluttered). The `claim_provenance` field on the MCP `query_knowledge` response carries the same map programmatically.
 
 ## Architecture
 

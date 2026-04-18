@@ -58,6 +58,9 @@ type mcpQueryOutput struct {
 	Claims         []domain.Claim        `json:"claims"`
 	Contradictions []domain.Relationship `json:"contradictions"`
 	Timeline       []string              `json:"timeline"`
+	// ClaimProvenance maps claim ID to "local" or a registry URL so the
+	// agent can show which claims came from a federated registry.
+	ClaimProvenance map[string]string `json:"claim_provenance,omitempty"`
 }
 
 type mcpProcessTextInput struct {
@@ -405,10 +408,11 @@ func mcpRunQuery(_ context.Context, input mcpQueryInput) (mcpQueryOutput, error)
 	}
 
 	return mcpQueryOutput{
-		Answer:         answer.AnswerText,
-		Claims:         answer.Claims,
-		Contradictions: answer.Contradictions,
-		Timeline:       answer.TimelineEventIDs,
+		Answer:          answer.AnswerText,
+		Claims:          answer.Claims,
+		Contradictions:  answer.Contradictions,
+		Timeline:        answer.TimelineEventIDs,
+		ClaimProvenance: answer.ClaimProvenance,
 	}, nil
 }
 

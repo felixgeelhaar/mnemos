@@ -154,7 +154,7 @@ func TestPushPull_RoundTripsAllResources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("pull events: %v", err)
 	}
-	pulledClaims, err := pullClaims(ctx, client, regURL, "")
+	pulledClaims, pulledEvidence, err := pullClaims(ctx, client, regURL, "")
 	if err != nil {
 		t.Fatalf("pull claims: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestPushPull_RoundTripsAllResources(t *testing.T) {
 	if n, _ := persistPulledEvents(ctx, pullDB, pulledEvents); n != 1 {
 		t.Errorf("inserted events = %d, want 1", n)
 	}
-	if n, _ := persistPulledClaims(ctx, pullDB, pulledClaims); n != 2 {
+	if n, _ := persistPulledClaims(ctx, pullDB, pulledClaims, pulledEvidence); n != 2 {
 		t.Errorf("inserted claims = %d, want 2", n)
 	}
 	if n, _ := persistPulledRelationships(ctx, pullDB, pulledRels); n != 1 {
@@ -335,6 +335,42 @@ func equalFloat32Slice(a, b []float32) bool {
 		}
 	}
 	return true
+}
+
+func TestStampPullProvenance_AddsRegistryAndTimestamp(t *testing.T) {
+	at := time.Date(2026, 4, 18, 12, 0, 0, 0, time.UTC)
+	events := []eventDTO{
+		{ID: "e1", Metadata: map[string]string{"source": "file"}},
+		{ID: "e2"}, // nil metadata — must be initialized
+	}
+	stampPullProvenance(events, "https://reg.example.com", at)
+
+	if events[0].Metadata["pulled_from_registry"] != "https://reg.example.com" {
+		t.Errorf("e1 missing pulled_from_registry: %+v", events[0].Metadata)
+	}
+	if events[0].Metadata["source"] != "file" {
+		t.Errorf("e1 lost original metadata: %+v", events[0].Metadata)
+	}
+	if events[1].Metadata == nil || events[1].Metadata["pulled_from_registry"] != "https://reg.example.com" {
+		t.Errorf("e2 missing provenance: %+v", events[1].Metadata)
+	}
+	wantStamp := at.Format(time.RFC3339)
+	if events[0].Metadata["pulled_at"] != wantStamp {
+		t.Errorf("pulled_at = %q, want %q", events[0].Metadata["pulled_at"], wantStamp)
+	}
+}
+
+func TestStampPullProvenance_DoesNotOverwriteExistingOrigin(t *testing.T) {
+	events := []eventDTO{
+		{ID: "e1", Metadata: map[string]string{
+			"pulled_from_registry": "https://original.example.com",
+			"pulled_at":            "2026-01-01T00:00:00Z",
+		}},
+	}
+	stampPullProvenance(events, "https://newer.example.com", time.Now().UTC())
+	if events[0].Metadata["pulled_from_registry"] != "https://original.example.com" {
+		t.Errorf("origin overwritten: %q", events[0].Metadata["pulled_from_registry"])
+	}
 }
 
 func TestPullEvents_PaginatesUntilExhausted(t *testing.T) {

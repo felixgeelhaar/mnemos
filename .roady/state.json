@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 61,
+  "version": 63,
   "task_states": {
     "task-append-only-event-store": {
       "status": "done",
@@ -69,9 +69,15 @@
       "elapsed_minutes": 3
     },
     "task-cross-project-query-federation": {
-      "status": "pending",
+      "status": "done",
       "path": "",
-      "elapsed_minutes": 0
+      "owner": "ai-agent",
+      "evidence": [
+        "Pull stamps each remote event with metadata.pulled_from_registry=\u003curl\u003e and pulled_at=\u003cRFC3339\u003e (preserving any pre-existing origin from a chained pull). Query engine attributes each surfaced claim to its first non-local evidence event via the new ListEvidenceByClaimIDs port method. Answer.ClaimProvenance carries a {claimID -\u003e origin} map; buildAnswerText appends ' (from \u003curl\u003e)' suffixes per claim and a summary count. mcpQueryOutput exposes claim_provenance as a JSON map. Also fixed an evidence-transfer bug surfaced during live testing: GET /v1/claims now embeds the evidence array so pull recovers the link rows and the local query engine can JOIN claims back to events. Live-tested end to end: push from local, pull into a fresh project, query — answer reads 'We use LRU for cache eviction (from http://localhost:17782) ... (1 from a connected registry).' Tests added for stamping behaviour, query-engine provenance attribution, and override-protection on chained pulls."
+      ],
+      "started_at": "2026-04-18T08:51:40.914879+02:00",
+      "completed_at": "2026-04-18T09:03:24.310433+02:00",
+      "elapsed_minutes": 11
     },
     "task-documentation-ingestion-pipeline": {
       "status": "done",
@@ -319,5 +325,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-04-18T01:46:00.848246+02:00"
+  "updated_at": "2026-04-18T09:03:24.310433+02:00"
 }

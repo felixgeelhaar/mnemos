@@ -17,6 +17,7 @@ type EventRepository interface {
 type ClaimRepository interface {
 	Upsert(ctx context.Context, claims []domain.Claim) error
 	ListByEventIDs(ctx context.Context, eventIDs []string) ([]domain.Claim, error)
+	ListEvidenceByClaimIDs(ctx context.Context, claimIDs []string) ([]domain.ClaimEvidence, error)
 }
 
 // RelationshipRepository persists and retrieves relationships between claims.

@@ -248,10 +248,11 @@ func listEventsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 }
 
 type claimsResponse struct {
-	Claims []claimDTO `json:"claims"`
-	Total  int        `json:"total"`
-	Limit  int        `json:"limit"`
-	Offset int        `json:"offset"`
+	Claims   []claimDTO          `json:"claims"`
+	Evidence []claimEvidenceItem `json:"evidence,omitempty"`
+	Total    int                 `json:"total"`
+	Limit    int                 `json:"limit"`
+	Offset   int                 `json:"offset"`
 }
 
 type claimDTO struct {
@@ -331,7 +332,45 @@ func listClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		}
 		claims = append(claims, c)
 	}
-	writeJSON(w, http.StatusOK, claimsResponse{Claims: claims, Total: total, Limit: limit, Offset: offset})
+
+	evidence, evErr := loadEvidenceForClaims(ctx, db, claims)
+	if evErr != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load evidence: %v", evErr))
+		return
+	}
+
+	writeJSON(w, http.StatusOK, claimsResponse{Claims: claims, Evidence: evidence, Total: total, Limit: limit, Offset: offset})
+}
+
+// loadEvidenceForClaims returns the (claim_id, event_id) link rows for the
+// supplied claim IDs. Empty input → empty output. Used by GET /v1/claims so
+// pull can recover the evidence relations alongside the claims themselves.
+func loadEvidenceForClaims(ctx context.Context, db *sql.DB, claims []claimDTO) ([]claimEvidenceItem, error) {
+	if len(claims) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, 0, len(claims))
+	args := make([]any, 0, len(claims))
+	for _, c := range claims {
+		placeholders = append(placeholders, "?")
+		args = append(args, c.ID)
+	}
+	//nolint:gosec // G202: placeholders are literal "?", IDs flow through ? bindings
+	q := "SELECT claim_id, event_id FROM claim_evidence WHERE claim_id IN (" + strings.Join(placeholders, ",") + ")"
+	rows, err := db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []claimEvidenceItem
+	for rows.Next() {
+		var item claimEvidenceItem
+		if err := rows.Scan(&item.ClaimID, &item.EventID); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
 }
 
 type relationshipsResponse struct {

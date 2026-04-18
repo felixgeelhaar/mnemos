@@ -19,10 +19,12 @@ import (
 )
 
 const (
-	registryConfigName  = "config.json"
-	pushBatchSize       = 100
-	pullPageSize        = 100
-	registryHTTPTimeout = 60 * time.Second
+	registryConfigName    = "config.json"
+	pushBatchSize         = 100
+	pullPageSize          = 100
+	registryHTTPTimeout   = 60 * time.Second
+	provenanceRegistryKey = "pulled_from_registry"
+	provenancePulledAtKey = "pulled_at"
 )
 
 // registryConfig is the persisted shape of .mnemos/config.json. Only the
@@ -266,7 +268,8 @@ func handlePull(args []string, _ Flags) {
 		exitWithMnemosError(false, NewSystemError(err, "pull events"))
 		return
 	}
-	claims, err := pullClaims(ctx, client, regURL, token)
+	stampPullProvenance(events, regURL, time.Now().UTC())
+	claims, evidence, err := pullClaims(ctx, client, regURL, token)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "pull claims"))
 		return
@@ -282,7 +285,7 @@ func handlePull(args []string, _ Flags) {
 		exitWithMnemosError(false, NewSystemError(err, "persist events"))
 		return
 	}
-	insertedClaims, err := persistPulledClaims(ctx, db, claims)
+	insertedClaims, err := persistPulledClaims(ctx, db, claims, evidence)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "persist claims"))
 		return
@@ -512,25 +515,27 @@ func pullEvents(ctx context.Context, client *http.Client, regURL, token string) 
 	return events, nil
 }
 
-func pullClaims(ctx context.Context, client *http.Client, regURL, token string) ([]claimDTO, error) {
+func pullClaims(ctx context.Context, client *http.Client, regURL, token string) ([]claimDTO, []claimEvidenceItem, error) {
 	var claims []claimDTO
+	var evidence []claimEvidenceItem
 	offset := 0
 	for {
 		page, err := fetchPage(ctx, client, fmt.Sprintf("%s/v1/claims?limit=%d&offset=%d", regURL, pullPageSize, offset), token)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		var body claimsResponse
 		if err := json.Unmarshal(page, &body); err != nil {
-			return nil, fmt.Errorf("decode claims: %w", err)
+			return nil, nil, fmt.Errorf("decode claims: %w", err)
 		}
 		claims = append(claims, body.Claims...)
+		evidence = append(evidence, body.Evidence...)
 		if len(body.Claims) == 0 || offset+len(body.Claims) >= body.Total {
 			break
 		}
 		offset += len(body.Claims)
 	}
-	return claims, nil
+	return claims, evidence, nil
 }
 
 func pullRelationships(ctx context.Context, client *http.Client, regURL, token string) ([]relationshipDTO, error) {
@@ -599,7 +604,7 @@ func persistPulledEvents(ctx context.Context, db *sql.DB, events []eventDTO) (in
 	return inserted, nil
 }
 
-func persistPulledClaims(ctx context.Context, db *sql.DB, claims []claimDTO) (int, error) {
+func persistPulledClaims(ctx context.Context, db *sql.DB, claims []claimDTO, evidence []claimEvidenceItem) (int, error) {
 	inserted := 0
 	for _, c := range claims {
 		res, err := db.ExecContext(ctx,
@@ -615,7 +620,36 @@ func persistPulledClaims(ctx context.Context, db *sql.DB, claims []claimDTO) (in
 			inserted++
 		}
 	}
+	for _, link := range evidence {
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO claim_evidence (claim_id, event_id) VALUES (?, ?) ON CONFLICT DO NOTHING`,
+			link.ClaimID, link.EventID,
+		); err != nil {
+			return inserted, fmt.Errorf("insert evidence (%s, %s): %w", link.ClaimID, link.EventID, err)
+		}
+	}
 	return inserted, nil
+}
+
+// stampPullProvenance mutates each pulled event so its metadata records
+// where it came from and when. The query engine surfaces these to the user
+// at answer time so claims from a registry are distinguishable from local
+// ones — the federation contract is "show me where each fact came from."
+//
+// Provenance is only added if not already set, so an event that was first
+// pulled from registry A and then re-pulled from registry B keeps its
+// original origin (consistent with first-write-wins on event id).
+func stampPullProvenance(events []eventDTO, regURL string, at time.Time) {
+	stamp := at.Format(time.RFC3339)
+	for i := range events {
+		if events[i].Metadata == nil {
+			events[i].Metadata = map[string]string{}
+		}
+		if _, exists := events[i].Metadata[provenanceRegistryKey]; !exists {
+			events[i].Metadata[provenanceRegistryKey] = regURL
+			events[i].Metadata[provenancePulledAtKey] = stamp
+		}
+	}
 }
 
 func loadAllEmbeddingsForPush(ctx context.Context, db *sql.DB) ([]embeddingDTO, error) {

@@ -135,6 +135,47 @@ ORDER BY c.created_at ASC`, strings.Join(placeholders, ",")) //nolint:gosec // G
 	return claims, nil
 }
 
+// ListEvidenceByClaimIDs returns the (claim_id, event_id) link rows for the
+// given claim IDs. Used by the query engine to attribute claim provenance
+// back to the events they were extracted from.
+func (r ClaimRepository) ListEvidenceByClaimIDs(ctx context.Context, claimIDs []string) ([]domain.ClaimEvidence, error) {
+	if len(claimIDs) == 0 {
+		return []domain.ClaimEvidence{}, nil
+	}
+
+	placeholders := make([]string, 0, len(claimIDs))
+	args := make([]any, 0, len(claimIDs))
+	for _, id := range claimIDs {
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
+	}
+
+	query := fmt.Sprintf(`
+SELECT claim_id, event_id
+FROM claim_evidence
+WHERE claim_id IN (%s)`, strings.Join(placeholders, ",")) //nolint:gosec // G201: placeholders are literal "?" strings, not user input
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list evidence by claim ids: %w", err)
+	}
+	defer closeRows(rows)
+
+	out := make([]domain.ClaimEvidence, 0)
+	for rows.Next() {
+		var ev domain.ClaimEvidence
+		if err := rows.Scan(&ev.ClaimID, &ev.EventID); err != nil {
+			return nil, fmt.Errorf("scan claim evidence row: %w", err)
+		}
+		out = append(out, ev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate claim evidence rows: %w", err)
+	}
+
+	return out, nil
+}
+
 // ListAll returns every claim stored in the database.
 func (r ClaimRepository) ListAll(ctx context.Context) ([]domain.Claim, error) {
 	rows, err := r.q.ListAllClaims(ctx)

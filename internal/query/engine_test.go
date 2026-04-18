@@ -32,12 +32,26 @@ func (f fakeEventRepo) ListByRunID(_ context.Context, runID string) ([]domain.Ev
 }
 
 type fakeClaimRepo struct {
-	claims []domain.Claim
+	claims   []domain.Claim
+	evidence []domain.ClaimEvidence
 }
 
 func (f fakeClaimRepo) Upsert(_ context.Context, _ []domain.Claim) error { return nil }
 func (f fakeClaimRepo) ListByEventIDs(_ context.Context, _ []string) ([]domain.Claim, error) {
 	return f.claims, nil
+}
+func (f fakeClaimRepo) ListEvidenceByClaimIDs(_ context.Context, claimIDs []string) ([]domain.ClaimEvidence, error) {
+	wanted := map[string]struct{}{}
+	for _, id := range claimIDs {
+		wanted[id] = struct{}{}
+	}
+	out := make([]domain.ClaimEvidence, 0, len(f.evidence))
+	for _, e := range f.evidence {
+		if _, ok := wanted[e.ClaimID]; ok {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }
 
 type fakeRelationshipRepo struct {
@@ -110,5 +124,44 @@ func TestAnswerForRunScopesEvents(t *testing.T) {
 	}
 	if answer.TimelineEventIDs[0] != "ev_run_a" {
 		t.Fatalf("TimelineEventIDs[0] = %q, want ev_run_a", answer.TimelineEventIDs[0])
+	}
+}
+
+func TestAnswer_AttributesProvenanceFromPulledEvent(t *testing.T) {
+	now := time.Date(2026, 4, 18, 9, 0, 0, 0, time.UTC)
+
+	events := fakeEventRepo{events: []domain.Event{
+		{ID: "ev_local", RunID: "r", Content: "Local fact about cache eviction policy", Timestamp: now,
+			Metadata: map[string]string{}},
+		{ID: "ev_remote", RunID: "r", Content: "Remote claim about cache eviction policy", Timestamp: now.Add(time.Minute),
+			Metadata: map[string]string{"pulled_from_registry": "https://reg.example.com"}},
+	}}
+	claims := []domain.Claim{
+		{ID: "cl_local", Text: "We use LRU for cache eviction policy", Type: domain.ClaimTypeFact, Status: domain.ClaimStatusActive, Confidence: 0.8, CreatedAt: now},
+		{ID: "cl_remote", Text: "Cache eviction policy is FIFO", Type: domain.ClaimTypeFact, Status: domain.ClaimStatusActive, Confidence: 0.8, CreatedAt: now.Add(time.Minute)},
+	}
+	repo := fakeClaimRepo{
+		claims: claims,
+		evidence: []domain.ClaimEvidence{
+			{ClaimID: "cl_local", EventID: "ev_local"},
+			{ClaimID: "cl_remote", EventID: "ev_remote"},
+		},
+	}
+
+	engine := NewEngine(events, repo, fakeRelationshipRepo{rels: map[string][]domain.Relationship{}})
+	answer, err := engine.Answer("cache eviction policy")
+	if err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	if got := answer.ClaimProvenance["cl_local"]; got != "local" {
+		t.Errorf("cl_local provenance = %q, want 'local'", got)
+	}
+	if got := answer.ClaimProvenance["cl_remote"]; got != "https://reg.example.com" {
+		t.Errorf("cl_remote provenance = %q, want registry URL", got)
+	}
+	if !strings.Contains(answer.AnswerText, "from https://reg.example.com") &&
+		!strings.Contains(answer.AnswerText, "from a connected registry") {
+		t.Errorf("AnswerText does not surface provenance: %q", answer.AnswerText)
 	}
 }

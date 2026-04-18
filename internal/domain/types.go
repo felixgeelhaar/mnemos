@@ -120,6 +120,11 @@ type Answer struct {
 	Claims           []Claim
 	Contradictions   []Relationship
 	TimelineEventIDs []string
+	// ClaimProvenance maps claim ID to a human-readable origin: "local"
+	// for claims sourced from this project's events, or "<registry-url>"
+	// for claims that reached the local DB via `mnemos pull`. Empty means
+	// unknown — the engine fills this in when it can.
+	ClaimProvenance map[string]string
 }
 
 // Validate checks that the Claim has a non-empty ID and text, a confidence

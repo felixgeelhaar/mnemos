@@ -114,13 +114,62 @@ func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents
 		return domain.Answer{}, fmt.Errorf("load contradictions for query: %w", err)
 	}
 
-	answerText := e.generateAnswer(ctx, q, claims, contradictions, len(topEvents))
+	provenance := e.computeClaimProvenance(ctx, claims, topEvents)
+
+	answerText := e.generateAnswer(ctx, q, claims, contradictions, len(topEvents), provenance)
 	return domain.Answer{
 		AnswerText:       answerText,
 		Claims:           claims,
 		Contradictions:   contradictions,
 		TimelineEventIDs: eventIDs,
+		ClaimProvenance:  provenance,
 	}, nil
+}
+
+// computeClaimProvenance builds a per-claim origin map: "local" for claims
+// whose evidence events have no pulled_from_registry metadata, or the
+// registry URL when at least one evidence event was pulled. The first
+// non-local origin wins because the question users ask is "where did this
+// originate?" — once a claim is known to have a remote source, that's the
+// load-bearing fact.
+//
+// Failures (e.g. evidence lookup error) silently yield an empty map; the
+// engine never blocks an answer on provenance attribution.
+func (e Engine) computeClaimProvenance(ctx context.Context, claims []domain.Claim, topEvents []domain.Event) map[string]string {
+	if len(claims) == 0 {
+		return nil
+	}
+	claimIDs := make([]string, 0, len(claims))
+	for _, c := range claims {
+		claimIDs = append(claimIDs, c.ID)
+	}
+	evidence, err := e.claims.ListEvidenceByClaimIDs(ctx, claimIDs)
+	if err != nil || len(evidence) == 0 {
+		return nil
+	}
+
+	// eventOrigin: event id → "local" or "<registry-url>"
+	eventOrigin := make(map[string]string, len(topEvents))
+	for _, ev := range topEvents {
+		if reg, ok := ev.Metadata["pulled_from_registry"]; ok && reg != "" {
+			eventOrigin[ev.ID] = reg
+		} else {
+			eventOrigin[ev.ID] = "local"
+		}
+	}
+
+	out := make(map[string]string, len(claimIDs))
+	for _, link := range evidence {
+		origin, ok := eventOrigin[link.EventID]
+		if !ok {
+			continue // evidence event not in our top set; skip
+		}
+		existing, seen := out[link.ClaimID]
+		if !seen || (existing == "local" && origin != "local") {
+			out[link.ClaimID] = origin
+		}
+	}
+	return out
 }
 
 // rankEventsWithFallback tries cosine similarity first (if embeddings are available),
@@ -454,15 +503,15 @@ func collectContradictions(ctx context.Context, repo ports.RelationshipRepositor
 // generateAnswer produces the answer text. When an LLM client is configured,
 // it synthesizes a grounded answer from the retrieved claims. Falls back to
 // the template-based answer on LLM failure or when no client is set.
-func (e Engine) generateAnswer(ctx context.Context, question string, claims []domain.Claim, contradictions []domain.Relationship, eventCount int) string {
+func (e Engine) generateAnswer(ctx context.Context, question string, claims []domain.Claim, contradictions []domain.Relationship, eventCount int, provenance map[string]string) string {
 	if e.llmClient == nil || len(claims) == 0 {
-		return buildAnswerText(question, claims, contradictions, eventCount)
+		return buildAnswerText(question, claims, contradictions, eventCount, provenance)
 	}
 
 	answer, err := e.groundedAnswer(ctx, question, claims, contradictions)
 	if err != nil {
 		// Fall back to template on any LLM error.
-		return buildAnswerText(question, claims, contradictions, eventCount)
+		return buildAnswerText(question, claims, contradictions, eventCount, provenance)
 	}
 	return answer
 }
@@ -501,16 +550,16 @@ func (e Engine) groundedAnswer(ctx context.Context, question string, claims []do
 	return strings.TrimSpace(resp.Content), nil
 }
 
-func buildAnswerText(question string, claims []domain.Claim, contradictions []domain.Relationship, eventCount int) string {
+func buildAnswerText(question string, claims []domain.Claim, contradictions []domain.Relationship, eventCount int, provenance map[string]string) string {
 	if len(claims) == 0 {
 		return fmt.Sprintf("I could not find claims yet for %q. Try running extract/relate first.", question)
 	}
 
 	parts := []string{}
-	parts = append(parts, fmt.Sprintf("For %q, the strongest signal is: %s.", question, claims[0].Text))
+	parts = append(parts, fmt.Sprintf("For %q, the strongest signal is: %s%s.", question, claims[0].Text, provenanceSuffix(claims[0].ID, provenance)))
 
 	if len(claims) > 1 {
-		parts = append(parts, fmt.Sprintf("Other relevant claim: %s.", claims[1].Text))
+		parts = append(parts, fmt.Sprintf("Other relevant claim: %s%s.", claims[1].Text, provenanceSuffix(claims[1].ID, provenance)))
 	}
 
 	if len(contradictions) > 0 {
@@ -519,6 +568,38 @@ func buildAnswerText(question string, claims []domain.Claim, contradictions []do
 		parts = append(parts, "No contradictions were found in the current claim set.")
 	}
 
-	parts = append(parts, fmt.Sprintf("Context used %d event(s) and %d claim(s).", eventCount, len(claims)))
+	if remoteCount := countRemoteClaims(claims, provenance); remoteCount > 0 {
+		parts = append(parts, fmt.Sprintf("Context used %d event(s) and %d claim(s) (%d from a connected registry).", eventCount, len(claims), remoteCount))
+	} else {
+		parts = append(parts, fmt.Sprintf("Context used %d event(s) and %d claim(s).", eventCount, len(claims)))
+	}
 	return strings.Join(parts, " ")
+}
+
+// provenanceSuffix returns " (from <registry-url>)" for claims pulled from a
+// registry, empty for local or unknown claims. Local claims aren't tagged
+// because that's the unmarked default — flagging every local one would add
+// noise to single-project queries.
+func provenanceSuffix(claimID string, provenance map[string]string) string {
+	if provenance == nil {
+		return ""
+	}
+	origin, ok := provenance[claimID]
+	if !ok || origin == "local" || origin == "" {
+		return ""
+	}
+	return " (from " + origin + ")"
+}
+
+func countRemoteClaims(claims []domain.Claim, provenance map[string]string) int {
+	if provenance == nil {
+		return 0
+	}
+	n := 0
+	for _, c := range claims {
+		if origin := provenance[c.ID]; origin != "" && origin != "local" {
+			n++
+		}
+	}
+	return n
 }

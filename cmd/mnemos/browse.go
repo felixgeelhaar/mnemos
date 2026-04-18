@@ -213,7 +213,7 @@ func validClaimType(s string) bool {
 
 func validClaimStatus(s string) bool {
 	switch domain.ClaimStatus(s) {
-	case domain.ClaimStatusActive, domain.ClaimStatusContested, domain.ClaimStatusDeprecated:
+	case domain.ClaimStatusActive, domain.ClaimStatusContested, domain.ClaimStatusResolved, domain.ClaimStatusDeprecated:
 		return true
 	}
 	return false

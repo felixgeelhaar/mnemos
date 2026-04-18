@@ -31,10 +31,19 @@ const (
 // ClaimStatus represents the lifecycle state of a claim.
 type ClaimStatus string
 
-// Supported ClaimStatus values.
+// Supported ClaimStatus values. The lifecycle reads as:
+//
+//	active → contested (when a contradicting claim lands)
+//	contested → resolved (when an operator picks a winner)
+//	contested → deprecated (when the loser of a resolution is retired)
+//	any → deprecated (when a claim is manually withdrawn)
+//
+// Status transitions are recorded in claim_status_history — see
+// ClaimRepository.ListStatusHistoryByClaimID.
 const (
 	ClaimStatusActive     ClaimStatus = "active"
 	ClaimStatusContested  ClaimStatus = "contested"
+	ClaimStatusResolved   ClaimStatus = "resolved"
 	ClaimStatusDeprecated ClaimStatus = "deprecated"
 )
 
@@ -151,7 +160,7 @@ func (c Claim) Validate() error {
 		return errors.New("claim type is invalid")
 	}
 	switch c.Status {
-	case ClaimStatusActive, ClaimStatusContested, ClaimStatusDeprecated:
+	case ClaimStatusActive, ClaimStatusContested, ClaimStatusResolved, ClaimStatusDeprecated:
 	default:
 		return errors.New("claim status is invalid")
 	}

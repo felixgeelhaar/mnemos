@@ -156,7 +156,7 @@ mnemos mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over
 | `/health` | GET | Liveness probe + version |
 | `/v1/events` | GET | List events (`?limit`, `?offset`) |
 | `/v1/events` | POST | Append a batch of events |
-| `/v1/claims` | GET | List claims (`?type=fact\|hypothesis\|decision`, `?status=active\|contested\|deprecated`, `?limit`, `?offset`) |
+| `/v1/claims` | GET | List claims (`?type=fact\|hypothesis\|decision`, `?status=active\|contested\|resolved\|deprecated`, `?limit`, `?offset`) |
 | `/v1/claims` | POST | Upsert a batch of claims (with optional `evidence` links) |
 | `/v1/relationships` | GET | List relationships (`?type=supports\|contradicts`, `?limit`, `?offset`) |
 | `/v1/relationships` | POST | Upsert a batch of relationships |

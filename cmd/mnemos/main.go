@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -289,7 +290,7 @@ func handleIngest(args []string, f Flags) {
 }
 
 func handleQuery(args []string, f Flags) {
-	question, runID, err := parseQueryArgs(args)
+	question, runID, hops, err := parseQueryArgs(args)
 	if err != nil {
 		exitWithMnemosError(f.Verbose, err)
 	}
@@ -297,6 +298,9 @@ func handleQuery(args []string, f Flags) {
 	scope := map[string]string{"question": question}
 	if runID != "" {
 		scope["run_id"] = runID
+	}
+	if hops > 0 {
+		scope["hops"] = strconv.Itoa(hops)
 	}
 
 	err = runJob("query", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
@@ -343,10 +347,11 @@ func handleQuery(args []string, f Flags) {
 		}
 		var answer domain.Answer
 		var queryErr error
+		opts := query.AnswerOptions{Hops: hops}
 		if runID != "" {
-			answer, queryErr = engine.AnswerForRun(question, runID)
+			answer, queryErr = engine.AnswerForRunWithOptions(question, runID, opts)
 		} else {
-			answer, queryErr = engine.Answer(question)
+			answer, queryErr = engine.AnswerWithOptions(question, opts)
 		}
 		if queryErr != nil {
 			return NewSystemError(queryErr, "query engine failed")
@@ -846,6 +851,7 @@ func printUsage() {
 	fmt.Println("")
 	fmt.Println("Query & Reporting:")
 	fmt.Println("  query [--run <run-id>] <question>    Query with evidence")
+	fmt.Println("  query --hops <N> <question>          Expand result claims via N hops of supports/contradicts")
 	fmt.Println("  query --llm <question>               Query with LLM-grounded answer")
 	fmt.Println("  metrics [--human]                    Knowledge base statistics")
 	fmt.Println("  mcp                                  Start MCP server over stdio")
@@ -878,30 +884,47 @@ func printUsage() {
 	fmt.Println("  MNEMOS_EMBED_BASE_URL  embedding endpoint (optional)")
 }
 
-func parseQueryArgs(args []string) (string, string, error) {
+func parseQueryArgs(args []string) (string, string, int, error) {
 	if len(args) == 0 {
-		return "", "", NewUserError("query requires a question")
+		return "", "", 0, NewUserError("query requires a question")
 	}
 
 	runID := ""
+	hops := 0
 	questionArgs := args
-	if args[0] == "--run" {
-		if len(args) < 3 {
-			return "", "", NewUserError("--run flag requires <run-id> followed by a question")
+	for len(questionArgs) > 0 {
+		switch questionArgs[0] {
+		case "--run":
+			if len(questionArgs) < 3 {
+				return "", "", 0, NewUserError("--run flag requires <run-id> followed by a question")
+			}
+			runID = strings.TrimSpace(questionArgs[1])
+			if runID == "" {
+				return "", "", 0, NewUserError("--run flag requires a non-empty run-id")
+			}
+			questionArgs = questionArgs[2:]
+		case "--hops":
+			if len(questionArgs) < 2 {
+				return "", "", 0, NewUserError("--hops flag requires a value")
+			}
+			n, err := strconv.Atoi(questionArgs[1])
+			if err != nil || n < 0 || n > 5 {
+				return "", "", 0, NewUserError("--hops must be an integer in [0, 5]")
+			}
+			hops = n
+			questionArgs = questionArgs[2:]
+		default:
+			goto done
 		}
-		runID = strings.TrimSpace(args[1])
-		if runID == "" {
-			return "", "", NewUserError("--run flag requires a non-empty run-id")
-		}
-		questionArgs = args[2:]
 	}
+done:
 
 	question := strings.TrimSpace(strings.Join(questionArgs, " "))
 	if question == "" {
-		return "", "", NewUserError("query requires a question")
+		return "", "", 0, NewUserError("query requires a question")
 	}
 
-	return question, runID, nil
+	return question, runID, hops, nil
 }
 
 func runJob(kind string, scope map[string]string, verbose bool, fn func(context.Context, *workflow.Job, *sql.DB) error) error {

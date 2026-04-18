@@ -51,6 +51,7 @@ func (l mcpBoltLogger) log(event *bolt.Event, msg string, fields ...mcp.LogField
 type mcpQueryInput struct {
 	Question string `json:"question" jsonschema:"required,description=Natural language question to ask Mnemos"`
 	RunID    string `json:"runId,omitempty" jsonschema:"description=Optional run ID to scope the query"`
+	Hops     int    `json:"hops,omitempty" jsonschema:"description=BFS hop expansion depth through supports/contradicts edges (0-5, default 0)"`
 }
 
 type mcpQueryOutput struct {
@@ -61,6 +62,10 @@ type mcpQueryOutput struct {
 	// ClaimProvenance maps claim ID to "local" or a registry URL so the
 	// agent can show which claims came from a federated registry.
 	ClaimProvenance map[string]string `json:"claim_provenance,omitempty"`
+	// ClaimHopDistance maps claim ID to the BFS hop count from the
+	// directly-retrieved set (0 = direct, N>0 = expanded via N hops of
+	// supports/contradicts). Empty when hops=0.
+	ClaimHopDistance map[string]int `json:"claim_hop_distance,omitempty"`
 }
 
 type mcpProcessTextInput struct {
@@ -397,22 +402,32 @@ func mcpRunQuery(_ context.Context, input mcpQueryInput) (mcpQueryOutput, error)
 		}
 	}
 
+	hops := input.Hops
+	if hops < 0 {
+		hops = 0
+	}
+	if hops > 5 {
+		hops = 5
+	}
+	opts := query.AnswerOptions{Hops: hops}
+
 	var answer domain.Answer
 	if strings.TrimSpace(input.RunID) != "" {
-		answer, err = engine.AnswerForRun(strings.TrimSpace(input.Question), strings.TrimSpace(input.RunID))
+		answer, err = engine.AnswerForRunWithOptions(strings.TrimSpace(input.Question), strings.TrimSpace(input.RunID), opts)
 	} else {
-		answer, err = engine.Answer(strings.TrimSpace(input.Question))
+		answer, err = engine.AnswerWithOptions(strings.TrimSpace(input.Question), opts)
 	}
 	if err != nil {
 		return mcpQueryOutput{}, err
 	}
 
 	return mcpQueryOutput{
-		Answer:          answer.AnswerText,
-		Claims:          answer.Claims,
-		Contradictions:  answer.Contradictions,
-		Timeline:        answer.TimelineEventIDs,
-		ClaimProvenance: answer.ClaimProvenance,
+		Answer:           answer.AnswerText,
+		Claims:           answer.Claims,
+		Contradictions:   answer.Contradictions,
+		Timeline:         answer.TimelineEventIDs,
+		ClaimProvenance:  answer.ClaimProvenance,
+		ClaimHopDistance: answer.ClaimHopDistance,
 	}, nil
 }
 

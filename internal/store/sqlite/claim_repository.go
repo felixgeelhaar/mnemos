@@ -176,6 +176,47 @@ WHERE claim_id IN (%s)`, strings.Join(placeholders, ",")) //nolint:gosec // G201
 	return out, nil
 }
 
+// ListByIDs returns the claims with the given IDs (in unspecified order).
+// Used by the query engine for hop-expanded claim lookup — given a set of
+// neighbor claim IDs from relationship traversal, materialize the full
+// Claim records.
+func (r ClaimRepository) ListByIDs(ctx context.Context, claimIDs []string) ([]domain.Claim, error) {
+	if len(claimIDs) == 0 {
+		return []domain.Claim{}, nil
+	}
+
+	placeholders := make([]string, 0, len(claimIDs))
+	args := make([]any, 0, len(claimIDs))
+	for _, id := range claimIDs {
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
+	}
+
+	query := fmt.Sprintf(`
+SELECT id, text, type, confidence, status, created_at
+FROM claims
+WHERE id IN (%s)`, strings.Join(placeholders, ",")) //nolint:gosec // G201: placeholders are literal "?" strings, not user input
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list claims by ids: %w", err)
+	}
+	defer closeRows(rows)
+
+	out := make([]domain.Claim, 0, len(claimIDs))
+	for rows.Next() {
+		c, err := scanClaim(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate claims by ids rows: %w", err)
+	}
+	return out, nil
+}
+
 // ListAll returns every claim stored in the database.
 func (r ClaimRepository) ListAll(ctx context.Context) ([]domain.Claim, error) {
 	rows, err := r.q.ListAllClaims(ctx)

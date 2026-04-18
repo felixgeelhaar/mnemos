@@ -18,12 +18,14 @@ type ClaimRepository interface {
 	Upsert(ctx context.Context, claims []domain.Claim) error
 	ListByEventIDs(ctx context.Context, eventIDs []string) ([]domain.Claim, error)
 	ListEvidenceByClaimIDs(ctx context.Context, claimIDs []string) ([]domain.ClaimEvidence, error)
+	ListByIDs(ctx context.Context, claimIDs []string) ([]domain.Claim, error)
 }
 
 // RelationshipRepository persists and retrieves relationships between claims.
 type RelationshipRepository interface {
 	Upsert(ctx context.Context, relationships []domain.Relationship) error
 	ListByClaim(ctx context.Context, claimID string) ([]domain.Relationship, error)
+	ListByClaimIDs(ctx context.Context, claimIDs []string) ([]domain.Relationship, error)
 }
 
 // ExtractionEngine extracts structured claims from domain events.

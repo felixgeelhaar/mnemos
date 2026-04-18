@@ -52,18 +52,38 @@ func (e Engine) WithLLM(client llm.Client) Engine {
 	return e
 }
 
+// AnswerOptions tunes a query without requiring callers that just want the
+// default behavior to learn a new constructor signature. Hops controls
+// graph-expansion of the directly-retrieved claim set: 0 means no expansion,
+// N means follow up to N supports/contradicts edges from the seed claims.
+type AnswerOptions struct {
+	Hops int
+}
+
 // Answer searches all stored events for the best answer to the given question.
 func (e Engine) Answer(question string) (domain.Answer, error) {
+	return e.AnswerWithOptions(question, AnswerOptions{})
+}
+
+// AnswerWithOptions is the configurable form of Answer. The plain Answer
+// method delegates here with a zero-value AnswerOptions so existing callers
+// see no behavior change.
+func (e Engine) AnswerWithOptions(question string, opts AnswerOptions) (domain.Answer, error) {
 	ctx := context.Background()
 	allEvents, err := e.events.ListAll(ctx)
 	if err != nil {
 		return domain.Answer{}, fmt.Errorf("load events for query: %w", err)
 	}
-	return e.answerWithEvents(ctx, question, allEvents)
+	return e.answerWithEvents(ctx, question, allEvents, opts)
 }
 
 // AnswerForRun searches events belonging to the specified run for the best answer.
 func (e Engine) AnswerForRun(question, runID string) (domain.Answer, error) {
+	return e.AnswerForRunWithOptions(question, runID, AnswerOptions{})
+}
+
+// AnswerForRunWithOptions is the configurable form of AnswerForRun.
+func (e Engine) AnswerForRunWithOptions(question, runID string, opts AnswerOptions) (domain.Answer, error) {
 	ctx := context.Background()
 	if strings.TrimSpace(runID) == "" {
 		return domain.Answer{}, fmt.Errorf("run id is required")
@@ -75,10 +95,10 @@ func (e Engine) AnswerForRun(question, runID string) (domain.Answer, error) {
 	if len(events) == 0 {
 		return domain.Answer{AnswerText: fmt.Sprintf("No events found for run %q.", runID)}, nil
 	}
-	return e.answerWithEvents(ctx, question, events)
+	return e.answerWithEvents(ctx, question, events, opts)
 }
 
-func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents []domain.Event) (domain.Answer, error) {
+func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents []domain.Event, opts AnswerOptions) (domain.Answer, error) {
 	q := strings.TrimSpace(question)
 	if q == "" {
 		return domain.Answer{}, fmt.Errorf("query question is required")
@@ -109,6 +129,22 @@ func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents
 	// Boost claims matching the question's intent (e.g., "decisions" → decision type).
 	claims = boostClaimsByQuestionIntent(q, claims)
 
+	// Track hop distance per claim — direct claims are hop 0; expansion
+	// fills in 1..opts.Hops for claims reached via supports/contradicts edges.
+	hopDistance := make(map[string]int, len(claims))
+	for _, c := range claims {
+		hopDistance[c.ID] = 0
+	}
+	if opts.Hops > 0 {
+		expanded, err := e.expandClaimsByHops(ctx, claims, opts.Hops, hopDistance)
+		if err != nil {
+			// Hop expansion is additive — log via the standard error path
+			// rather than failing the whole answer.
+			return domain.Answer{}, fmt.Errorf("expand claims by %d hops: %w", opts.Hops, err)
+		}
+		claims = append(claims, expanded...)
+	}
+
 	contradictions, err := collectContradictions(ctx, e.relationships, claims)
 	if err != nil {
 		return domain.Answer{}, fmt.Errorf("load contradictions for query: %w", err)
@@ -117,13 +153,75 @@ func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents
 	provenance := e.computeClaimProvenance(ctx, claims, topEvents)
 
 	answerText := e.generateAnswer(ctx, q, claims, contradictions, len(topEvents), provenance)
+	if opts.Hops > 0 {
+		expandedCount := 0
+		for _, c := range claims {
+			if hopDistance[c.ID] > 0 {
+				expandedCount++
+			}
+		}
+		if expandedCount > 0 {
+			answerText += fmt.Sprintf(" Expanded %d additional claim(s) via supports/contradicts edges (up to %d hop(s)).", expandedCount, opts.Hops)
+		}
+	}
+
 	return domain.Answer{
 		AnswerText:       answerText,
 		Claims:           claims,
 		Contradictions:   contradictions,
 		TimelineEventIDs: eventIDs,
 		ClaimProvenance:  provenance,
+		ClaimHopDistance: hopDistance,
 	}, nil
+}
+
+// expandClaimsByHops does a BFS through the relationship graph from the
+// given seed claims, returning the newly-discovered claims (not the seeds
+// themselves). hopDistance is mutated in place: each newly-seen claim is
+// recorded with its hop distance from the seed set. Termination: when the
+// frontier of newly-discovered IDs is empty or maxHops is reached.
+func (e Engine) expandClaimsByHops(ctx context.Context, seed []domain.Claim, maxHops int, hopDistance map[string]int) ([]domain.Claim, error) {
+	if maxHops <= 0 || len(seed) == 0 {
+		return nil, nil
+	}
+	frontier := make([]string, 0, len(seed))
+	for _, c := range seed {
+		frontier = append(frontier, c.ID)
+	}
+
+	var expanded []domain.Claim
+	for hop := 1; hop <= maxHops && len(frontier) > 0; hop++ {
+		rels, err := e.relationships.ListByClaimIDs(ctx, frontier)
+		if err != nil {
+			return nil, fmt.Errorf("list relationships for hop %d: %w", hop, err)
+		}
+		nextIDs := map[string]struct{}{}
+		for _, rel := range rels {
+			for _, neighbor := range []string{rel.FromClaimID, rel.ToClaimID} {
+				if _, seen := hopDistance[neighbor]; seen {
+					continue
+				}
+				nextIDs[neighbor] = struct{}{}
+			}
+		}
+		if len(nextIDs) == 0 {
+			break
+		}
+		ids := make([]string, 0, len(nextIDs))
+		for id := range nextIDs {
+			ids = append(ids, id)
+		}
+		newClaims, err := e.claims.ListByIDs(ctx, ids)
+		if err != nil {
+			return nil, fmt.Errorf("load hop-%d claims: %w", hop, err)
+		}
+		for _, c := range newClaims {
+			hopDistance[c.ID] = hop
+		}
+		expanded = append(expanded, newClaims...)
+		frontier = ids
+	}
+	return expanded, nil
 }
 
 // computeClaimProvenance builds a per-claim origin map: "local" for claims

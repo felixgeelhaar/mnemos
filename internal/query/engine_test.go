@@ -53,6 +53,19 @@ func (f fakeClaimRepo) ListEvidenceByClaimIDs(_ context.Context, claimIDs []stri
 	}
 	return out, nil
 }
+func (f fakeClaimRepo) ListByIDs(_ context.Context, claimIDs []string) ([]domain.Claim, error) {
+	wanted := map[string]struct{}{}
+	for _, id := range claimIDs {
+		wanted[id] = struct{}{}
+	}
+	out := make([]domain.Claim, 0, len(claimIDs))
+	for _, c := range f.claims {
+		if _, ok := wanted[c.ID]; ok {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
 
 type fakeRelationshipRepo struct {
 	rels map[string][]domain.Relationship
@@ -61,6 +74,20 @@ type fakeRelationshipRepo struct {
 func (f fakeRelationshipRepo) Upsert(_ context.Context, _ []domain.Relationship) error { return nil }
 func (f fakeRelationshipRepo) ListByClaim(_ context.Context, claimID string) ([]domain.Relationship, error) {
 	return f.rels[claimID], nil
+}
+func (f fakeRelationshipRepo) ListByClaimIDs(_ context.Context, claimIDs []string) ([]domain.Relationship, error) {
+	seen := map[string]struct{}{}
+	out := make([]domain.Relationship, 0)
+	for _, id := range claimIDs {
+		for _, rel := range f.rels[id] {
+			if _, dup := seen[rel.ID]; dup {
+				continue
+			}
+			seen[rel.ID] = struct{}{}
+			out = append(out, rel)
+		}
+	}
+	return out, nil
 }
 
 func TestAnswerIncludesClaimsAndContradictions(t *testing.T) {
@@ -125,6 +152,116 @@ func TestAnswerForRunScopesEvents(t *testing.T) {
 	if answer.TimelineEventIDs[0] != "ev_run_a" {
 		t.Fatalf("TimelineEventIDs[0] = %q, want ev_run_a", answer.TimelineEventIDs[0])
 	}
+}
+
+func TestAnswer_HopExpansionWalksRelationshipGraph(t *testing.T) {
+	now := time.Date(2026, 4, 18, 9, 0, 0, 0, time.UTC)
+
+	// Three claims chained through relationships:
+	//   cl_seed --(supports)--> cl_one --(contradicts)--> cl_two
+	// A query that finds only cl_seed via the events should, with hops=2,
+	// expand to include cl_one (1 hop) and cl_two (2 hops).
+	events := fakeEventRepo{events: []domain.Event{
+		{ID: "ev_seed", RunID: "r", Content: "Seed event about cache eviction policy", Timestamp: now},
+	}}
+	allClaims := []domain.Claim{
+		{ID: "cl_seed", Text: "Cache eviction is LRU", Type: domain.ClaimTypeFact, Status: domain.ClaimStatusActive, Confidence: 0.9, CreatedAt: now},
+		{ID: "cl_one", Text: "LRU outperforms FIFO under our workload", Type: domain.ClaimTypeFact, Status: domain.ClaimStatusActive, Confidence: 0.85, CreatedAt: now},
+		{ID: "cl_two", Text: "FIFO is simpler to reason about", Type: domain.ClaimTypeFact, Status: domain.ClaimStatusActive, Confidence: 0.7, CreatedAt: now},
+	}
+	repo := fakeClaimRepo{
+		claims:   allClaims,
+		evidence: []domain.ClaimEvidence{{ClaimID: "cl_seed", EventID: "ev_seed"}},
+	}
+	rels := fakeRelationshipRepo{rels: map[string][]domain.Relationship{
+		"cl_seed": {{ID: "r1", Type: domain.RelationshipTypeSupports, FromClaimID: "cl_seed", ToClaimID: "cl_one", CreatedAt: now}},
+		"cl_one": {
+			{ID: "r1", Type: domain.RelationshipTypeSupports, FromClaimID: "cl_seed", ToClaimID: "cl_one", CreatedAt: now},
+			{ID: "r2", Type: domain.RelationshipTypeContradicts, FromClaimID: "cl_one", ToClaimID: "cl_two", CreatedAt: now.Add(time.Minute)},
+		},
+		"cl_two": {{ID: "r2", Type: domain.RelationshipTypeContradicts, FromClaimID: "cl_one", ToClaimID: "cl_two", CreatedAt: now.Add(time.Minute)}},
+	}}
+
+	// ListByEventIDs returns only the seed claim (the others have no
+	// evidence link), so without hops the answer would have one claim.
+	repo.claims = []domain.Claim{allClaims[0]}
+	// But ListByIDs (used during expansion) needs to find the others too —
+	// stash them via a wrapper that knows both sets.
+	wrapper := hopFakeClaimRepo{base: repo, all: allClaims}
+
+	engine := NewEngine(events, wrapper, rels)
+
+	// Hops = 0 → just the seed.
+	noHops, err := engine.Answer("cache eviction policy")
+	if err != nil {
+		t.Fatalf("Answer(0 hops): %v", err)
+	}
+	if len(noHops.Claims) != 1 {
+		t.Fatalf("0-hop claim count = %d, want 1", len(noHops.Claims))
+	}
+
+	// Hops = 2 → seed + 1-hop neighbor + 2-hop neighbor.
+	withHops, err := engine.AnswerWithOptions("cache eviction policy", AnswerOptions{Hops: 2})
+	if err != nil {
+		t.Fatalf("Answer(2 hops): %v", err)
+	}
+	if len(withHops.Claims) != 3 {
+		t.Fatalf("2-hop claim count = %d, want 3 (got: %+v)", len(withHops.Claims), withHops.Claims)
+	}
+	if withHops.ClaimHopDistance["cl_seed"] != 0 {
+		t.Errorf("cl_seed hop distance = %d, want 0", withHops.ClaimHopDistance["cl_seed"])
+	}
+	if withHops.ClaimHopDistance["cl_one"] != 1 {
+		t.Errorf("cl_one hop distance = %d, want 1", withHops.ClaimHopDistance["cl_one"])
+	}
+	if withHops.ClaimHopDistance["cl_two"] != 2 {
+		t.Errorf("cl_two hop distance = %d, want 2", withHops.ClaimHopDistance["cl_two"])
+	}
+	if !strings.Contains(withHops.AnswerText, "Expanded 2 additional claim(s)") {
+		t.Errorf("AnswerText missing expansion summary: %q", withHops.AnswerText)
+	}
+
+	// Hops = 1 → seed + only the 1-hop neighbor (cl_two should not appear).
+	oneHop, err := engine.AnswerWithOptions("cache eviction policy", AnswerOptions{Hops: 1})
+	if err != nil {
+		t.Fatalf("Answer(1 hop): %v", err)
+	}
+	if len(oneHop.Claims) != 2 {
+		t.Fatalf("1-hop claim count = %d, want 2", len(oneHop.Claims))
+	}
+	if _, expanded := oneHop.ClaimHopDistance["cl_two"]; expanded {
+		t.Errorf("cl_two should not appear at hops=1")
+	}
+}
+
+// hopFakeClaimRepo extends fakeClaimRepo so ListByIDs (used for
+// hop-expansion) can find claims that aren't in the seed set.
+type hopFakeClaimRepo struct {
+	base fakeClaimRepo
+	all  []domain.Claim
+}
+
+func (r hopFakeClaimRepo) Upsert(ctx context.Context, c []domain.Claim) error {
+	return r.base.Upsert(ctx, c)
+}
+func (r hopFakeClaimRepo) ListByEventIDs(ctx context.Context, ids []string) ([]domain.Claim, error) {
+	return r.base.ListByEventIDs(ctx, ids)
+}
+func (r hopFakeClaimRepo) ListEvidenceByClaimIDs(ctx context.Context, ids []string) ([]domain.ClaimEvidence, error) {
+	return r.base.ListEvidenceByClaimIDs(ctx, ids)
+}
+func (r hopFakeClaimRepo) ListByIDs(_ context.Context, ids []string) ([]domain.Claim, error) {
+	wanted := map[string]struct{}{}
+	for _, id := range ids {
+		wanted[id] = struct{}{}
+	}
+	out := make([]domain.Claim, 0, len(ids))
+	for _, c := range r.all {
+		if _, ok := wanted[c.ID]; ok {
+			out = append(out, c)
+		}
+	}
+	return out, nil
 }
 
 func TestAnswer_AttributesProvenanceFromPulledEvent(t *testing.T) {

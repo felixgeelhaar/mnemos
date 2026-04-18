@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
@@ -81,4 +82,57 @@ func (r RelationshipRepository) ListByClaim(ctx context.Context, claimID string)
 	}
 
 	return rels, nil
+}
+
+// ListByClaimIDs returns every relationship that touches any of the given
+// claim IDs (as source OR target). Used by hop-expansion in the query
+// engine — N IDs in one round trip rather than N round trips.
+func (r RelationshipRepository) ListByClaimIDs(ctx context.Context, claimIDs []string) ([]domain.Relationship, error) {
+	if len(claimIDs) == 0 {
+		return []domain.Relationship{}, nil
+	}
+
+	placeholders := make([]string, 0, len(claimIDs))
+	args := make([]any, 0, len(claimIDs)*2)
+	for _, id := range claimIDs {
+		placeholders = append(placeholders, "?")
+		args = append(args, id)
+	}
+	for _, id := range claimIDs {
+		args = append(args, id)
+	}
+	in := strings.Join(placeholders, ",")
+
+	//nolint:gosec // G201: placeholders are literal "?", IDs flow through ? bindings
+	q := "SELECT id, type, from_claim_id, to_claim_id, created_at FROM relationships WHERE from_claim_id IN (" + in + ") OR to_claim_id IN (" + in + ")"
+	rows, err := r.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list relationships by claim ids: %w", err)
+	}
+	defer closeRows(rows)
+
+	out := make([]domain.Relationship, 0)
+	for rows.Next() {
+		var (
+			id, typ, from, to, createdStr string
+		)
+		if err := rows.Scan(&id, &typ, &from, &to, &createdStr); err != nil {
+			return nil, fmt.Errorf("scan relationship row: %w", err)
+		}
+		t, err := time.Parse(time.RFC3339Nano, createdStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse relationship created_at: %w", err)
+		}
+		out = append(out, domain.Relationship{
+			ID:          id,
+			Type:        domain.RelationshipType(typ),
+			FromClaimID: from,
+			ToClaimID:   to,
+			CreatedAt:   t,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate relationship rows: %w", err)
+	}
+	return out, nil
 }

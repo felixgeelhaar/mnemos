@@ -137,6 +137,7 @@ mnemos mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over
 | `mnemos extract --run <run-id>` | Extract claims from a run's events |
 | `mnemos relate` | Detect relationships between claims |
 | `mnemos query <question>` | Query with evidence |
+| `mnemos query --hops <N> <question>` | Expand result claims by N supports/contradicts hops (max 5) |
 | `mnemos query --llm <question>` | Query with LLM-grounded answer generation |
 | `mnemos metrics` | Knowledge base statistics |
 | `mnemos mcp` | Start MCP server over stdio |

@@ -125,6 +125,12 @@ type Answer struct {
 	// for claims that reached the local DB via `mnemos pull`. Empty means
 	// unknown — the engine fills this in when it can.
 	ClaimProvenance map[string]string
+	// ClaimHopDistance maps claim ID to the BFS hop distance from the
+	// directly-retrieved claims. 0 means the claim came from the top-ranked
+	// events; 1 means it was reached by following one supports/contradicts
+	// edge from a hop-0 claim, etc. Empty when hop expansion was not
+	// requested.
+	ClaimHopDistance map[string]int
 }
 
 // Validate checks that the Claim has a non-empty ID and text, a confidence

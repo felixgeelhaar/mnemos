@@ -153,6 +153,8 @@ func main() {
 		handlePull(args, flags)
 	case "audit":
 		handleAudit(args, flags)
+	case "resolve":
+		handleResolve(args, flags)
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command %q\n", command)
 		if suggestion := suggestCommand(command); suggestion != "" {
@@ -857,6 +859,7 @@ func printUsage() {
 	fmt.Println("  query --llm <question>               Query with LLM-grounded answer")
 	fmt.Println("  metrics [--human]                    Knowledge base statistics")
 	fmt.Println("  audit [--include-embeddings]         Export the full knowledge base as JSON")
+	fmt.Println("  resolve <winner> --over <loser>      Resolve a contradiction: winner → resolved, loser → deprecated")
 	fmt.Println("  mcp                                  Start MCP server over stdio")
 	fmt.Println("  serve [--port <n>]                   Start HTTP registry server (default :7777)")
 	fmt.Println("")

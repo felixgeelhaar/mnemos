@@ -114,6 +114,18 @@ type CompilationJob struct {
 	Error     string
 }
 
+// ClaimStatusTransition records a single status change on a claim. An
+// ordered series of these forms a claim's lifecycle history: when a claim
+// first appears as active, when it becomes contested, when it resolves or
+// is deprecated, and why.
+type ClaimStatusTransition struct {
+	ClaimID    string
+	FromStatus ClaimStatus // empty string means "initial state, no prior"
+	ToStatus   ClaimStatus
+	ChangedAt  time.Time
+	Reason     string // free-form human context: "auto: contradiction detected", "resolved via mnemos resolve", etc.
+}
+
 // EmbeddingRecord holds a stored vector embedding with its metadata.
 type EmbeddingRecord struct {
 	EntityID   string

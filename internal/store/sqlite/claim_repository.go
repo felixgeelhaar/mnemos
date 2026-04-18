@@ -22,8 +22,25 @@ func NewClaimRepository(db *sql.DB) ClaimRepository {
 	return ClaimRepository{db: db, q: sqlcgen.New(db)}
 }
 
-// Upsert inserts or updates the given claims in a single transaction.
+// Upsert inserts or updates the given claims in a single transaction. When
+// a claim's status changes (or a new claim is created), a row is appended
+// to claim_status_history so the lifecycle is reviewable. Callers don't
+// opt in — status is a first-class concept and its timeline should be
+// recorded for every write.
 func (r ClaimRepository) Upsert(ctx context.Context, claims []domain.Claim) error {
+	return r.upsertWithReason(ctx, claims, "")
+}
+
+// UpsertWithReason is like Upsert but records a human-readable reason on
+// each status transition. Use this when the caller has meaningful context
+// (e.g., "auto: contradiction detected with cl_abc", "resolved via mnemos
+// resolve"); pass empty to Upsert and the transition records "" which
+// still captures the when, just not the why.
+func (r ClaimRepository) UpsertWithReason(ctx context.Context, claims []domain.Claim, reason string) error {
+	return r.upsertWithReason(ctx, claims, reason)
+}
+
+func (r ClaimRepository) upsertWithReason(ctx context.Context, claims []domain.Claim, reason string) error {
 	if len(claims) == 0 {
 		return nil
 	}
@@ -35,12 +52,19 @@ func (r ClaimRepository) Upsert(ctx context.Context, claims []domain.Claim) erro
 	defer rollbackTx(tx)
 
 	qtx := r.q.WithTx(tx)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 
 	for _, claim := range claims {
 		if err := claim.Validate(); err != nil {
 			return fmt.Errorf("invalid claim %s: %w", claim.ID, err)
 		}
-		err := qtx.UpsertClaim(ctx, sqlcgen.UpsertClaimParams{
+
+		priorStatus, err := currentClaimStatus(ctx, tx, claim.ID)
+		if err != nil {
+			return fmt.Errorf("look up prior status for %s: %w", claim.ID, err)
+		}
+
+		err = qtx.UpsertClaim(ctx, sqlcgen.UpsertClaimParams{
 			ID:         claim.ID,
 			Text:       claim.Text,
 			Type:       string(claim.Type),
@@ -51,6 +75,17 @@ func (r ClaimRepository) Upsert(ctx context.Context, claims []domain.Claim) erro
 		if err != nil {
 			return fmt.Errorf("upsert claim %s: %w", claim.ID, err)
 		}
+
+		newStatus := string(claim.Status)
+		if priorStatus == newStatus {
+			continue // no transition
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO claim_status_history (claim_id, from_status, to_status, changed_at, reason) VALUES (?, ?, ?, ?, ?)`,
+			claim.ID, priorStatus, newStatus, now, reason,
+		); err != nil {
+			return fmt.Errorf("record status transition for %s: %w", claim.ID, err)
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -58,6 +93,18 @@ func (r ClaimRepository) Upsert(ctx context.Context, claims []domain.Claim) erro
 	}
 
 	return nil
+}
+
+// currentClaimStatus returns the claim's stored status, or "" when the
+// claim does not yet exist (meaning the incoming write is a fresh insert
+// and the transition row will record an empty from_status).
+func currentClaimStatus(ctx context.Context, tx *sql.Tx, claimID string) (string, error) {
+	var status string
+	err := tx.QueryRowContext(ctx, `SELECT status FROM claims WHERE id = ?`, claimID).Scan(&status)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return status, err
 }
 
 // UpsertEvidence inserts or updates claim-to-event evidence links in a single transaction.
@@ -133,6 +180,52 @@ ORDER BY c.created_at ASC`, strings.Join(placeholders, ",")) //nolint:gosec // G
 	}
 
 	return claims, nil
+}
+
+// ListStatusHistoryByClaimID returns the claim's status transitions in
+// chronological order (oldest first). An empty slice means either the
+// claim doesn't exist, or it exists but its status has never changed
+// (pre-existing claims from before the history table was added fall into
+// this bucket).
+func (r ClaimRepository) ListStatusHistoryByClaimID(ctx context.Context, claimID string) ([]domain.ClaimStatusTransition, error) {
+	// Order by id, not changed_at: id is AUTOINCREMENT so it reflects
+	// insertion order exactly. RFC3339Nano string sort is theoretically
+	// correct too, but two upserts in the same millisecond can collide,
+	// and id always disambiguates.
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT claim_id, from_status, to_status, changed_at, reason
+		 FROM claim_status_history
+		 WHERE claim_id = ?
+		 ORDER BY id ASC`, claimID)
+	if err != nil {
+		return nil, fmt.Errorf("list status history for %s: %w", claimID, err)
+	}
+	defer closeRows(rows)
+
+	out := make([]domain.ClaimStatusTransition, 0)
+	for rows.Next() {
+		var (
+			cid, from, to, changedAt, reason string
+		)
+		if err := rows.Scan(&cid, &from, &to, &changedAt, &reason); err != nil {
+			return nil, fmt.Errorf("scan status history row: %w", err)
+		}
+		t, err := time.Parse(time.RFC3339Nano, changedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse status history changed_at: %w", err)
+		}
+		out = append(out, domain.ClaimStatusTransition{
+			ClaimID:    cid,
+			FromStatus: domain.ClaimStatus(from),
+			ToStatus:   domain.ClaimStatus(to),
+			ChangedAt:  t,
+			Reason:     reason,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate status history rows: %w", err)
+	}
+	return out, nil
 }
 
 // ListEvidenceByClaimIDs returns the (claim_id, event_id) link rows for the

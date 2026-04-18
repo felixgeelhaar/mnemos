@@ -19,6 +19,7 @@ type ClaimRepository interface {
 	ListByEventIDs(ctx context.Context, eventIDs []string) ([]domain.Claim, error)
 	ListEvidenceByClaimIDs(ctx context.Context, claimIDs []string) ([]domain.ClaimEvidence, error)
 	ListByIDs(ctx context.Context, claimIDs []string) ([]domain.Claim, error)
+	ListStatusHistoryByClaimID(ctx context.Context, claimID string) ([]domain.ClaimStatusTransition, error)
 }
 
 // RelationshipRepository persists and retrieves relationships between claims.

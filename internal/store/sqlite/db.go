@@ -100,6 +100,19 @@ CREATE TABLE IF NOT EXISTS compilation_jobs (
 CREATE INDEX IF NOT EXISTS idx_compilation_jobs_kind ON compilation_jobs(kind);
 CREATE INDEX IF NOT EXISTS idx_compilation_jobs_status ON compilation_jobs(status);
 
+CREATE TABLE IF NOT EXISTS claim_status_history (
+	id INTEGER PRIMARY KEY AUTOINCREMENT,
+	claim_id TEXT NOT NULL,
+	from_status TEXT NOT NULL,
+	to_status TEXT NOT NULL,
+	changed_at TEXT NOT NULL,
+	reason TEXT NOT NULL,
+	FOREIGN KEY (claim_id) REFERENCES claims(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_claim_status_history_claim_id ON claim_status_history(claim_id);
+CREATE INDEX IF NOT EXISTS idx_claim_status_history_changed_at ON claim_status_history(changed_at);
+
 CREATE TABLE IF NOT EXISTS embeddings (
 	entity_id TEXT NOT NULL,
 	entity_type TEXT NOT NULL,

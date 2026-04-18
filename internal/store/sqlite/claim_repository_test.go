@@ -8,6 +8,87 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 )
 
+func TestClaimRepositoryStatusHistory_RecordsInitialInsertThenTransitions(t *testing.T) {
+	db := openTestDB(t)
+	defer closeDB(db)
+
+	ctx := context.Background()
+	repo := NewClaimRepository(db)
+
+	now := time.Date(2026, 4, 18, 9, 0, 0, 0, time.UTC)
+	claim := domain.Claim{
+		ID:         "cl_hist",
+		Text:       "Lifecycle test",
+		Type:       domain.ClaimTypeFact,
+		Confidence: 0.8,
+		Status:     domain.ClaimStatusActive,
+		CreatedAt:  now,
+	}
+
+	// Initial insert → history row with from_status = "".
+	if err := repo.Upsert(ctx, []domain.Claim{claim}); err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+	hist, err := repo.ListStatusHistoryByClaimID(ctx, "cl_hist")
+	if err != nil {
+		t.Fatalf("list hist: %v", err)
+	}
+	if len(hist) != 1 || hist[0].FromStatus != "" || hist[0].ToStatus != domain.ClaimStatusActive {
+		t.Fatalf("after insert: got %+v, want single ('' -> active) row", hist)
+	}
+
+	// Same-status upsert → no new row.
+	if err := repo.Upsert(ctx, []domain.Claim{claim}); err != nil {
+		t.Fatalf("re-upsert same status: %v", err)
+	}
+	hist, _ = repo.ListStatusHistoryByClaimID(ctx, "cl_hist")
+	if len(hist) != 1 {
+		t.Fatalf("after no-op upsert: %d rows, want 1", len(hist))
+	}
+
+	// Status change → new row with from_status = active.
+	claim.Status = domain.ClaimStatusContested
+	if err := repo.UpsertWithReason(ctx, []domain.Claim{claim}, "contradicts cl_other"); err != nil {
+		t.Fatalf("contested upsert: %v", err)
+	}
+	hist, _ = repo.ListStatusHistoryByClaimID(ctx, "cl_hist")
+	if len(hist) != 2 {
+		t.Fatalf("after contest: %d rows, want 2", len(hist))
+	}
+	if hist[1].FromStatus != domain.ClaimStatusActive || hist[1].ToStatus != domain.ClaimStatusContested {
+		t.Fatalf("bad second transition: %+v", hist[1])
+	}
+	if hist[1].Reason != "contradicts cl_other" {
+		t.Fatalf("reason not captured: %q", hist[1].Reason)
+	}
+
+	// Resolved → one more row.
+	claim.Status = domain.ClaimStatusResolved
+	if err := repo.UpsertWithReason(ctx, []domain.Claim{claim}, "operator chose winner"); err != nil {
+		t.Fatalf("resolve upsert: %v", err)
+	}
+	hist, _ = repo.ListStatusHistoryByClaimID(ctx, "cl_hist")
+	if len(hist) != 3 {
+		t.Fatalf("after resolve: %d rows, want 3", len(hist))
+	}
+	if hist[2].FromStatus != domain.ClaimStatusContested || hist[2].ToStatus != domain.ClaimStatusResolved {
+		t.Fatalf("bad third transition: %+v", hist[2])
+	}
+}
+
+func TestClaimRepositoryStatusHistory_EmptyForUnknownClaim(t *testing.T) {
+	db := openTestDB(t)
+	defer closeDB(db)
+
+	hist, err := NewClaimRepository(db).ListStatusHistoryByClaimID(context.Background(), "cl_nope")
+	if err != nil {
+		t.Fatalf("list hist: %v", err)
+	}
+	if len(hist) != 0 {
+		t.Fatalf("got %d rows for unknown claim, want 0", len(hist))
+	}
+}
+
 func TestClaimRepositoryUpsertAndListByEventIDs(t *testing.T) {
 	db := openTestDB(t)
 	defer closeDB(db)

@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -81,10 +82,17 @@ func PersistArtifacts(ctx context.Context, db *sql.DB, events []domain.Event, cl
 		}
 	}
 
+	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, claim := range claims {
 		if err := claim.Validate(); err != nil {
 			return fmt.Errorf("invalid claim %s: %w", claim.ID, err)
 		}
+
+		var priorStatus string
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM claims WHERE id = ?`, claim.ID).Scan(&priorStatus); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("look up prior status for %s: %w", claim.ID, err)
+		}
+
 		err = q.UpsertClaim(ctx, sqlcgen.UpsertClaimParams{
 			ID:         claim.ID,
 			Text:       claim.Text,
@@ -95,6 +103,15 @@ func PersistArtifacts(ctx context.Context, db *sql.DB, events []domain.Event, cl
 		})
 		if err != nil {
 			return fmt.Errorf("upsert claim %s: %w", claim.ID, err)
+		}
+
+		if priorStatus != string(claim.Status) {
+			if _, err := tx.ExecContext(ctx,
+				`INSERT INTO claim_status_history (claim_id, from_status, to_status, changed_at, reason) VALUES (?, ?, ?, ?, ?)`,
+				claim.ID, priorStatus, string(claim.Status), now, "pipeline",
+			); err != nil {
+				return fmt.Errorf("record status transition for %s: %w", claim.ID, err)
+			}
 		}
 	}
 

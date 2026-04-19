@@ -3,11 +3,14 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/felixgeelhaar/bolt"
@@ -163,9 +166,13 @@ func handleMCP() {
 	// watch_file uses a long-lived DB connection separate from the
 	// per-call connections in the other handlers. Opened lazily so
 	// startup doesn't fail just because the watcher isn't needed.
+	// We also remember the DB handle so the shutdown defer can close
+	// it after stopping the polling goroutine — without this the
+	// watcher leaks a connection on every MCP exit.
 	var (
 		watcherOnce sync.Once
 		watcher     *Watcher
+		watcherDB   *sql.DB
 		watcherErr  error
 	)
 	getWatcher := func() (*Watcher, error) {
@@ -175,6 +182,7 @@ func handleMCP() {
 				watcherErr = err
 				return
 			}
+			watcherDB = db
 			watcher = NewWatcher(db, mcpActor)
 		})
 		return watcher, watcherErr
@@ -292,7 +300,37 @@ func handleMCP() {
 			return out, nil
 		})
 
-	if err := mcp.ServeStdio(context.Background(), srv, mcp.WithMiddleware(mcp.DefaultMiddlewareWithTimeout(mcpBoltLogger{logger: logger}, 30*time.Second)...)); err != nil {
+	// Wire signal handling so a SIGINT/SIGTERM cancels the parent
+	// context: ServeStdio observes the cancellation and returns,
+	// then we tear the watcher down. Without this, Ctrl+C would
+	// leave the polling goroutine alive and the DB unflushed.
+	rootCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	stopSignals := make(chan os.Signal, 1)
+	signal.Notify(stopSignals, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig, ok := <-stopSignals
+		if !ok {
+			return
+		}
+		fmt.Fprintf(os.Stderr, "mcp: received %s, shutting down...\n", sig)
+		cancel()
+	}()
+
+	// Defer watcher shutdown so the polling goroutine exits and the
+	// DB connection it holds gets released. Cheap if no watcher was
+	// ever started.
+	defer func() {
+		if watcher != nil {
+			watcher.Stop()
+		}
+		if watcherDB != nil {
+			_ = watcherDB.Close()
+		}
+	}()
+
+	if err := mcp.ServeStdio(rootCtx, srv, mcp.WithMiddleware(mcp.DefaultMiddlewareWithTimeout(mcpBoltLogger{logger: logger}, 30*time.Second)...)); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatal(err)
 	}
 }

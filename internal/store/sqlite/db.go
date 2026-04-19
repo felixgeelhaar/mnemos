@@ -20,14 +20,25 @@ func Open(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("create database directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", path)
+	// Reliability PRAGMAs are passed via the DSN so they apply to
+	// every connection the pool opens, not just the first one.
+	// Setting them with db.Exec only affects whichever pooled conn
+	// happened to handle that statement — every subsequent goroutine
+	// might land on a fresh conn without WAL or busy_timeout, which
+	// breaks concurrent writes (we hit this in the auth stress test).
+	//
+	//   foreign_keys=ON: schema-level FK constraints aren't enforced
+	//     without this — SQLite's default is OFF for back-compat.
+	//   journal_mode=WAL: lets readers and a single writer coexist;
+	//     without it the whole file serialises and concurrent token
+	//     issuance fails with SQLITE_BUSY.
+	//   busy_timeout=5000: wait up to 5s for the writer lock before
+	//     returning SQLITE_BUSY. Friendlier than immediate failure
+	//     for short bursts of contention.
+	dsn := path + "?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database: %w", err)
-	}
-
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("enable foreign keys: %w", err)
 	}
 
 	if err := ensureSchema(db); err != nil {

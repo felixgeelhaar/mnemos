@@ -93,6 +93,10 @@ func PersistArtifacts(ctx context.Context, db *sql.DB, events []domain.Event, cl
 			return fmt.Errorf("look up prior status for %s: %w", claim.ID, err)
 		}
 
+		createdBy := claim.CreatedBy
+		if createdBy == "" {
+			createdBy = domain.SystemUser
+		}
 		err = q.UpsertClaim(ctx, sqlcgen.UpsertClaimParams{
 			ID:         claim.ID,
 			Text:       claim.Text,
@@ -100,6 +104,7 @@ func PersistArtifacts(ctx context.Context, db *sql.DB, events []domain.Event, cl
 			Confidence: claim.Confidence,
 			Status:     string(claim.Status),
 			CreatedAt:  claim.CreatedAt.UTC().Format(time.RFC3339Nano),
+			CreatedBy:  createdBy,
 		})
 		if err != nil {
 			return fmt.Errorf("upsert claim %s: %w", claim.ID, err)
@@ -126,12 +131,17 @@ func PersistArtifacts(ctx context.Context, db *sql.DB, events []domain.Event, cl
 	}
 
 	for _, rel := range relationships {
+		createdBy := rel.CreatedBy
+		if createdBy == "" {
+			createdBy = domain.SystemUser
+		}
 		err = q.UpsertRelationship(ctx, sqlcgen.UpsertRelationshipParams{
 			ID:          rel.ID,
 			Type:        string(rel.Type),
 			FromClaimID: rel.FromClaimID,
 			ToClaimID:   rel.ToClaimID,
 			CreatedAt:   rel.CreatedAt.UTC().Format(time.RFC3339Nano),
+			CreatedBy:   createdBy,
 		})
 		if err != nil {
 			return fmt.Errorf("upsert relationship %s: %w", rel.ID, err)

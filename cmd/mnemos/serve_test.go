@@ -253,10 +253,14 @@ func TestServe_MetricsCountsSchemaCorrectly(t *testing.T) {
 }
 
 func TestServe_UnsupportedMethodReturns405(t *testing.T) {
-	srv := httptest.NewServer(newServerMux(newServerTestDB(t)))
-	defer srv.Close()
+	// Needs auth to reach the handler; without it the middleware correctly
+	// returns 401 before the method dispatch.
+	st := newServeJWTTest(t)
 
-	req, _ := http.NewRequest(http.MethodDelete, srv.URL+"/v1/events", nil)
+	req, _ := http.NewRequest(http.MethodDelete, st.Srv.URL+"/v1/events", nil)
+	for k, v := range st.Auth {
+		req.Header.Set(k, v)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("delete: %v", err)

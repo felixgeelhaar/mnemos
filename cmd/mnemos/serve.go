@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/subtle"
 	"database/sql"
 	_ "embed"
 	"encoding/json"
@@ -17,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/felixgeelhaar/bolt"
+	"github.com/felixgeelhaar/mnemos/internal/auth"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/embedding"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
@@ -109,7 +110,27 @@ func handleServe(args []string, _ Flags) {
 
 // newServerMux wires the routes. Exported in package for httptest in
 // serve_test.go without booting a real listener.
+//
+// Auth model: reads are open; mutating methods require a valid Mnemos
+// JWT signed with the server secret. The secret is resolved from
+// MNEMOS_JWT_SECRET or a per-install file (auto-created on first boot).
+// Revoked JTIs are honored via the RevokedTokenRepository denylist.
 func newServerMux(db *sql.DB) http.Handler {
+	_, projectRoot, _ := findProjectDB()
+	secretPath := auth.DefaultSecretPath(projectRoot)
+	secret, created, err := auth.LoadOrCreateSecret(secretPath)
+	if err != nil {
+		// Secret resolution failing at boot is fatal — without it the
+		// server can't verify any token. Fail loudly so the operator can
+		// fix it (e.g. set MNEMOS_JWT_SECRET).
+		fmt.Fprintf(os.Stderr, "serve: load JWT secret: %v\n", err)
+		os.Exit(int(ExitError))
+	}
+	if created {
+		fmt.Fprintf(os.Stderr, "serve: generated new JWT secret at %s — previously-issued tokens are invalid\n", secretPath)
+	}
+	verifier := auth.NewVerifier(secret, sqlite.NewRevokedTokenRepository(db))
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleWebRoot)
 	mux.HandleFunc("/health", handleHealth)
@@ -118,52 +139,9 @@ func newServerMux(db *sql.DB) http.Handler {
 	mux.HandleFunc("/v1/relationships", makeRelationshipsHandler(db))
 	mux.HandleFunc("/v1/embeddings", makeEmbeddingsHandler(db))
 	mux.HandleFunc("/v1/metrics", makeMetricsHandler(db))
-	token := os.Getenv("MNEMOS_REGISTRY_TOKEN")
-	return logMiddleware(authMiddleware(token, mux))
-}
 
-// authMiddleware enforces bearer-token auth on write methods (POST/PUT/
-// DELETE) when a token is configured. Reads are always allowed — the
-// registry's first job is to be browsable; tightening reads is a future
-// commit when multi-tenant scopes land. constant-time comparison avoids
-// timing oracles even for a single shared token.
-func authMiddleware(token string, h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
-			h.ServeHTTP(w, r)
-			return
-		}
-		if token == "" {
-			// No token configured → registry is fully open. Useful for
-			// local dev; production deploys should always set the env var.
-			h.ServeHTTP(w, r)
-			return
-		}
-		auth := r.Header.Get("Authorization")
-		const prefix = "Bearer "
-		if !strings.HasPrefix(auth, prefix) {
-			writeError(w, http.StatusUnauthorized, "missing bearer token")
-			return
-		}
-		provided := strings.TrimPrefix(auth, prefix)
-		if subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
-			writeError(w, http.StatusUnauthorized, "invalid bearer token")
-			return
-		}
-		h.ServeHTTP(w, r)
-	})
-}
-
-// logMiddleware writes a one-line access log to stderr per request. Keeps
-// stdout clean for the boot banner and any future structured output.
-func logMiddleware(h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		rw := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
-		h.ServeHTTP(rw, r)
-		fmt.Fprintf(os.Stderr, "%s %s %d %s\n",
-			r.Method, r.URL.RequestURI(), rw.status, time.Since(start).Round(time.Microsecond))
-	})
+	logger := bolt.New(bolt.NewJSONHandler(os.Stderr))
+	return boltAccessLog(logger, jwtAuthMiddleware(verifier, mux))
 }
 
 type statusRecorder struct {
@@ -531,6 +509,7 @@ func appendEventsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 	repo := sqlite.NewEventRepository(db)
 	ctx := r.Context()
+	actor := actorFromContext(ctx)
 	now := time.Now().UTC()
 	accepted := 0
 	for i, e := range req.Events {
@@ -556,6 +535,7 @@ func appendEventsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 			Timestamp:     ts,
 			Metadata:      e.Metadata,
 			IngestedAt:    ingested,
+			CreatedBy:     actor,
 		}
 		if err := repo.Append(ctx, event); err != nil {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("events[%d]: %v", i, err))
@@ -589,6 +569,7 @@ func appendClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 	claims := make([]domain.Claim, 0, len(req.Claims))
 	now := time.Now().UTC()
+	actor := actorFromContext(r.Context())
 	for i, c := range req.Claims {
 		if c.Type != "" && !validClaimType(c.Type) {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("claims[%d].type %q invalid", i, c.Type))
@@ -613,6 +594,7 @@ func appendClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 			Confidence: c.Confidence,
 			Status:     domain.ClaimStatus(c.Status),
 			CreatedAt:  created,
+			CreatedBy:  actor,
 		}
 		claims = append(claims, claim)
 	}
@@ -654,6 +636,7 @@ func appendRelationshipsHandler(db *sql.DB, w http.ResponseWriter, r *http.Reque
 
 	rels := make([]domain.Relationship, 0, len(req.Relationships))
 	now := time.Now().UTC()
+	actor := actorFromContext(r.Context())
 	for i, rel := range req.Relationships {
 		if rel.Type != "supports" && rel.Type != "contradicts" {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("relationships[%d].type %q invalid (want supports or contradicts)", i, rel.Type))
@@ -673,6 +656,7 @@ func appendRelationshipsHandler(db *sql.DB, w http.ResponseWriter, r *http.Reque
 			FromClaimID: rel.FromClaimID,
 			ToClaimID:   rel.ToClaimID,
 			CreatedAt:   created,
+			CreatedBy:   actor,
 		})
 	}
 
@@ -791,6 +775,7 @@ func appendEmbeddingsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request)
 
 	repo := sqlite.NewEmbeddingRepository(db)
 	ctx := r.Context()
+	actor := actorFromContext(ctx)
 	accepted := 0
 	for i, e := range req.Embeddings {
 		if e.EntityID == "" {
@@ -809,7 +794,7 @@ func appendEmbeddingsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("embeddings[%d]: dimensions=%d but vector length=%d", i, e.Dimensions, len(e.Vector)))
 			return
 		}
-		if err := repo.Upsert(ctx, e.EntityID, e.EntityType, e.Vector, e.Model); err != nil {
+		if err := repo.UpsertAs(ctx, e.EntityID, e.EntityType, e.Vector, e.Model, actor); err != nil {
 			writeError(w, http.StatusInternalServerError, fmt.Sprintf("upsert embedding %s/%s: %v", e.EntityID, e.EntityType, err))
 			return
 		}

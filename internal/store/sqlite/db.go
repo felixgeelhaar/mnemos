@@ -48,11 +48,13 @@ CREATE TABLE IF NOT EXISTS events (
 	source_input_id TEXT NOT NULL,
 	timestamp TEXT NOT NULL,
 	metadata_json TEXT NOT NULL,
-	ingested_at TEXT NOT NULL
+	ingested_at TEXT NOT NULL,
+	created_by TEXT NOT NULL DEFAULT '<system>'
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_source_input_id ON events(source_input_id);
+CREATE INDEX IF NOT EXISTS idx_events_run_id ON events(run_id);
 
 CREATE TABLE IF NOT EXISTS claims (
 	id TEXT PRIMARY KEY,
@@ -60,7 +62,8 @@ CREATE TABLE IF NOT EXISTS claims (
 	type TEXT NOT NULL,
 	confidence REAL NOT NULL,
 	status TEXT NOT NULL,
-	created_at TEXT NOT NULL
+	created_at TEXT NOT NULL,
+	created_by TEXT NOT NULL DEFAULT '<system>'
 );
 
 CREATE TABLE IF NOT EXISTS claim_evidence (
@@ -78,6 +81,7 @@ CREATE TABLE IF NOT EXISTS relationships (
 	from_claim_id TEXT NOT NULL,
 	to_claim_id TEXT NOT NULL,
 	created_at TEXT NOT NULL,
+	created_by TEXT NOT NULL DEFAULT '<system>',
 	FOREIGN KEY (from_claim_id) REFERENCES claims(id),
 	FOREIGN KEY (to_claim_id) REFERENCES claims(id)
 );
@@ -107,6 +111,7 @@ CREATE TABLE IF NOT EXISTS claim_status_history (
 	to_status TEXT NOT NULL,
 	changed_at TEXT NOT NULL,
 	reason TEXT NOT NULL,
+	changed_by TEXT NOT NULL DEFAULT '<system>',
 	FOREIGN KEY (claim_id) REFERENCES claims(id)
 );
 
@@ -120,6 +125,7 @@ CREATE TABLE IF NOT EXISTS embeddings (
 	model TEXT NOT NULL,
 	dimensions INTEGER NOT NULL,
 	created_at TEXT NOT NULL,
+	created_by TEXT NOT NULL DEFAULT '<system>',
 	PRIMARY KEY (entity_id, entity_type)
 );
 
@@ -145,55 +151,13 @@ CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires_at ON revoked_tokens(expir
 `
 
 	if _, err := db.Exec(schema); err != nil {
-		return fmt.Errorf("ensure events schema: %w", err)
+		return fmt.Errorf("ensure schema: %w", err)
 	}
 
-	if err := ensureEventsRunIDColumn(db); err != nil {
-		return err
-	}
-	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_events_run_id ON events(run_id);`); err != nil {
-		return fmt.Errorf("ensure run_id event index: %w", err)
-	}
-
-	return nil
-}
-
-func ensureEventsRunIDColumn(db *sql.DB) error {
-	rows, err := db.Query(`PRAGMA table_info(events);`)
-	if err != nil {
-		return fmt.Errorf("read events table info: %w", err)
-	}
-	defer closeRows(rows)
-
-	hasRunID := false
-	for rows.Next() {
-		var (
-			cid       int
-			name      string
-			typeName  string
-			notNull   int
-			defaultV  sql.NullString
-			primaryPK int
-		)
-		if err := rows.Scan(&cid, &name, &typeName, &notNull, &defaultV, &primaryPK); err != nil {
-			return fmt.Errorf("scan events table info: %w", err)
-		}
-		if name == "run_id" {
-			hasRunID = true
-			break
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate events table info: %w", err)
-	}
-
-	if hasRunID {
-		return nil
-	}
-
-	if _, err := db.Exec(`ALTER TABLE events ADD COLUMN run_id TEXT NOT NULL DEFAULT '';`); err != nil {
-		return fmt.Errorf("add events.run_id column: %w", err)
-	}
+	// Pre-launch: bootstrap schema is the single source of truth. No
+	// in-place migration helpers — devs upgrading from an older snapshot
+	// drop their dev DB and start fresh. When we go live this section
+	// gains a real migration framework (golang-migrate or equivalent).
 
 	return nil
 }

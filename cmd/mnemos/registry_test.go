@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/felixgeelhaar/mnemos/internal/auth"
+	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
@@ -88,25 +92,48 @@ func TestClaimsToBatches_AttachesEvidenceToFirstBatchOnly(t *testing.T) {
 	}
 }
 
-// roundTripWithFakeRegistry sets up a fake registry server and runs the
-// push/pull cycle against it from a temp local DB. Returns the local DB
-// post-pull plus the registry URL for assertions.
-func newFakeRegistry(t *testing.T) (string, *http.Client, func()) {
+// newFakeRegistry sets up a fake registry server and returns a token
+// authorized to write to it. The token is a real Mnemos JWT minted
+// against the test JWT secret (pinned by TestMain), and a matching user
+// row is seeded so the server's revocation lookup path stays consistent
+// with production.
+func newFakeRegistry(t *testing.T) (url string, client *http.Client, token string, closer func()) {
 	t.Helper()
 	regDB, err := sqlite.Open(filepath.Join(t.TempDir(), "registry.db"))
 	if err != nil {
 		t.Fatalf("open registry db: %v", err)
 	}
+
+	// Mint a token signed with the same secret TestMain pinned. Using
+	// the env-exposed secret avoids having to plumb bytes through two
+	// helpers just for tests.
+	secretHex := os.Getenv("MNEMOS_JWT_SECRET")
+	secret, err := hex.DecodeString(secretHex)
+	if err != nil {
+		t.Fatalf("decode test secret: %v", err)
+	}
+	user := domain.User{
+		ID: "usr_pushtest", Name: "push", Email: "push@test.local",
+		Status: domain.UserStatusActive, CreatedAt: time.Now().UTC(),
+	}
+	if err := sqlite.NewUserRepository(regDB).Create(context.Background(), user); err != nil {
+		t.Fatalf("seed registry user: %v", err)
+	}
+	jwt, _, err := auth.NewIssuer(secret).IssueUserToken(user, time.Hour)
+	if err != nil {
+		t.Fatalf("issue token: %v", err)
+	}
+
 	srv := httptest.NewServer(newServerMux(regDB))
-	closer := func() {
+	closer = func() {
 		srv.Close()
 		_ = regDB.Close()
 	}
-	return srv.URL, srv.Client(), closer
+	return srv.URL, srv.Client(), jwt, closer
 }
 
 func TestPushPull_RoundTripsAllResources(t *testing.T) {
-	regURL, _, closeReg := newFakeRegistry(t)
+	regURL, _, regToken, closeReg := newFakeRegistry(t)
 	defer closeReg()
 
 	// Local DB seeded with 1 event, 1 claim, 1 evidence link, 1 relationship.
@@ -133,13 +160,13 @@ func TestPushPull_RoundTripsAllResources(t *testing.T) {
 	claims, evidence, _ := loadAllClaimsForPush(ctx, localDB)
 	rels, _ := loadAllRelationshipsForPush(ctx, localDB)
 
-	if n, err := pushBatched(ctx, client, regURL+"/v1/events", "", "events", eventsToBatches(events)); err != nil || n != 1 {
+	if n, err := pushBatched(ctx, client, regURL+"/v1/events", regToken, "events", eventsToBatches(events)); err != nil || n != 1 {
 		t.Fatalf("push events n=%d err=%v", n, err)
 	}
-	if n, err := pushBatched(ctx, client, regURL+"/v1/claims", "", "claims", claimsToBatches(claims, evidence)); err != nil || n != 2 {
+	if n, err := pushBatched(ctx, client, regURL+"/v1/claims", regToken, "claims", claimsToBatches(claims, evidence)); err != nil || n != 2 {
 		t.Fatalf("push claims n=%d err=%v", n, err)
 	}
-	if n, err := pushBatched(ctx, client, regURL+"/v1/relationships", "", "relationships", relsToBatches(rels)); err != nil || n != 1 {
+	if n, err := pushBatched(ctx, client, regURL+"/v1/relationships", regToken, "relationships", relsToBatches(rels)); err != nil || n != 1 {
 		t.Fatalf("push relationships n=%d err=%v", n, err)
 	}
 
@@ -213,7 +240,7 @@ func TestPushBatched_PassesAuthHeader(t *testing.T) {
 }
 
 func TestPushPull_EmbeddingsRoundTripBitExact(t *testing.T) {
-	regURL, _, closeReg := newFakeRegistry(t)
+	regURL, _, regToken, closeReg := newFakeRegistry(t)
 	defer closeReg()
 
 	localDB, err := sqlite.Open(filepath.Join(t.TempDir(), "local.db"))
@@ -248,7 +275,7 @@ func TestPushPull_EmbeddingsRoundTripBitExact(t *testing.T) {
 		t.Fatalf("loaded %d embeddings, want 2", len(embeddings))
 	}
 	client := &http.Client{Timeout: 10 * time.Second}
-	if n, err := pushBatched(ctx, client, regURL+"/v1/embeddings", "", "embeddings", embeddingsToBatches(embeddings)); err != nil || n != 2 {
+	if n, err := pushBatched(ctx, client, regURL+"/v1/embeddings", regToken, "embeddings", embeddingsToBatches(embeddings)); err != nil || n != 2 {
 		t.Fatalf("push n=%d err=%v", n, err)
 	}
 
@@ -292,7 +319,7 @@ func TestPushPull_EmbeddingsRoundTripBitExact(t *testing.T) {
 }
 
 func TestAppendEmbeddings_RejectsLengthMismatch(t *testing.T) {
-	regURL, _, closeReg := newFakeRegistry(t)
+	regURL, _, regToken, closeReg := newFakeRegistry(t)
 	defer closeReg()
 
 	body := map[string]any{
@@ -301,7 +328,7 @@ func TestAppendEmbeddings_RejectsLengthMismatch(t *testing.T) {
 			"vector": []float32{1.0, 2.0}, "model": "m", "dimensions": 5,
 		}},
 	}
-	resp := postJSON(t, regURL+"/v1/embeddings", body, nil)
+	resp := postJSON(t, regURL+"/v1/embeddings", body, map[string]string{"Authorization": "Bearer " + regToken})
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
@@ -309,7 +336,7 @@ func TestAppendEmbeddings_RejectsLengthMismatch(t *testing.T) {
 }
 
 func TestAppendEmbeddings_RejectsBadEntityType(t *testing.T) {
-	regURL, _, closeReg := newFakeRegistry(t)
+	regURL, _, regToken, closeReg := newFakeRegistry(t)
 	defer closeReg()
 
 	body := map[string]any{
@@ -318,7 +345,7 @@ func TestAppendEmbeddings_RejectsBadEntityType(t *testing.T) {
 			"vector": []float32{1.0}, "model": "m",
 		}},
 	}
-	resp := postJSON(t, regURL+"/v1/embeddings", body, nil)
+	resp := postJSON(t, regURL+"/v1/embeddings", body, map[string]string{"Authorization": "Bearer " + regToken})
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)

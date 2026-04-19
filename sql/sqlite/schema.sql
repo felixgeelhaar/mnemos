@@ -6,11 +6,13 @@ CREATE TABLE IF NOT EXISTS events (
   source_input_id TEXT NOT NULL,
   timestamp TEXT NOT NULL,
   metadata_json TEXT NOT NULL,
-  ingested_at TEXT NOT NULL
+  ingested_at TEXT NOT NULL,
+  created_by TEXT NOT NULL DEFAULT '<system>'
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_source_input_id ON events(source_input_id);
+CREATE INDEX IF NOT EXISTS idx_events_run_id ON events(run_id);
 CREATE INDEX IF NOT EXISTS idx_events_run_id ON events(run_id);
 
 CREATE TABLE IF NOT EXISTS claims (
@@ -19,7 +21,8 @@ CREATE TABLE IF NOT EXISTS claims (
   type TEXT NOT NULL,
   confidence REAL NOT NULL,
   status TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  created_by TEXT NOT NULL DEFAULT '<system>'
 );
 
 CREATE TABLE IF NOT EXISTS claim_evidence (
@@ -37,6 +40,7 @@ CREATE TABLE IF NOT EXISTS relationships (
   from_claim_id TEXT NOT NULL,
   to_claim_id TEXT NOT NULL,
   created_at TEXT NOT NULL,
+  created_by TEXT NOT NULL DEFAULT '<system>',
   FOREIGN KEY (from_claim_id) REFERENCES claims(id),
   FOREIGN KEY (to_claim_id) REFERENCES claims(id)
 );
@@ -66,6 +70,7 @@ CREATE TABLE IF NOT EXISTS claim_status_history (
   to_status TEXT NOT NULL,
   changed_at TEXT NOT NULL,
   reason TEXT NOT NULL,
+  changed_by TEXT NOT NULL DEFAULT '<system>',
   FOREIGN KEY (claim_id) REFERENCES claims(id)
 );
 
@@ -79,6 +84,7 @@ CREATE TABLE IF NOT EXISTS embeddings (
   model TEXT NOT NULL,
   dimensions INTEGER NOT NULL,
   created_at TEXT NOT NULL,
+  created_by TEXT NOT NULL DEFAULT '<system>',
   PRIMARY KEY (entity_id, entity_type)
 );
 

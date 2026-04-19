@@ -11,11 +11,22 @@ type Claim struct {
 	Confidence float64 `json:"confidence"`
 	Status     string  `json:"status"`
 	CreatedAt  string  `json:"created_at"`
+	CreatedBy  string  `json:"created_by"`
 }
 
 type ClaimEvidence struct {
 	ClaimID string `json:"claim_id"`
 	EventID string `json:"event_id"`
+}
+
+type ClaimStatusHistory struct {
+	ID         int64  `json:"id"`
+	ClaimID    string `json:"claim_id"`
+	FromStatus string `json:"from_status"`
+	ToStatus   string `json:"to_status"`
+	ChangedAt  string `json:"changed_at"`
+	Reason     string `json:"reason"`
+	ChangedBy  string `json:"changed_by"`
 }
 
 type CompilationJob struct {
@@ -35,6 +46,7 @@ type Embedding struct {
 	Model      string `json:"model"`
 	Dimensions int64  `json:"dimensions"`
 	CreatedAt  string `json:"created_at"`
+	CreatedBy  string `json:"created_by"`
 }
 
 type Event struct {
@@ -46,6 +58,7 @@ type Event struct {
 	Timestamp     string `json:"timestamp"`
 	MetadataJson  string `json:"metadata_json"`
 	IngestedAt    string `json:"ingested_at"`
+	CreatedBy     string `json:"created_by"`
 }
 
 type Relationship struct {
@@ -54,4 +67,19 @@ type Relationship struct {
 	FromClaimID string `json:"from_claim_id"`
 	ToClaimID   string `json:"to_claim_id"`
 	CreatedAt   string `json:"created_at"`
+	CreatedBy   string `json:"created_by"`
+}
+
+type RevokedToken struct {
+	Jti       string `json:"jti"`
+	RevokedAt string `json:"revoked_at"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+type User struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"created_at"`
 }

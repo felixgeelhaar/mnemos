@@ -43,6 +43,7 @@ func (r RelationshipRepository) Upsert(ctx context.Context, relationships []doma
 			FromClaimID: rel.FromClaimID,
 			ToClaimID:   rel.ToClaimID,
 			CreatedAt:   rel.CreatedAt.UTC().Format(time.RFC3339Nano),
+			CreatedBy:   actorOr(rel.CreatedBy),
 		})
 		if err != nil {
 			return fmt.Errorf("upsert relationship %s: %w", rel.ID, err)
@@ -78,6 +79,7 @@ func (r RelationshipRepository) ListByClaim(ctx context.Context, claimID string)
 			FromClaimID: row.FromClaimID,
 			ToClaimID:   row.ToClaimID,
 			CreatedAt:   t,
+			CreatedBy:   row.CreatedBy,
 		})
 	}
 
@@ -104,7 +106,7 @@ func (r RelationshipRepository) ListByClaimIDs(ctx context.Context, claimIDs []s
 	in := strings.Join(placeholders, ",")
 
 	//nolint:gosec // G201: placeholders are literal "?", IDs flow through ? bindings
-	q := "SELECT id, type, from_claim_id, to_claim_id, created_at FROM relationships WHERE from_claim_id IN (" + in + ") OR to_claim_id IN (" + in + ")"
+	q := "SELECT id, type, from_claim_id, to_claim_id, created_at, created_by FROM relationships WHERE from_claim_id IN (" + in + ") OR to_claim_id IN (" + in + ")"
 	rows, err := r.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list relationships by claim ids: %w", err)
@@ -114,9 +116,9 @@ func (r RelationshipRepository) ListByClaimIDs(ctx context.Context, claimIDs []s
 	out := make([]domain.Relationship, 0)
 	for rows.Next() {
 		var (
-			id, typ, from, to, createdStr string
+			id, typ, from, to, createdStr, createdBy string
 		)
-		if err := rows.Scan(&id, &typ, &from, &to, &createdStr); err != nil {
+		if err := rows.Scan(&id, &typ, &from, &to, &createdStr, &createdBy); err != nil {
 			return nil, fmt.Errorf("scan relationship row: %w", err)
 		}
 		t, err := time.Parse(time.RFC3339Nano, createdStr)
@@ -129,6 +131,7 @@ func (r RelationshipRepository) ListByClaimIDs(ctx context.Context, claimIDs []s
 			FromClaimID: from,
 			ToClaimID:   to,
 			CreatedAt:   t,
+			CreatedBy:   createdBy,
 		})
 	}
 	if err := rows.Err(); err != nil {

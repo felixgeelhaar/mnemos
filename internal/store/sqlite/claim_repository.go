@@ -71,6 +71,7 @@ func (r ClaimRepository) upsertWithReason(ctx context.Context, claims []domain.C
 			Confidence: claim.Confidence,
 			Status:     string(claim.Status),
 			CreatedAt:  claim.CreatedAt.UTC().Format(time.RFC3339Nano),
+			CreatedBy:  actorOr(claim.CreatedBy),
 		})
 		if err != nil {
 			return fmt.Errorf("upsert claim %s: %w", claim.ID, err)
@@ -155,7 +156,7 @@ func (r ClaimRepository) ListByEventIDs(ctx context.Context, eventIDs []string) 
 	}
 
 	query := fmt.Sprintf(`
-SELECT DISTINCT c.id, c.text, c.type, c.confidence, c.status, c.created_at
+SELECT DISTINCT c.id, c.text, c.type, c.confidence, c.status, c.created_at, c.created_by
 FROM claims c
 JOIN claim_evidence ce ON ce.claim_id = c.id
 WHERE ce.event_id IN (%s)
@@ -286,7 +287,7 @@ func (r ClaimRepository) ListByIDs(ctx context.Context, claimIDs []string) ([]do
 	}
 
 	query := fmt.Sprintf(`
-SELECT id, text, type, confidence, status, created_at
+SELECT id, text, type, confidence, status, created_at, created_by
 FROM claims
 WHERE id IN (%s)`, strings.Join(placeholders, ",")) //nolint:gosec // G201: placeholders are literal "?" strings, not user input
 
@@ -336,6 +337,7 @@ func mapSQLClaim(row sqlcgen.Claim) (domain.Claim, error) {
 		Type:       domain.ClaimType(row.Type),
 		Confidence: row.Confidence,
 		Status:     domain.ClaimStatus(row.Status),
+		CreatedBy:  row.CreatedBy,
 	}
 
 	t, err := time.Parse(time.RFC3339Nano, row.CreatedAt)
@@ -370,6 +372,7 @@ func scanClaim(scanner claimRowScanner) (domain.Claim, error) {
 		&claim.Confidence,
 		&status,
 		&createdAt,
+		&claim.CreatedBy,
 	); err != nil {
 		return domain.Claim{}, err
 	}

@@ -40,6 +40,7 @@ func (r EventRepository) Append(ctx context.Context, event domain.Event) error {
 		Timestamp:     event.Timestamp.UTC().Format(time.RFC3339Nano),
 		MetadataJson:  string(metadata),
 		IngestedAt:    event.IngestedAt.UTC().Format(time.RFC3339Nano),
+		CreatedBy:     actorOr(event.CreatedBy),
 	})
 	if err != nil {
 		return fmt.Errorf("insert event: %w", err)
@@ -79,7 +80,7 @@ func (r EventRepository) ListByIDs(ctx context.Context, ids []string) ([]domain.
 	}
 
 	query := fmt.Sprintf(`
-SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at
+SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at, created_by
 FROM events
 WHERE id IN (%s)`, strings.Join(placeholders, ",")) //nolint:gosec // G201: placeholders are literal "?" strings, not user input
 
@@ -174,6 +175,7 @@ func mapSQLEvent(row sqlcgen.Event) (domain.Event, error) {
 		Timestamp:     eventTimestamp,
 		Metadata:      metadata,
 		IngestedAt:    eventIngestedAt,
+		CreatedBy:     row.CreatedBy,
 	}, nil
 }
 
@@ -199,6 +201,7 @@ func scanEvent(scanner eventRowScanner) (domain.Event, error) {
 		&timestamp,
 		&metadataRaw,
 		&ingestedAt,
+		&event.CreatedBy,
 	); err != nil {
 		return domain.Event{}, err
 	}

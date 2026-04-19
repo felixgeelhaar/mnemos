@@ -10,7 +10,7 @@ import (
 )
 
 const getEmbeddingByEntityID = `-- name: GetEmbeddingByEntityID :one
-SELECT entity_id, entity_type, vector, model, dimensions, created_at
+SELECT entity_id, entity_type, vector, model, dimensions, created_at, created_by
 FROM embeddings
 WHERE entity_id = ? AND entity_type = ?
 `
@@ -30,12 +30,13 @@ func (q *Queries) GetEmbeddingByEntityID(ctx context.Context, arg GetEmbeddingBy
 		&i.Model,
 		&i.Dimensions,
 		&i.CreatedAt,
+		&i.CreatedBy,
 	)
 	return i, err
 }
 
 const listEmbeddingsByEntityType = `-- name: ListEmbeddingsByEntityType :many
-SELECT entity_id, entity_type, vector, model, dimensions, created_at
+SELECT entity_id, entity_type, vector, model, dimensions, created_at, created_by
 FROM embeddings
 WHERE entity_type = ?
 ORDER BY created_at ASC
@@ -57,6 +58,7 @@ func (q *Queries) ListEmbeddingsByEntityType(ctx context.Context, entityType str
 			&i.Model,
 			&i.Dimensions,
 			&i.CreatedAt,
+			&i.CreatedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -72,13 +74,14 @@ func (q *Queries) ListEmbeddingsByEntityType(ctx context.Context, entityType str
 }
 
 const upsertEmbedding = `-- name: UpsertEmbedding :exec
-INSERT INTO embeddings (entity_id, entity_type, vector, model, dimensions, created_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO embeddings (entity_id, entity_type, vector, model, dimensions, created_at, created_by)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (entity_id, entity_type) DO UPDATE SET
   vector = excluded.vector,
   model = excluded.model,
   dimensions = excluded.dimensions,
-  created_at = excluded.created_at
+  created_at = excluded.created_at,
+  created_by = excluded.created_by
 `
 
 type UpsertEmbeddingParams struct {
@@ -88,6 +91,7 @@ type UpsertEmbeddingParams struct {
 	Model      string `json:"model"`
 	Dimensions int64  `json:"dimensions"`
 	CreatedAt  string `json:"created_at"`
+	CreatedBy  string `json:"created_by"`
 }
 
 func (q *Queries) UpsertEmbedding(ctx context.Context, arg UpsertEmbeddingParams) error {
@@ -98,6 +102,7 @@ func (q *Queries) UpsertEmbedding(ctx context.Context, arg UpsertEmbeddingParams
 		arg.Model,
 		arg.Dimensions,
 		arg.CreatedAt,
+		arg.CreatedBy,
 	)
 	return err
 }

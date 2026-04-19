@@ -76,6 +76,7 @@ type Event struct {
 	Timestamp     time.Time
 	Metadata      map[string]string
 	IngestedAt    time.Time
+	CreatedBy     string // user id of the actor that created this event; "<system>" for unattributed
 }
 
 // Claim represents an assertion derived from one or more events,
@@ -87,6 +88,7 @@ type Claim struct {
 	Confidence float64
 	Status     ClaimStatus
 	CreatedAt  time.Time
+	CreatedBy  string // user id of the actor that created this claim; "<system>" for unattributed
 }
 
 // ClaimEvidence links a Claim to the Event that supports it.
@@ -102,6 +104,7 @@ type Relationship struct {
 	FromClaimID string
 	ToClaimID   string
 	CreatedAt   time.Time
+	CreatedBy   string // user id of the actor that created this relationship
 }
 
 // CompilationJob tracks the state of an asynchronous compilation task.
@@ -125,7 +128,14 @@ type ClaimStatusTransition struct {
 	ToStatus   ClaimStatus
 	ChangedAt  time.Time
 	Reason     string // free-form human context: "auto: contradiction detected", "resolved via mnemos resolve", etc.
+	ChangedBy  string // user id of the actor that triggered the transition
 }
+
+// SystemUser is the sentinel actor recorded on rows that were written by
+// internal pipelines or pre-A.2 data (no real user identity attached).
+// Treated specially by the audit and narrative output paths so it reads
+// as "system" rather than as an unknown user id.
+const SystemUser = "<system>"
 
 // UserStatus represents the lifecycle state of a user account.
 type UserStatus string
@@ -187,6 +197,7 @@ type EmbeddingRecord struct {
 	Vector     []float32
 	Model      string
 	Dimensions int
+	CreatedBy  string // user id of the actor that generated this embedding
 }
 
 // Answer holds the result of a query, including supporting claims and contradictions.

@@ -10,7 +10,7 @@ import (
 )
 
 const listAllClaims = `-- name: ListAllClaims :many
-SELECT id, text, type, confidence, status, created_at
+SELECT id, text, type, confidence, status, created_at, created_by
 FROM claims
 ORDER BY created_at ASC
 `
@@ -31,6 +31,7 @@ func (q *Queries) ListAllClaims(ctx context.Context) ([]Claim, error) {
 			&i.Confidence,
 			&i.Status,
 			&i.CreatedAt,
+			&i.CreatedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -46,14 +47,15 @@ func (q *Queries) ListAllClaims(ctx context.Context) ([]Claim, error) {
 }
 
 const upsertClaim = `-- name: UpsertClaim :exec
-INSERT INTO claims (id, text, type, confidence, status, created_at)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO claims (id, text, type, confidence, status, created_at, created_by)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   text = excluded.text,
   type = excluded.type,
   confidence = excluded.confidence,
   status = excluded.status,
-  created_at = excluded.created_at
+  created_at = excluded.created_at,
+  created_by = excluded.created_by
 `
 
 type UpsertClaimParams struct {
@@ -63,6 +65,7 @@ type UpsertClaimParams struct {
 	Confidence float64 `json:"confidence"`
 	Status     string  `json:"status"`
 	CreatedAt  string  `json:"created_at"`
+	CreatedBy  string  `json:"created_by"`
 }
 
 func (q *Queries) UpsertClaim(ctx context.Context, arg UpsertClaimParams) error {
@@ -73,6 +76,7 @@ func (q *Queries) UpsertClaim(ctx context.Context, arg UpsertClaimParams) error 
 		arg.Confidence,
 		arg.Status,
 		arg.CreatedAt,
+		arg.CreatedBy,
 	)
 	return err
 }

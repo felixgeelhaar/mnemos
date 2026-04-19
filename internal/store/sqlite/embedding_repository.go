@@ -23,7 +23,15 @@ func NewEmbeddingRepository(db *sql.DB) EmbeddingRepository {
 }
 
 // Upsert stores or updates a vector embedding for the given entity.
+// Records SystemUser as created_by; callers that have an authenticated
+// actor should use UpsertAs instead.
 func (r EmbeddingRepository) Upsert(ctx context.Context, entityID, entityType string, vector []float32, model string) error {
+	return r.UpsertAs(ctx, entityID, entityType, vector, model, "")
+}
+
+// UpsertAs is the actor-aware variant of Upsert. The empty string
+// resolves to SystemUser via actorOr.
+func (r EmbeddingRepository) UpsertAs(ctx context.Context, entityID, entityType string, vector []float32, model, createdBy string) error {
 	blob := embedding.EncodeVector(vector)
 	return r.q.UpsertEmbedding(ctx, sqlcgen.UpsertEmbeddingParams{
 		EntityID:   entityID,
@@ -32,6 +40,7 @@ func (r EmbeddingRepository) Upsert(ctx context.Context, entityID, entityType st
 		Model:      model,
 		Dimensions: int64(len(vector)),
 		CreatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
+		CreatedBy:  actorOr(createdBy),
 	})
 }
 
@@ -84,5 +93,6 @@ func mapSQLEmbedding(row sqlcgen.Embedding) (domain.EmbeddingRecord, error) {
 		Vector:     vector,
 		Model:      row.Model,
 		Dimensions: int(row.Dimensions),
+		CreatedBy:  row.CreatedBy,
 	}, nil
 }

@@ -10,8 +10,8 @@ import (
 )
 
 const createEvent = `-- name: CreateEvent :exec
-INSERT INTO events (id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO events (id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at, created_by)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `
 
 type CreateEventParams struct {
@@ -23,6 +23,7 @@ type CreateEventParams struct {
 	Timestamp     string `json:"timestamp"`
 	MetadataJson  string `json:"metadata_json"`
 	IngestedAt    string `json:"ingested_at"`
+	CreatedBy     string `json:"created_by"`
 }
 
 func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) error {
@@ -35,12 +36,13 @@ func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) error 
 		arg.Timestamp,
 		arg.MetadataJson,
 		arg.IngestedAt,
+		arg.CreatedBy,
 	)
 	return err
 }
 
 const getEventByID = `-- name: GetEventByID :one
-SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at
+SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at, created_by
 FROM events
 WHERE id = ?
 `
@@ -57,12 +59,13 @@ func (q *Queries) GetEventByID(ctx context.Context, id string) (Event, error) {
 		&i.Timestamp,
 		&i.MetadataJson,
 		&i.IngestedAt,
+		&i.CreatedBy,
 	)
 	return i, err
 }
 
 const listAllEvents = `-- name: ListAllEvents :many
-SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at
+SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at, created_by
 FROM events
 ORDER BY timestamp ASC
 `
@@ -85,6 +88,7 @@ func (q *Queries) ListAllEvents(ctx context.Context) ([]Event, error) {
 			&i.Timestamp,
 			&i.MetadataJson,
 			&i.IngestedAt,
+			&i.CreatedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -100,7 +104,7 @@ func (q *Queries) ListAllEvents(ctx context.Context) ([]Event, error) {
 }
 
 const listEventsByRunID = `-- name: ListEventsByRunID :many
-SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at
+SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at, created_by
 FROM events
 WHERE run_id = ?
 ORDER BY timestamp ASC
@@ -124,6 +128,7 @@ func (q *Queries) ListEventsByRunID(ctx context.Context, runID string) ([]Event,
 			&i.Timestamp,
 			&i.MetadataJson,
 			&i.IngestedAt,
+			&i.CreatedBy,
 		); err != nil {
 			return nil, err
 		}

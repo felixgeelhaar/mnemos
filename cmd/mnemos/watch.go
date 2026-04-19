@@ -32,6 +32,7 @@ type Watcher struct {
 	hashes   map[string]string // absolute path → sha256 hex of last-seen content
 	db       *sql.DB
 	interval time.Duration
+	actor    string // user id to stamp as created_by on re-ingested events/claims
 
 	startOnce sync.Once
 	stopCh    chan struct{}
@@ -39,11 +40,14 @@ type Watcher struct {
 
 // NewWatcher returns a watcher that re-ingests changed files into db.
 // The background goroutine is not started until the first Add call.
-func NewWatcher(db *sql.DB) *Watcher {
+// actor is the user id stamped on everything the watcher persists; pass
+// domain.SystemUser (or empty) to attribute writes to the system.
+func NewWatcher(db *sql.DB, actor string) *Watcher {
 	return &Watcher{
 		hashes:   make(map[string]string),
 		db:       db,
 		interval: defaultWatchInterval,
+		actor:    actor,
 		stopCh:   make(chan struct{}),
 	}
 }
@@ -155,7 +159,7 @@ func (w *Watcher) tick(ctx context.Context) (changed, removed int) {
 		}
 
 		runID := fmt.Sprintf("watch-%s", time.Now().UTC().Format("20060102T150405"))
-		if err := ingestSingleDoc(ctx, w.db, service, normalizer, extractor, relEngine, runID, path); err != nil {
+		if err := ingestSingleDoc(ctx, w.db, service, normalizer, extractor, relEngine, runID, path, w.actor); err != nil {
 			fmt.Fprintf(os.Stderr, "watch: re-ingest %s: %v\n", path, err)
 			continue
 		}

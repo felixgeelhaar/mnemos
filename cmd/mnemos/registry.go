@@ -469,7 +469,7 @@ func pushBatched(ctx context.Context, client *http.Client, endpoint, token, reso
 		if err != nil {
 			return totalAccepted, fmt.Errorf("encode %s batch %d: %w", resource, i, err)
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf)) //nolint:gosec // G704: endpoint is operator-supplied via env/config, not user-supplied input
 		if err != nil {
 			return totalAccepted, fmt.Errorf("build %s request: %w", resource, err)
 		}
@@ -477,7 +477,7 @@ func pushBatched(ctx context.Context, client *http.Client, endpoint, token, reso
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
-		resp, err := client.Do(req)
+		resp, err := client.Do(req) //nolint:gosec // G704: same operator-supplied endpoint as request
 		if err != nil {
 			return totalAccepted, fmt.Errorf("post %s batch %d: %w", resource, i, err)
 		}
@@ -560,14 +560,14 @@ func pullRelationships(ctx context.Context, client *http.Client, regURL, token s
 }
 
 func fetchPage(ctx context.Context, client *http.Client, endpoint, token string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil) //nolint:gosec // G704: endpoint is operator-supplied via env/config, not user-supplied input
 	if err != nil {
 		return nil, err
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec // G704: same operator-supplied endpoint as request
 	if err != nil {
 		return nil, err
 	}

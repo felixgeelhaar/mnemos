@@ -11,6 +11,9 @@ type Flags struct {
 	JSON    bool
 	LLM     bool
 	Embed   bool
+	// Actor is the user id to attribute writes to ("--as <id>"). Empty
+	// means "fall back to MNEMOS_USER_ID, then to the <system> sentinel".
+	Actor string
 }
 
 // ParseFlags extracts known CLI flags from args and returns the remaining positional arguments.
@@ -34,6 +37,14 @@ func ParseFlags(args []string) (Flags, []string) {
 			f.LLM = true
 		case "--embed":
 			f.Embed = true
+		case "--as":
+			// --as wants the next positional as its value. If the flag
+			// is trailing or followed by another flag, leave Actor empty
+			// and let the resolver fall back to env / SystemUser.
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				f.Actor = args[i+1]
+				i++
+			}
 		default:
 			filtered = append(filtered, arg)
 		}

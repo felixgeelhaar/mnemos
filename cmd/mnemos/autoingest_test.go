@@ -148,7 +148,7 @@ func TestAutoIngestProjectDocs_IngestsThenDedupesOnSecondRun(t *testing.T) {
 
 	ctx := context.Background()
 
-	ingested, skipped := autoIngestProjectDocs(ctx, db, root)
+	ingested, skipped := autoIngestProjectDocs(ctx, db, root, "")
 	if ingested != 2 || skipped != 0 {
 		t.Fatalf("first run: ingested=%d skipped=%d, want 2 and 0", ingested, skipped)
 	}
@@ -161,7 +161,7 @@ func TestAutoIngestProjectDocs_IngestsThenDedupesOnSecondRun(t *testing.T) {
 		t.Fatal("expected events persisted, got 0")
 	}
 
-	ingested2, skipped2 := autoIngestProjectDocs(ctx, db, root)
+	ingested2, skipped2 := autoIngestProjectDocs(ctx, db, root, "")
 	if ingested2 != 0 || skipped2 != 2 {
 		t.Fatalf("second run: ingested=%d skipped=%d, want 0 and 2", ingested2, skipped2)
 	}
@@ -184,9 +184,50 @@ func TestAutoIngestProjectDocs_NoDocsReturnsZero(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	ingested, skipped := autoIngestProjectDocs(context.Background(), db, root)
+	ingested, skipped := autoIngestProjectDocs(context.Background(), db, root, "")
 	if ingested != 0 || skipped != 0 {
 		t.Fatalf("ingested=%d skipped=%d, want 0 and 0", ingested, skipped)
+	}
+}
+
+// TestAutoIngestProjectDocs_StampsActorOnEventsAndClaims verifies that
+// when autoIngestProjectDocs is called with a non-empty actor, every
+// event and claim it writes carries that actor in created_by. This is
+// the MCP-side half of A.2.b: MCP resolves MNEMOS_USER_ID at startup and
+// threads it through every mutating path, so the audit trail attributes
+// writes to the configured user rather than defaulting to <system>.
+func TestAutoIngestProjectDocs_StampsActorOnEventsAndClaims(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "README.md"), "We chose Postgres over MySQL. Postgres is our primary database.")
+
+	dbPath := filepath.Join(t.TempDir(), "mnemos.db")
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	ingested, _ := autoIngestProjectDocs(context.Background(), db, root, "usr_auditor")
+	if ingested == 0 {
+		t.Fatal("expected ingested > 0")
+	}
+
+	// Every event row's created_by should be usr_auditor, not <system>.
+	var nonAuditor int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM events WHERE created_by != 'usr_auditor'`).Scan(&nonAuditor); err != nil {
+		t.Fatalf("count events: %v", err)
+	}
+	if nonAuditor != 0 {
+		t.Errorf("events not attributed to actor: %d rows have created_by != usr_auditor", nonAuditor)
+	}
+
+	// Same for claims.
+	var nonAuditorClaims int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM claims WHERE created_by != 'usr_auditor'`).Scan(&nonAuditorClaims); err != nil {
+		t.Fatalf("count claims: %v", err)
+	}
+	if nonAuditorClaims != 0 {
+		t.Errorf("claims not attributed to actor: %d rows have created_by != usr_auditor", nonAuditorClaims)
 	}
 }
 

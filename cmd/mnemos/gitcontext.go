@@ -166,7 +166,7 @@ func existingGitCommitSHAs(ctx context.Context, db *sql.DB) (map[string]struct{}
 // extract+relate so commit subjects/bodies become queryable claims. Returns
 // counts and never fails fatally — per-commit errors are logged and
 // skipped.
-func ingestGitLog(ctx context.Context, db *sql.DB, repoRoot string, limit int, since string) (ingested, skipped int, err error) {
+func ingestGitLog(ctx context.Context, db *sql.DB, repoRoot string, limit int, since, actor string) (ingested, skipped int, err error) {
 	commits, err := runGitLog(ctx, repoRoot, limit, since)
 	if err != nil {
 		return 0, 0, err
@@ -226,6 +226,9 @@ func ingestGitLog(ctx context.Context, db *sql.DB, repoRoot string, limit int, s
 		}
 	}
 
+	stampEventActor(newEvents, actor)
+	stampClaimActor(newClaims, actor)
+	stampRelationshipActor(rels, actor)
 	if persistErr := pipeline.PersistArtifacts(ctx, db, newEvents, newClaims, newLinks, rels); persistErr != nil {
 		return 0, skipped, fmt.Errorf("persist commits: %w", persistErr)
 	}

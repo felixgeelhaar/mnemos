@@ -130,7 +130,7 @@ func TestIngestGitLog_PersistsCommitsAsEvents(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	ctx := context.Background()
-	ingested, skipped, err := ingestGitLog(ctx, db, repo, 10, "")
+	ingested, skipped, err := ingestGitLog(ctx, db, repo, 10, "", "")
 	if err != nil {
 		t.Fatalf("ingestGitLog: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestIngestGitLog_PersistsCommitsAsEvents(t *testing.T) {
 	}
 
 	// Second run is fully deduped by SHA.
-	ingested2, skipped2, err := ingestGitLog(ctx, db, repo, 10, "")
+	ingested2, skipped2, err := ingestGitLog(ctx, db, repo, 10, "", "")
 	if err != nil {
 		t.Fatalf("ingestGitLog second: %v", err)
 	}
@@ -168,13 +168,13 @@ func TestIngestGitLog_NewCommitsOnlyOnRerun(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	ctx := context.Background()
-	if _, _, err := ingestGitLog(ctx, db, repo, 10, ""); err != nil {
+	if _, _, err := ingestGitLog(ctx, db, repo, 10, "", ""); err != nil {
 		t.Fatalf("first ingest: %v", err)
 	}
 
 	gitCommit(t, repo, "b.txt", "beta", "feat: add beta")
 
-	ingested, skipped, err := ingestGitLog(ctx, db, repo, 10, "")
+	ingested, skipped, err := ingestGitLog(ctx, db, repo, 10, "", "")
 	if err != nil {
 		t.Fatalf("second ingest: %v", err)
 	}

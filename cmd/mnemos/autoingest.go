@@ -162,7 +162,7 @@ func existingSourcePaths(ctx context.Context, db *sql.DB) (map[string]struct{}, 
 // users can re-process specific files via the MCP process_text tool with
 // useLlm=true if they want LLM-quality claims. Returns counts and never
 // fails fatally: per-file errors are logged to stderr and skipped.
-func autoIngestProjectDocs(ctx context.Context, db *sql.DB, root string) (ingested, skipped int) {
+func autoIngestProjectDocs(ctx context.Context, db *sql.DB, root, actor string) (ingested, skipped int) {
 	docs := discoverProjectDocs(root)
 	if len(docs) == 0 {
 		return 0, 0
@@ -190,7 +190,7 @@ func autoIngestProjectDocs(ctx context.Context, db *sql.DB, root string) (ingest
 			skipped++
 			continue
 		}
-		if err := ingestSingleDoc(ctx, db, service, normalizer, extractor, relEngine, runID, path); err != nil {
+		if err := ingestSingleDoc(ctx, db, service, normalizer, extractor, relEngine, runID, path, actor); err != nil {
 			fmt.Fprintf(os.Stderr, "auto-ingest: %s: %v\n", path, err)
 			continue
 		}
@@ -209,6 +209,7 @@ func ingestSingleDoc(
 	relEngine relate.Engine,
 	runID string,
 	path string,
+	actor string,
 ) error {
 	input, content, err := service.IngestFile(path)
 	if err != nil {
@@ -243,6 +244,9 @@ func ingestSingleDoc(
 		rels = append(rels, incremental...)
 	}
 
+	stampEventActor(events, actor)
+	stampClaimActor(claims, actor)
+	stampRelationshipActor(rels, actor)
 	if err := pipeline.PersistArtifacts(ctx, db, events, claims, links, rels); err != nil {
 		return fmt.Errorf("persist: %w", err)
 	}

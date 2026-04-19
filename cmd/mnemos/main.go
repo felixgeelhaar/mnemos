@@ -222,6 +222,10 @@ func handleIngest(args []string, f Flags) {
 
 		contentArg := strings.Join(args[1:], " ")
 		err := runJob("ingest", map[string]string{"source": "raw_text"}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
+			actor, err := resolveActor(ctx, db, f.Actor)
+			if err != nil {
+				return err
+			}
 			if err := job.SetStatus("loading", ""); err != nil {
 				return err
 			}
@@ -239,6 +243,7 @@ func handleIngest(args []string, f Flags) {
 			for i := range events {
 				events[i].RunID = job.ID()
 			}
+			stampEventActor(events, actor)
 			if err := job.SetStatus("saving", ""); err != nil {
 				return err
 			}
@@ -264,6 +269,10 @@ func handleIngest(args []string, f Flags) {
 
 	path := args[0]
 	err := runJob("ingest", map[string]string{"path": path}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
+		actor, err := resolveActor(ctx, db, f.Actor)
+		if err != nil {
+			return err
+		}
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -281,6 +290,7 @@ func handleIngest(args []string, f Flags) {
 		for i := range events {
 			events[i].RunID = job.ID()
 		}
+		stampEventActor(events, actor)
 		if err := job.SetStatus("saving", ""); err != nil {
 			return err
 		}
@@ -530,6 +540,10 @@ func handleExtract(args []string, f Flags) {
 	}
 
 	err := runJob("extract", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
+		actor, actorErr := resolveActor(ctx, db, f.Actor)
+		if actorErr != nil {
+			return actorErr
+		}
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -574,6 +588,7 @@ func handleExtract(args []string, f Flags) {
 		if err := job.SetStatus("saving", ""); err != nil {
 			return err
 		}
+		stampClaimActor(claims, actor)
 		claimRepo := sqlite.NewClaimRepository(db)
 		if err := claimRepo.Upsert(ctx, claims); err != nil {
 			return NewSystemError(err, "failed to persist claims")
@@ -590,6 +605,10 @@ func handleExtract(args []string, f Flags) {
 
 func handleRelate(args []string, f Flags) {
 	err := runJob("relate", map[string]string{"event_ids": strings.Join(args, ",")}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
+		actor, actorErr := resolveActor(ctx, db, f.Actor)
+		if actorErr != nil {
+			return actorErr
+		}
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -625,6 +644,7 @@ func handleRelate(args []string, f Flags) {
 		if err := job.SetStatus("saving", ""); err != nil {
 			return err
 		}
+		stampRelationshipActor(rels, actor)
 		if err := relRepo.Upsert(ctx, rels); err != nil {
 			return NewSystemError(err, "failed to persist relationships")
 		}
@@ -652,6 +672,10 @@ func handleProcess(args []string, f Flags) {
 	}
 
 	err := runJob("process", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
+		actor, actorErr := resolveActor(ctx, db, f.Actor)
+		if actorErr != nil {
+			return actorErr
+		}
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -729,6 +753,9 @@ func handleProcess(args []string, f Flags) {
 		if err := job.SetStatus("saving", ""); err != nil {
 			return err
 		}
+		stampEventActor(events, actor)
+		stampClaimActor(claims, actor)
+		stampRelationshipActor(rels, actor)
 		if err := pipeline.PersistArtifacts(ctx, db, events, claims, links, rels); err != nil {
 			return err
 		}

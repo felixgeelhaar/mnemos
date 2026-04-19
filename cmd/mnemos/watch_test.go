@@ -18,7 +18,7 @@ func newTestWatcher(t *testing.T) *Watcher {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	w := NewWatcher(db)
+	w := NewWatcher(db, "")
 	t.Cleanup(w.Stop)
 	return w
 }

@@ -67,6 +67,10 @@ func PersistArtifacts(ctx context.Context, db *sql.DB, events []domain.Event, cl
 		if err != nil {
 			return fmt.Errorf("marshal event metadata: %w", err)
 		}
+		createdBy := event.CreatedBy
+		if createdBy == "" {
+			createdBy = domain.SystemUser
+		}
 		err = q.CreateEvent(ctx, sqlcgen.CreateEventParams{
 			ID:            event.ID,
 			RunID:         event.RunID,
@@ -76,6 +80,7 @@ func PersistArtifacts(ctx context.Context, db *sql.DB, events []domain.Event, cl
 			Timestamp:     event.Timestamp.UTC().Format(time.RFC3339Nano),
 			MetadataJson:  string(metadata),
 			IngestedAt:    event.IngestedAt.UTC().Format(time.RFC3339Nano),
+			CreatedBy:     createdBy,
 		})
 		if err != nil {
 			return fmt.Errorf("insert event %s: %w", event.ID, err)
@@ -112,8 +117,8 @@ func PersistArtifacts(ctx context.Context, db *sql.DB, events []domain.Event, cl
 
 		if priorStatus != string(claim.Status) {
 			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO claim_status_history (claim_id, from_status, to_status, changed_at, reason) VALUES (?, ?, ?, ?, ?)`,
-				claim.ID, priorStatus, string(claim.Status), now, "pipeline",
+				`INSERT INTO claim_status_history (claim_id, from_status, to_status, changed_at, reason, changed_by) VALUES (?, ?, ?, ?, ?, ?)`,
+				claim.ID, priorStatus, string(claim.Status), now, "pipeline", createdBy,
 			); err != nil {
 				return fmt.Errorf("record status transition for %s: %w", claim.ID, err)
 			}

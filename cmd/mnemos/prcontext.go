@@ -118,7 +118,7 @@ func existingGitPRNumbers(ctx context.Context, db *sql.DB) (map[string]struct{},
 // ingestGhPRs persists each merged PR as an event (deduped by PR number)
 // and runs extract+relate so PR bodies become queryable claims. Returns
 // counts and never fails fatally — per-PR errors are logged and skipped.
-func ingestGhPRs(ctx context.Context, db *sql.DB, repoRoot string, limit int) (ingested, skipped int, err error) {
+func ingestGhPRs(ctx context.Context, db *sql.DB, repoRoot string, limit int, actor string) (ingested, skipped int, err error) {
 	prs, err := runGhPRs(ctx, repoRoot, limit)
 	if err != nil {
 		return 0, 0, err
@@ -179,6 +179,9 @@ func ingestGhPRs(ctx context.Context, db *sql.DB, repoRoot string, limit int) (i
 		}
 	}
 
+	stampEventActor(newEvents, actor)
+	stampClaimActor(newClaims, actor)
+	stampRelationshipActor(rels, actor)
 	if persistErr := pipeline.PersistArtifacts(ctx, db, newEvents, newClaims, newLinks, rels); persistErr != nil {
 		return 0, skipped, fmt.Errorf("persist PRs: %w", persistErr)
 	}

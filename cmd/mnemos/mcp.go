@@ -128,15 +128,21 @@ type mcpWatchFileOutput struct {
 func handleMCP() {
 	logger := bolt.New(bolt.NewJSONHandler(os.Stderr))
 
+	// Resolve the actor once at startup from MNEMOS_USER_ID; every
+	// persistence path below stamps it as created_by / changed_by. We
+	// only validate against the DB when the env var is non-empty — an
+	// unset env reliably means "attribute to <system>" with no lookup.
+	mcpActor := resolveMCPActor()
+
 	// When launched inside a project (.mnemos/ exists), bulk-ingest the
 	// standard project documents so the agent has context immediately. New
 	// or unchanged source paths are skipped, so this is safe to run on
 	// every startup.
 	if _, projectRoot, ok := findProjectDB(); ok {
-		runAutoIngest(projectRoot)
+		runAutoIngest(projectRoot, mcpActor)
 		if repoIsGit(projectRoot) {
-			runGitContextIngest(projectRoot)
-			runPRContextIngest(projectRoot)
+			runGitContextIngest(projectRoot, mcpActor)
+			runPRContextIngest(projectRoot, mcpActor)
 		}
 	}
 
@@ -167,7 +173,7 @@ func handleMCP() {
 		OutputSchema(mcpProcessTextOutput{}).
 		ValidateInput().
 		Handler(func(ctx context.Context, input mcpProcessTextInput) (mcpProcessTextOutput, error) {
-			return mcpRunProcessText(ctx, input)
+			return mcpRunProcessText(ctx, mcpActor, input)
 		})
 
 	srv.Tool("knowledge_metrics").
@@ -192,7 +198,7 @@ func handleMCP() {
 				watcherErr = err
 				return
 			}
-			watcher = NewWatcher(db)
+			watcher = NewWatcher(db, mcpActor)
 		})
 		return watcher, watcherErr
 	}
@@ -227,7 +233,7 @@ func handleMCP() {
 		OutputSchema(mcpIngestGitPRsOutput{}).
 		ValidateInput().
 		Handler(func(ctx context.Context, input mcpIngestGitPRsInput) (mcpIngestGitPRsOutput, error) {
-			return mcpRunIngestGitPRs(ctx, input)
+			return mcpRunIngestGitPRs(ctx, mcpActor, input)
 		})
 
 	srv.Tool("ingest_git_log").
@@ -235,7 +241,7 @@ func handleMCP() {
 		OutputSchema(mcpIngestGitLogOutput{}).
 		ValidateInput().
 		Handler(func(ctx context.Context, input mcpIngestGitLogInput) (mcpIngestGitLogOutput, error) {
-			return mcpRunIngestGitLog(ctx, input)
+			return mcpRunIngestGitLog(ctx, mcpActor, input)
 		})
 
 	srv.Tool("watch_file").
@@ -263,7 +269,7 @@ func handleMCP() {
 	}
 }
 
-func runGitContextIngest(projectRoot string) {
+func runGitContextIngest(projectRoot, actor string) {
 	db, err := sqlite.Open(resolveDBPath())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "git: failed to open DB: %v\n", err)
@@ -274,7 +280,7 @@ func runGitContextIngest(projectRoot string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	ingested, skipped, err := ingestGitLog(ctx, db, projectRoot, defaultGitLogLimit, "")
+	ingested, skipped, err := ingestGitLog(ctx, db, projectRoot, defaultGitLogLimit, "", actor)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "git: %v\n", err)
 		return
@@ -284,7 +290,7 @@ func runGitContextIngest(projectRoot string) {
 	}
 }
 
-func runPRContextIngest(projectRoot string) {
+func runPRContextIngest(projectRoot, actor string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -301,7 +307,7 @@ func runPRContextIngest(projectRoot string) {
 	}
 	defer func() { _ = db.Close() }()
 
-	ingested, skipped, err := ingestGhPRs(ctx, db, projectRoot, defaultGitPRLimit)
+	ingested, skipped, err := ingestGhPRs(ctx, db, projectRoot, defaultGitPRLimit, actor)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "git-prs: %v\n", err)
 		return
@@ -311,7 +317,7 @@ func runPRContextIngest(projectRoot string) {
 	}
 }
 
-func mcpRunIngestGitPRs(ctx context.Context, input mcpIngestGitPRsInput) (mcpIngestGitPRsOutput, error) {
+func mcpRunIngestGitPRs(ctx context.Context, actor string, input mcpIngestGitPRsInput) (mcpIngestGitPRsOutput, error) {
 	_, projectRoot, ok := findProjectDB()
 	if !ok {
 		return mcpIngestGitPRsOutput{}, fmt.Errorf("no project (.mnemos/) found — run 'mnemos init' first")
@@ -325,14 +331,14 @@ func mcpRunIngestGitPRs(ctx context.Context, input mcpIngestGitPRsInput) (mcpIng
 	}
 	defer func() { _ = db.Close() }()
 
-	ingested, skipped, err := ingestGhPRs(ctx, db, projectRoot, input.Limit)
+	ingested, skipped, err := ingestGhPRs(ctx, db, projectRoot, input.Limit, actor)
 	if err != nil {
 		return mcpIngestGitPRsOutput{}, err
 	}
 	return mcpIngestGitPRsOutput{Ingested: ingested, Skipped: skipped}, nil
 }
 
-func mcpRunIngestGitLog(ctx context.Context, input mcpIngestGitLogInput) (mcpIngestGitLogOutput, error) {
+func mcpRunIngestGitLog(ctx context.Context, actor string, input mcpIngestGitLogInput) (mcpIngestGitLogOutput, error) {
 	_, projectRoot, ok := findProjectDB()
 	if !ok {
 		return mcpIngestGitLogOutput{}, fmt.Errorf("no project (.mnemos/) found — run 'mnemos init' first")
@@ -346,14 +352,14 @@ func mcpRunIngestGitLog(ctx context.Context, input mcpIngestGitLogInput) (mcpIng
 	}
 	defer func() { _ = db.Close() }()
 
-	ingested, skipped, err := ingestGitLog(ctx, db, projectRoot, input.Limit, input.Since)
+	ingested, skipped, err := ingestGitLog(ctx, db, projectRoot, input.Limit, input.Since, actor)
 	if err != nil {
 		return mcpIngestGitLogOutput{}, err
 	}
 	return mcpIngestGitLogOutput{Ingested: ingested, Skipped: skipped}, nil
 }
 
-func runAutoIngest(projectRoot string) {
+func runAutoIngest(projectRoot, actor string) {
 	db, err := sqlite.Open(resolveDBPath())
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "auto-ingest: failed to open DB: %v\n", err)
@@ -364,10 +370,38 @@ func runAutoIngest(projectRoot string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	ingested, skipped := autoIngestProjectDocs(ctx, db, projectRoot)
+	ingested, skipped := autoIngestProjectDocs(ctx, db, projectRoot, actor)
 	if ingested > 0 || skipped > 0 {
 		fmt.Fprintf(os.Stderr, "auto-ingest: ingested=%d skipped=%d root=%s\n", ingested, skipped, projectRoot)
 	}
+}
+
+// resolveMCPActor reads MNEMOS_USER_ID at MCP startup. Empty env ->
+// SystemUser. Non-empty env -> validated against the local DB so typos
+// surface immediately instead of silently stamping a nonexistent user.
+// A lookup failure here logs a warning and falls back to SystemUser,
+// since the MCP process shouldn't refuse to start over an auth config
+// mistake — downstream writes will just carry the fallback attribution.
+func resolveMCPActor() string {
+	candidate := strings.TrimSpace(os.Getenv("MNEMOS_USER_ID"))
+	if candidate == "" {
+		return domain.SystemUser
+	}
+	db, err := sqlite.Open(resolveDBPath())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp: MNEMOS_USER_ID=%s but couldn't open DB to validate: %v — using <system>\n", candidate, err)
+		return domain.SystemUser
+	}
+	defer func() { _ = db.Close() }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	actor, err := resolveActor(ctx, db, candidate)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp: MNEMOS_USER_ID=%s rejected: %v — using <system>\n", candidate, err)
+		return domain.SystemUser
+	}
+	return actor
 }
 
 func mcpRunQuery(_ context.Context, input mcpQueryInput) (mcpQueryOutput, error) {
@@ -431,7 +465,7 @@ func mcpRunQuery(_ context.Context, input mcpQueryInput) (mcpQueryOutput, error)
 	}, nil
 }
 
-func mcpRunProcessText(ctx context.Context, input mcpProcessTextInput) (mcpProcessTextOutput, error) {
+func mcpRunProcessText(ctx context.Context, actor string, input mcpProcessTextInput) (mcpProcessTextOutput, error) {
 	service := ingest.NewService()
 	normalizer := parser.NewNormalizer()
 	progress := mcp.ProgressFromContext(ctx)
@@ -508,6 +542,9 @@ func mcpRunProcessText(ctx context.Context, input mcpProcessTextInput) (mcpProce
 		if err := job.SetStatus("saving", ""); err != nil {
 			return err
 		}
+		stampEventActor(events, actor)
+		stampClaimActor(claims, actor)
+		stampRelationshipActor(rels, actor)
 		if err := pipeline.PersistArtifacts(ctx, db, events, claims, links, rels); err != nil {
 			return err
 		}

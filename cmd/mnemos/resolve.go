@@ -23,7 +23,7 @@ import (
 // heuristic) and would undermine the project's "surface contradictions,
 // let humans judge" stance. If it ever lands, it will be as an opt-in
 // probe with its own eval, not a default.
-func handleResolve(args []string, _ Flags) {
+func handleResolve(args []string, f Flags) {
 	if len(args) < 1 {
 		exitWithMnemosError(false, NewUserError("resolve requires a winning claim id\n  mnemos resolve <winner-id> --over <loser-id> [--reason \"...\"]"))
 		return
@@ -99,17 +99,24 @@ func handleResolve(args []string, _ Flags) {
 		return
 	}
 
+	actor, err := resolveActor(ctx, db, f.Actor)
+	if err != nil {
+		exitWithMnemosError(false, err)
+		return
+	}
+
 	winner.Status = domain.ClaimStatusResolved
 	loser.Status = domain.ClaimStatusDeprecated
 
 	// Single-batch upsert so both transitions succeed or fail together —
-	// the audit trail should never show a half-resolved pair.
-	if err := claimRepo.UpsertWithReason(ctx, []domain.Claim{winner, loser}, reason); err != nil {
+	// the audit trail should never show a half-resolved pair. Pass the
+	// resolved actor so claim_status_history captures who decided.
+	if err := claimRepo.UpsertWithReasonAs(ctx, []domain.Claim{winner, loser}, reason, actor); err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "persist resolution"))
 		return
 	}
 
 	fmt.Printf("resolved: %s (%s → resolved) over %s (%s → deprecated)\n",
 		winner.ID, winner.Type, loser.ID, loser.Type)
-	fmt.Printf("reason: %s\n", reason)
+	fmt.Printf("reason: %s by=%s\n", reason, actor)
 }

@@ -28,7 +28,7 @@ func NewClaimRepository(db *sql.DB) ClaimRepository {
 // opt in — status is a first-class concept and its timeline should be
 // recorded for every write.
 func (r ClaimRepository) Upsert(ctx context.Context, claims []domain.Claim) error {
-	return r.upsertWithReason(ctx, claims, "")
+	return r.upsertWithReason(ctx, claims, "", "")
 }
 
 // UpsertWithReason is like Upsert but records a human-readable reason on
@@ -37,10 +37,18 @@ func (r ClaimRepository) Upsert(ctx context.Context, claims []domain.Claim) erro
 // resolve"); pass empty to Upsert and the transition records "" which
 // still captures the when, just not the why.
 func (r ClaimRepository) UpsertWithReason(ctx context.Context, claims []domain.Claim, reason string) error {
-	return r.upsertWithReason(ctx, claims, reason)
+	return r.upsertWithReason(ctx, claims, reason, "")
 }
 
-func (r ClaimRepository) upsertWithReason(ctx context.Context, claims []domain.Claim, reason string) error {
+// UpsertWithReasonAs is the actor-aware variant of UpsertWithReason. The
+// changedBy id is recorded on every status transition row so the audit
+// trail can attribute the change to a specific user. Empty string falls
+// back to SystemUser via actorOr.
+func (r ClaimRepository) UpsertWithReasonAs(ctx context.Context, claims []domain.Claim, reason, changedBy string) error {
+	return r.upsertWithReason(ctx, claims, reason, changedBy)
+}
+
+func (r ClaimRepository) upsertWithReason(ctx context.Context, claims []domain.Claim, reason, changedBy string) error {
 	if len(claims) == 0 {
 		return nil
 	}
@@ -82,8 +90,8 @@ func (r ClaimRepository) upsertWithReason(ctx context.Context, claims []domain.C
 			continue // no transition
 		}
 		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO claim_status_history (claim_id, from_status, to_status, changed_at, reason) VALUES (?, ?, ?, ?, ?)`,
-			claim.ID, priorStatus, newStatus, now, reason,
+			`INSERT INTO claim_status_history (claim_id, from_status, to_status, changed_at, reason, changed_by) VALUES (?, ?, ?, ?, ?, ?)`,
+			claim.ID, priorStatus, newStatus, now, reason, actorOr(changedBy),
 		); err != nil {
 			return fmt.Errorf("record status transition for %s: %w", claim.ID, err)
 		}

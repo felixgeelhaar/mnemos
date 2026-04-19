@@ -51,10 +51,10 @@
 
 ---
 
-## Phase 2B: Knowledge Registry (FUTURE)
+## Phase 2B: Knowledge Registry (SHIPPED)
 
-**Status:** Planned (v0.5)
-**Goal:** Enable knowledge to flow across projects and teams through a shared registry.
+**Status:** Shipped on `main`
+**Goal:** Knowledge flows across projects and teams through a shared registry.
 
 ### Concept
 
@@ -67,17 +67,57 @@ mnemos pull = query team knowledge alongside local
 
 ### Milestones
 
-- [ ] `mnemos serve` — HTTP API registry server
-- [ ] `mnemos registry connect <url>` — wire local to registry
-- [ ] Automatic sync on process/query
-- [ ] Cross-project queries
-- [ ] REST API for programmatic access
-- [ ] Namespace/scope isolation (team, org, project)
+- [x] `mnemos serve` — HTTP API registry server with embedded web UI
+- [x] `mnemos registry connect <url>` — wire local to registry
+- [x] `mnemos push` / `mnemos pull` — git-style sync with batched paginated transfer
+- [x] Cross-project queries with claim provenance (`pulled_from_registry` metadata)
+- [x] REST API (`/v1/events`, `/v1/claims`, `/v1/relationships`, `/v1/embeddings`, `/v1/metrics`)
+- [x] Embeddings round-trip bit-exact through push/pull
+- [x] Typed Go client SDK (`client/`) with fluent builder, bolt logging, fortify retry
 
-### Success Metrics
+---
 
-- Cross-project query returns relevant answers with source provenance
-- 50% reduction in "when did we decide X?" questions within teams
+## Phase A: Identity (SHIPPED)
+
+**Status:** Shipped on `main`
+**Goal:** Authenticated, attributable writes — every change traces to a real principal.
+
+### Milestones
+
+- [x] **A.1** — JWT primitives (Issuer/Verifier, HS256 with alg-confusion lock, revocation denylist) + `mnemos user create|list|revoke`, `mnemos token issue|revoke`
+- [x] **A.2 + A.3** — JWT middleware on `mnemos serve` (replaces shared bearer token); every audit-bearing table gains `created_by` / `changed_by` with `<system>` sentinel; POST handlers stamp the JWT subject
+- [x] **A.2.b** — CLI/MCP actor resolution: `--as <user-id>` flag and `MNEMOS_USER_ID` env so non-server writes also carry attribution
+- [ ] **A.4** — OIDC integration (deferred until first real OIDC need surfaces)
+
+---
+
+## Phase F: Agent Governance (SHIPPED)
+
+**Status:** Shipped on `main`
+**Goal:** Non-human principals are first-class with explicit, narrowable authority.
+
+### Milestones
+
+- [x] **F.1 + F.2** — Agent identities + scope enforcement: `domain.Agent` with owning user, `agents` table FK'd to users, scoped JWTs (`events:write`, `claims:write`, `relationships:write`, `embeddings:write`, `*`), POST handlers gated with `requireScope(...)`. CLI: `mnemos agent create|list|revoke`, `mnemos agent token issue`
+- [x] **F.3** — Per-user scope policy: `users.scopes_json`, `mnemos user create --scope <s>`, user JWTs honour the recorded list (legacy users keep `*`)
+- [x] **F.4 + F.4.b** — Agent → run_id whitelist: `agents.allowed_runs_json`, JWT `Runs` claim, batch pre-checks on every write endpoint (events directly; claims/relationships/embeddings via evidence join). CLI: `mnemos agent create --run <id>`
+- [x] **F.5** — Audit by principal: `mnemos audit who <id> [--since <duration>] [--human]` returns every write attributed to a user/agent/system across events, claims, relationships, embeddings, and `claim_status_history`
+- [ ] Future: glob-pattern run scopes, agent quota policies, federated agent sync
+
+---
+
+## axi-go Execution Kernel (SHIPPED)
+
+**Status:** Shipped on `main`
+**Goal:** Wrap the MCP tool surface with a uniform DDD execution kernel for governance, audit, and budgets.
+
+### Milestones
+
+- [x] Each MCP tool registered as an axi-go action with effect profile (`read-local`, `write-local`) and idempotency profile
+- [x] Tamper-evident SHA-256 evidence chain per session
+- [x] Duration / capability-invocation budgets (`MNEMOS_AXI_MAX_DURATION`, `MNEMOS_AXI_MAX_INVOCATIONS`)
+- [x] Domain events fanned into bolt as structured `axi_event` log lines
+- [ ] Future: LLM token reporting through capability evidence (gates `MaxTokens` budget); persist evidence chain to SQLite for cross-session audit; approval flow for any future write-external tool
 
 ---
 
@@ -88,11 +128,11 @@ mnemos pull = query team knowledge alongside local
 
 ### Milestones
 
-- [ ] GraphRAG integration (multi-hop queries)
-- [ ] Governance and bias detection
+- [x] GraphRAG-style multi-hop queries (supports/contradicts edge expansion)
+- [x] Compliance and audit trails (Phase A + F deliver the substrate)
+- [ ] Bias detection
 - [ ] Enterprise integrations (Slack, Teams, Jira)
-- [ ] Compliance and audit trails
-- [ ] Web interface (built on Phase 2B API)
+- [x] Web interface — embedded SPA shipped with `mnemos serve`
 
 ---
 

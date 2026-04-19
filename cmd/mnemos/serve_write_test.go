@@ -539,6 +539,182 @@ func TestServe_Auth_AgentRunWhitelist_BatchAllOrNothing(t *testing.T) {
 	}
 }
 
+// TestServe_Auth_AgentRunWhitelist_BlocksClaimsWithCrossRunEvidence
+// proves the F.4.b extension: a scoped agent can't sneak claims in
+// by linking evidence to events from runs they don't own. The
+// pre-check happens before any DB write.
+func TestServe_Auth_AgentRunWhitelist_BlocksClaimsWithCrossRunEvidence(t *testing.T) {
+	secret, _ := setupJWTTestEnv(t)
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	srv := httptest.NewServer(newServerMux(db))
+	defer srv.Close()
+
+	// Seed an event in a run the agent shouldn't be able to touch.
+	now := time.Now().UTC()
+	seedEvent(t, db, "ev_other", "run-other", "x", "in", `{}`, now)
+
+	tok, _, err := auth.NewIssuer(secret).IssueAgentTokenWithScopesAndRuns(
+		"agt_scoped",
+		[]string{"claims:write"},
+		[]string{"run-mine"},
+		time.Hour,
+	)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	hdrs := map[string]string{"Authorization": "Bearer " + tok}
+
+	body := map[string]any{
+		"claims": []map[string]any{{
+			"id": "cl_sneaky", "text": "x", "type": "fact",
+			"confidence": 0.5, "status": "active",
+			"created_at": now.Format(time.RFC3339),
+		}},
+		"evidence": []map[string]string{{"claim_id": "cl_sneaky", "event_id": "ev_other"}},
+	}
+	r := postJSON(t, srv.URL+"/v1/claims", body, hdrs)
+	if r.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", r.StatusCode)
+	}
+	_ = r.Body.Close()
+
+	// The claim must NOT have landed.
+	var n int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM claims WHERE id = ?`, "cl_sneaky").Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("blocked claim leaked through: count = %d", n)
+	}
+}
+
+// TestServe_Auth_AgentRunWhitelist_BlocksRelationshipWithCrossRunClaim
+// covers the relationship gate: both endpoint claims must derive
+// from events in allowed runs.
+func TestServe_Auth_AgentRunWhitelist_BlocksRelationshipWithCrossRunClaim(t *testing.T) {
+	secret, _ := setupJWTTestEnv(t)
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	srv := httptest.NewServer(newServerMux(db))
+	defer srv.Close()
+
+	now := time.Now().UTC()
+	// Two events, two runs.
+	seedEvent(t, db, "ev_mine", "run-mine", "x", "i1", `{}`, now)
+	seedEvent(t, db, "ev_other", "run-other", "x", "i2", `{}`, now)
+	seedClaim(t, db, "cl_mine", "x", "fact", "active", 0.8, now)
+	seedClaim(t, db, "cl_other", "x", "fact", "active", 0.8, now)
+	if _, err := db.Exec(`INSERT INTO claim_evidence VALUES ('cl_mine','ev_mine'), ('cl_other','ev_other')`); err != nil {
+		t.Fatalf("seed evidence: %v", err)
+	}
+
+	tok, _, err := auth.NewIssuer(secret).IssueAgentTokenWithScopesAndRuns(
+		"agt_scoped", []string{"relationships:write"}, []string{"run-mine"}, time.Hour,
+	)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	hdrs := map[string]string{"Authorization": "Bearer " + tok}
+
+	body := map[string]any{
+		"relationships": []map[string]any{{
+			"id": "r_cross", "type": "supports",
+			"from_claim_id": "cl_mine", "to_claim_id": "cl_other",
+		}},
+	}
+	r := postJSON(t, srv.URL+"/v1/relationships", body, hdrs)
+	if r.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", r.StatusCode)
+	}
+	_ = r.Body.Close()
+}
+
+// TestServe_Auth_AgentRunWhitelist_BlocksEmbeddingForCrossRunEvent
+// covers embeddings: an event-typed embedding for an out-of-scope
+// event is forbidden.
+func TestServe_Auth_AgentRunWhitelist_BlocksEmbeddingForCrossRunEvent(t *testing.T) {
+	secret, _ := setupJWTTestEnv(t)
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	srv := httptest.NewServer(newServerMux(db))
+	defer srv.Close()
+
+	now := time.Now().UTC()
+	seedEvent(t, db, "ev_other", "run-other", "x", "in", `{}`, now)
+
+	tok, _, err := auth.NewIssuer(secret).IssueAgentTokenWithScopesAndRuns(
+		"agt_scoped", []string{"embeddings:write"}, []string{"run-mine"}, time.Hour,
+	)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	hdrs := map[string]string{"Authorization": "Bearer " + tok}
+
+	body := map[string]any{
+		"embeddings": []map[string]any{{
+			"entity_id": "ev_other", "entity_type": "event",
+			"vector": []float32{0.1, 0.2}, "model": "m",
+		}},
+	}
+	r := postJSON(t, srv.URL+"/v1/embeddings", body, hdrs)
+	if r.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", r.StatusCode)
+	}
+	_ = r.Body.Close()
+}
+
+// TestServe_Auth_AgentRunWhitelist_AllowsClaimsInOwnRun confirms
+// the gate doesn't over-block: same-run evidence still works.
+func TestServe_Auth_AgentRunWhitelist_AllowsClaimsInOwnRun(t *testing.T) {
+	secret, _ := setupJWTTestEnv(t)
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	srv := httptest.NewServer(newServerMux(db))
+	defer srv.Close()
+
+	now := time.Now().UTC()
+	seedEvent(t, db, "ev_mine", "run-mine", "x", "in", `{}`, now)
+
+	tok, _, err := auth.NewIssuer(secret).IssueAgentTokenWithScopesAndRuns(
+		"agt_scoped", []string{"claims:write"}, []string{"run-mine"}, time.Hour,
+	)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	hdrs := map[string]string{"Authorization": "Bearer " + tok}
+
+	body := map[string]any{
+		"claims": []map[string]any{{
+			"id": "cl_ok", "text": "x", "type": "fact",
+			"confidence": 0.5, "status": "active",
+			"created_at": now.Format(time.RFC3339),
+		}},
+		"evidence": []map[string]string{{"claim_id": "cl_ok", "event_id": "ev_mine"}},
+	}
+	r := postJSON(t, srv.URL+"/v1/claims", body, hdrs)
+	if r.StatusCode != http.StatusCreated {
+		var msg errorResponse
+		_ = json.NewDecoder(r.Body).Decode(&msg)
+		_ = r.Body.Close()
+		t.Errorf("status = %d, want 201 (%v)", r.StatusCode, msg.Error)
+		return
+	}
+	_ = r.Body.Close()
+}
+
 // TestServe_Auth_NarrowUserScopeRejectsOtherEndpoints proves the
 // F.3 contract end-to-end: a user with `events:write` only is
 // allowed at /v1/events but forbidden everywhere else.

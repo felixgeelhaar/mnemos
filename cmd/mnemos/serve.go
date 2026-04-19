@@ -623,6 +623,27 @@ func appendClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 	repo := sqlite.NewClaimRepository(db)
 	ctx := r.Context()
+
+	// F.4.b: if the bearer is run-scoped, every event referenced by
+	// the request's evidence links must belong to an allowed run.
+	// We pre-check before any DB write so failures don't leave
+	// orphan claims behind.
+	if allowed := allowedRunsFromContext(ctx); len(allowed) > 0 && len(req.Evidence) > 0 {
+		eventIDs := make([]string, 0, len(req.Evidence))
+		for _, e := range req.Evidence {
+			eventIDs = append(eventIDs, e.EventID)
+		}
+		bad, badRun, err := checkEventRunsAllowed(ctx, db, eventIDs, allowed)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("run-scope check: %v", err))
+			return
+		}
+		if bad != "" {
+			writeError(w, http.StatusForbidden, fmt.Sprintf("evidence event %q (run %q) not in token whitelist", bad, badRun))
+			return
+		}
+	}
+
 	if err := repo.Upsert(ctx, claims); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("upsert claims: %v", err))
 		return
@@ -683,6 +704,36 @@ func appendRelationshipsHandler(db *sql.DB, w http.ResponseWriter, r *http.Reque
 			CreatedAt:   created,
 			CreatedBy:   actor,
 		})
+	}
+
+	// F.4.b: relationships span claims; both endpoint claims' evidence
+	// events must lie in the bearer's allowed runs.
+	if allowed := allowedRunsFromContext(r.Context()); len(allowed) > 0 {
+		claimIDs := make([]string, 0, len(rels)*2)
+		seen := map[string]struct{}{}
+		for _, rel := range rels {
+			for _, id := range []string{rel.FromClaimID, rel.ToClaimID} {
+				if _, dup := seen[id]; dup {
+					continue
+				}
+				seen[id] = struct{}{}
+				claimIDs = append(claimIDs, id)
+			}
+		}
+		evIDs, err := claimEventIDs(r.Context(), db, claimIDs)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("run-scope lookup: %v", err))
+			return
+		}
+		bad, badRun, err := checkEventRunsAllowed(r.Context(), db, evIDs, allowed)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("run-scope check: %v", err))
+			return
+		}
+		if bad != "" {
+			writeError(w, http.StatusForbidden, fmt.Sprintf("relationship references event %q (run %q) not in token whitelist", bad, badRun))
+			return
+		}
 	}
 
 	repo := sqlite.NewRelationshipRepository(db)
@@ -804,6 +855,37 @@ func appendEmbeddingsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request)
 	repo := sqlite.NewEmbeddingRepository(db)
 	ctx := r.Context()
 	actor := actorFromContext(ctx)
+
+	// F.4.b: validate every embedding's entity belongs to an
+	// allowed run before writing any. Event entities are checked
+	// directly; claim entities derive their runs through evidence.
+	if allowed := allowedRunsFromContext(ctx); len(allowed) > 0 {
+		var eventIDs, claimIDs []string
+		for _, e := range req.Embeddings {
+			switch e.EntityType {
+			case "event":
+				eventIDs = append(eventIDs, e.EntityID)
+			case "claim":
+				claimIDs = append(claimIDs, e.EntityID)
+			}
+		}
+		extraEvents, err := claimEventIDs(ctx, db, claimIDs)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("run-scope lookup: %v", err))
+			return
+		}
+		eventIDs = append(eventIDs, extraEvents...)
+		bad, badRun, err := checkEventRunsAllowed(ctx, db, eventIDs, allowed)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("run-scope check: %v", err))
+			return
+		}
+		if bad != "" {
+			writeError(w, http.StatusForbidden, fmt.Sprintf("embedding entity references event %q (run %q) not in token whitelist", bad, badRun))
+			return
+		}
+	}
+
 	accepted := 0
 	for i, e := range req.Embeddings {
 		if e.EntityID == "" {

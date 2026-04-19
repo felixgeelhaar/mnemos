@@ -148,9 +148,9 @@ func TestAutoIngestProjectDocs_IngestsThenDedupesOnSecondRun(t *testing.T) {
 
 	ctx := context.Background()
 
-	ingested, skipped := autoIngestProjectDocs(ctx, db, root, "")
-	if ingested != 2 || skipped != 0 {
-		t.Fatalf("first run: ingested=%d skipped=%d, want 2 and 0", ingested, skipped)
+	first := autoIngestProjectDocs(ctx, db, root, "")
+	if first.Ingested != 2 || first.Skipped != 0 || first.HasFailures() {
+		t.Fatalf("first run: %+v, want ingested=2 skipped=0 no failures", first)
 	}
 
 	var eventCount int
@@ -161,9 +161,9 @@ func TestAutoIngestProjectDocs_IngestsThenDedupesOnSecondRun(t *testing.T) {
 		t.Fatal("expected events persisted, got 0")
 	}
 
-	ingested2, skipped2 := autoIngestProjectDocs(ctx, db, root, "")
-	if ingested2 != 0 || skipped2 != 2 {
-		t.Fatalf("second run: ingested=%d skipped=%d, want 0 and 2", ingested2, skipped2)
+	second := autoIngestProjectDocs(ctx, db, root, "")
+	if second.Ingested != 0 || second.Skipped != 2 || second.HasFailures() {
+		t.Fatalf("second run: %+v, want ingested=0 skipped=2 no failures", second)
 	}
 
 	var eventCount2 int
@@ -184,9 +184,41 @@ func TestAutoIngestProjectDocs_NoDocsReturnsZero(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	ingested, skipped := autoIngestProjectDocs(context.Background(), db, root, "")
-	if ingested != 0 || skipped != 0 {
-		t.Fatalf("ingested=%d skipped=%d, want 0 and 0", ingested, skipped)
+	r := autoIngestProjectDocs(context.Background(), db, root, "")
+	if r.Ingested != 0 || r.Skipped != 0 || r.HasFailures() {
+		t.Fatalf("empty-root report = %+v, want ingested=0 skipped=0 no failures", r)
+	}
+}
+
+// TestAutoIngestProjectDocs_DedupeFailureDoesNotSilentlyDuplicate
+// proves the reliability fix: if existingSourcePaths fails (DB
+// closed mid-run, schema missing, etc.) we must NOT proceed and
+// re-ingest everything. Pre-fix this used to silently treat the
+// existing-set as empty, which would create duplicate runs on every
+// MCP startup. The new contract surfaces it via DedupeFailed=true
+// and skips the loop entirely.
+func TestAutoIngestProjectDocs_DedupeFailureDoesNotSilentlyDuplicate(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "README.md"), "We use SQLite for storage.")
+
+	dbPath := filepath.Join(t.TempDir(), "mnemos.db")
+	db, err := sqlite.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+
+	// Drop the events table so existingSourcePaths can't query it.
+	if _, err := db.Exec(`DROP TABLE events`); err != nil {
+		t.Fatalf("drop events: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	r := autoIngestProjectDocs(context.Background(), db, root, "")
+	if !r.DedupeFailed {
+		t.Errorf("expected DedupeFailed=true when events table missing, got %+v", r)
+	}
+	if r.Ingested != 0 {
+		t.Errorf("expected zero writes when dedupe fails, got Ingested=%d", r.Ingested)
 	}
 }
 
@@ -207,8 +239,8 @@ func TestAutoIngestProjectDocs_StampsActorOnEventsAndClaims(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	ingested, _ := autoIngestProjectDocs(context.Background(), db, root, "usr_auditor")
-	if ingested == 0 {
+	r := autoIngestProjectDocs(context.Background(), db, root, "usr_auditor")
+	if r.Ingested == 0 {
 		t.Fatal("expected ingested > 0")
 	}
 

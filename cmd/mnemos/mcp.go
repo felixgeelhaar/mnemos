@@ -398,9 +398,16 @@ func runAutoIngest(projectRoot, actor string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	ingested, skipped := autoIngestProjectDocs(ctx, db, projectRoot, actor)
-	if ingested > 0 || skipped > 0 {
-		fmt.Fprintf(os.Stderr, "auto-ingest: ingested=%d skipped=%d root=%s\n", ingested, skipped, projectRoot)
+	report := autoIngestProjectDocs(ctx, db, projectRoot, actor)
+	if report.Ingested > 0 || report.Skipped > 0 || report.HasFailures() {
+		fmt.Fprintf(os.Stderr, "auto-ingest: ingested=%d skipped=%d failed=%d root=%s\n",
+			report.Ingested, report.Skipped, len(report.PerFileErrors), projectRoot)
+	}
+	if report.DedupeFailed {
+		fmt.Fprintln(os.Stderr, "auto-ingest: warning — dedupe lookup failed; nothing was ingested to avoid duplicate runs")
+	}
+	if report.ExtractorError != nil {
+		fmt.Fprintf(os.Stderr, "auto-ingest: warning — extractor build failed (%v); nothing was attempted\n", report.ExtractorError)
 	}
 }
 

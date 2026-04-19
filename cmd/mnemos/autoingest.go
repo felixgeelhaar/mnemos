@@ -24,7 +24,13 @@ import (
 // Ollama, no MNEMOS_EMBED_PROVIDER), it silently no-ops so that auto-ingest
 // still works in zero-config environments. Any actual provider call failure
 // is logged to stderr but does not propagate — persisted events and claims
-// remain queryable via token-overlap fallback.
+// remain queryable via token-overlap fallback. Embeddings are derived
+// data; re-running this on the same events/claims is safe and overwrites.
+//
+// Each batch is attempted independently: a flaky event batch should not
+// stop us from trying claims, since the underlying provider call may
+// succeed for one shape and not the other (e.g., long-content
+// truncation rules differ).
 func generateEmbeddingsBestEffort(ctx context.Context, db *sql.DB, events []domain.Event, claims []domain.Claim) {
 	if _, err := embedding.ConfigFromEnv(); err != nil {
 		return
@@ -32,7 +38,6 @@ func generateEmbeddingsBestEffort(ctx context.Context, db *sql.DB, events []doma
 	if len(events) > 0 {
 		if _, err := pipeline.GenerateEmbeddings(ctx, db, events); err != nil {
 			fmt.Fprintf(os.Stderr, "embeddings: event batch failed: %v\n", err)
-			return
 		}
 	}
 	if len(claims) > 0 {
@@ -157,21 +162,50 @@ func existingSourcePaths(ctx context.Context, db *sql.DB) (map[string]struct{}, 
 	return out, nil
 }
 
-// autoIngestProjectDocs scans root for standard project documents and ingests
-// any that haven't been seen yet. Uses rule-based extraction for speed —
-// users can re-process specific files via the MCP process_text tool with
-// useLlm=true if they want LLM-quality claims. Returns counts and never
-// fails fatally: per-file errors are logged to stderr and skipped.
-func autoIngestProjectDocs(ctx context.Context, db *sql.DB, root, actor string) (ingested, skipped int) {
+// AutoIngestReport summarises an auto-ingest pass. Counts cover the
+// happy path; PerFileErrors lists the path → error pairs for any
+// document that failed mid-pipeline, so callers can surface a real
+// summary rather than relying on stderr scraping.
+type AutoIngestReport struct {
+	Ingested       int
+	Skipped        int
+	PerFileErrors  map[string]error
+	DedupeFailed   bool  // existing-path lookup failed; ingest may produce duplicate runs
+	ExtractorError error // pipeline.NewExtractor failed; nothing was attempted
+}
+
+// HasFailures reports whether any per-file or pre-flight error
+// occurred. Callers in --strict mode use this to fail loudly;
+// best-effort callers (MCP startup) just log the report.
+func (r AutoIngestReport) HasFailures() bool {
+	return r.ExtractorError != nil || r.DedupeFailed || len(r.PerFileErrors) > 0
+}
+
+// autoIngestProjectDocs scans root for standard project documents and
+// ingests any that haven't been seen yet. Uses rule-based extraction
+// for speed — users can re-process specific files via the MCP
+// process_text tool with useLlm=true if they want LLM-quality claims.
+//
+// Returns a structured report so callers can decide whether to treat
+// failures as fatal. The per-doc loop continues past per-file errors
+// (one bad file shouldn't block the rest of the project), but
+// preflight errors that affect all docs (extractor build failure,
+// dedupe lookup failure) are surfaced rather than silently skipped.
+func autoIngestProjectDocs(ctx context.Context, db *sql.DB, root, actor string) AutoIngestReport {
+	report := AutoIngestReport{PerFileErrors: map[string]error{}}
+
 	docs := discoverProjectDocs(root)
 	if len(docs) == 0 {
-		return 0, 0
+		return report
 	}
 
 	existing, err := existingSourcePaths(ctx, db)
 	if err != nil {
+		// Treating this as recoverable would silently re-ingest every
+		// doc on every restart, creating duplicate runs. Surface it.
 		fmt.Fprintf(os.Stderr, "auto-ingest: failed to query existing sources: %v\n", err)
-		existing = map[string]struct{}{}
+		report.DedupeFailed = true
+		return report
 	}
 
 	service := ingest.NewService()
@@ -179,7 +213,8 @@ func autoIngestProjectDocs(ctx context.Context, db *sql.DB, root, actor string) 
 	extractor, err := pipeline.NewExtractor(false)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "auto-ingest: failed to build extractor: %v\n", err)
-		return 0, len(docs)
+		report.ExtractorError = err
+		return report
 	}
 	relEngine := relate.NewEngine()
 
@@ -187,17 +222,18 @@ func autoIngestProjectDocs(ctx context.Context, db *sql.DB, root, actor string) 
 
 	for _, path := range docs {
 		if _, seen := existing[path]; seen {
-			skipped++
+			report.Skipped++
 			continue
 		}
 		if err := ingestSingleDoc(ctx, db, service, normalizer, extractor, relEngine, runID, path, actor); err != nil {
 			fmt.Fprintf(os.Stderr, "auto-ingest: %s: %v\n", path, err)
+			report.PerFileErrors[path] = err
 			continue
 		}
-		ingested++
+		report.Ingested++
 	}
 
-	return ingested, skipped
+	return report
 }
 
 func ingestSingleDoc(

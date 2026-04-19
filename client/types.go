@@ -116,20 +116,6 @@ type AppendResponse struct {
 	Skipped  int `json:"skipped"`
 }
 
-// ListOptions are common pagination + filter parameters for the GET
-// endpoints. Limit defaults to 50 server-side and is capped at 200.
-type ListOptions struct {
-	Limit  int
-	Offset int
-	// Type filters claims by claim type (fact|hypothesis|decision),
-	// relationships by relationship type (supports|contradicts), or
-	// embeddings by entity_type (event|claim). Empty = no filter.
-	Type string
-	// Status filters claims (active|contested|resolved|deprecated).
-	// Ignored for non-claim listings. Empty = no filter.
-	Status string
-}
-
 // AppendClaimsBody is the request body for POST /v1/claims. Evidence is
 // optional — pass nil if the claims don't have associated events yet.
 type AppendClaimsBody struct {

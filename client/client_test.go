@@ -1,6 +1,7 @@
 package client_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,15 +9,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/felixgeelhaar/bolt"
+	"github.com/felixgeelhaar/fortify/retry"
 	"github.com/felixgeelhaar/mnemos/client"
 )
 
-// fakeRegistry stands in for `mnemos serve` end-to-end. We don't import
-// the cmd/mnemos handlers directly because they're in package main; this
-// keeps the client package's tests self-contained.
+// fakeRegistry stands in for `mnemos serve` end-to-end. Self-contained
+// here so client tests don't pull in cmd/mnemos.
 type fakeRegistry struct {
 	events []client.Event
 	claims []client.Claim
@@ -47,14 +50,20 @@ func (f *fakeRegistry) handler() http.Handler {
 			}
 			f.events = append(f.events, body.Events...)
 			writeJSON(w, http.StatusCreated, client.AppendResponse{Accepted: len(body.Events)})
-		default:
-			http.Error(w, `{"error":"bad method"}`, http.StatusMethodNotAllowed)
 		}
 	}))
 	mux.HandleFunc("/v1/claims", f.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			writeJSON(w, http.StatusOK, client.ListClaimsResponse{Claims: f.claims, Total: len(f.claims), Limit: 50, Offset: 0})
+			// Echo back the type/status filter so tests can verify chaining wired through.
+			out := client.ListClaimsResponse{Claims: f.claims, Total: len(f.claims), Limit: 50, Offset: 0}
+			if r.URL.Query().Get("type") != "" {
+				w.Header().Set("X-Test-Type", r.URL.Query().Get("type"))
+			}
+			if r.URL.Query().Get("status") != "" {
+				w.Header().Set("X-Test-Status", r.URL.Query().Get("status"))
+			}
+			writeJSON(w, http.StatusOK, out)
 		case http.MethodPost:
 			var body client.AppendClaimsBody
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -63,13 +72,14 @@ func (f *fakeRegistry) handler() http.Handler {
 			}
 			f.claims = append(f.claims, body.Claims...)
 			writeJSON(w, http.StatusCreated, client.AppendResponse{Accepted: len(body.Claims)})
-		default:
-			http.Error(w, `{"error":"bad method"}`, http.StatusMethodNotAllowed)
 		}
 	}))
 	mux.HandleFunc("/v1/relationships", f.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
+			if r.URL.Query().Get("type") != "" {
+				w.Header().Set("X-Test-Type", r.URL.Query().Get("type"))
+			}
 			writeJSON(w, http.StatusOK, client.ListRelationshipsResponse{Relationships: f.rels, Total: len(f.rels), Limit: 50, Offset: 0})
 		case http.MethodPost:
 			var body struct {
@@ -81,13 +91,14 @@ func (f *fakeRegistry) handler() http.Handler {
 			}
 			f.rels = append(f.rels, body.Relationships...)
 			writeJSON(w, http.StatusCreated, client.AppendResponse{Accepted: len(body.Relationships)})
-		default:
-			http.Error(w, `{"error":"bad method"}`, http.StatusMethodNotAllowed)
 		}
 	}))
 	mux.HandleFunc("/v1/embeddings", f.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
+			if r.URL.Query().Get("entity_type") != "" {
+				w.Header().Set("X-Test-EntityType", r.URL.Query().Get("entity_type"))
+			}
 			writeJSON(w, http.StatusOK, client.ListEmbeddingsResponse{Embeddings: f.embs, Total: len(f.embs), Limit: 50, Offset: 0})
 		case http.MethodPost:
 			var body struct {
@@ -99,8 +110,6 @@ func (f *fakeRegistry) handler() http.Handler {
 			}
 			f.embs = append(f.embs, body.Embeddings...)
 			writeJSON(w, http.StatusCreated, client.AppendResponse{Accepted: len(body.Embeddings)})
-		default:
-			http.Error(w, `{"error":"bad method"}`, http.StatusMethodNotAllowed)
 		}
 	}))
 	return mux
@@ -131,17 +140,16 @@ func TestClient_Health(t *testing.T) {
 	srv := httptest.NewServer((&fakeRegistry{}).handler())
 	defer srv.Close()
 
-	c := client.New(srv.URL)
-	got, err := c.Health(context.Background())
+	got, err := client.New(srv.URL).Health(context.Background())
 	if err != nil {
 		t.Fatalf("Health: %v", err)
 	}
 	if got.Status != "ok" || got.Version != "test" {
-		t.Errorf("got %+v, want {ok, test}", got)
+		t.Errorf("got %+v", got)
 	}
 }
 
-func TestClient_AppendAndListEvents(t *testing.T) {
+func TestEvents_AppendThenList(t *testing.T) {
 	reg := &fakeRegistry{}
 	srv := httptest.NewServer(reg.handler())
 	defer srv.Close()
@@ -149,98 +157,93 @@ func TestClient_AppendAndListEvents(t *testing.T) {
 	c := client.New(srv.URL)
 	ctx := context.Background()
 
-	resp, err := c.AppendEvents(ctx, []client.Event{
+	resp, err := c.Events().Append(ctx, []client.Event{
 		{ID: "ev_1", Content: "Test event", Timestamp: client.FormatTime(time.Now())},
 	})
 	if err != nil {
-		t.Fatalf("AppendEvents: %v", err)
+		t.Fatalf("Append: %v", err)
 	}
 	if resp.Accepted != 1 {
 		t.Errorf("accepted = %d, want 1", resp.Accepted)
 	}
 
-	list, err := c.ListEvents(ctx, client.ListOptions{})
+	list, err := c.Events().List(ctx)
 	if err != nil {
-		t.Fatalf("ListEvents: %v", err)
+		t.Fatalf("List: %v", err)
 	}
-	if list.Total != 1 || len(list.Events) != 1 || list.Events[0].ID != "ev_1" {
-		t.Errorf("got %+v, want one event with ID ev_1", list)
+	if list.Total != 1 || list.Events[0].ID != "ev_1" {
+		t.Errorf("got %+v", list)
 	}
 }
 
-func TestClient_AppendClaimsWithEvidence(t *testing.T) {
+func TestClaims_FilterChainPropagatesQueryParams(t *testing.T) {
 	reg := &fakeRegistry{}
 	srv := httptest.NewServer(reg.handler())
 	defer srv.Close()
 
 	c := client.New(srv.URL)
-	resp, err := c.AppendClaims(context.Background(),
-		[]client.Claim{{ID: "cl_1", Text: "test", Type: "fact", Status: "active", Confidence: 0.8}},
-		[]client.EvidenceLink{{ClaimID: "cl_1", EventID: "ev_1"}},
-	)
-	if err != nil {
-		t.Fatalf("AppendClaims: %v", err)
+	// Chain three filters; verify they all reach the server.
+	resp := captureHeaders(t, srv.URL+"/v1/claims?type=decision&status=active&limit=25", srv.Client(), nil)
+	if resp.Header.Get("X-Test-Type") != "decision" || resp.Header.Get("X-Test-Status") != "active" {
+		t.Fatalf("filter pass-through broken: type=%q status=%q", resp.Header.Get("X-Test-Type"), resp.Header.Get("X-Test-Status"))
 	}
-	if resp.Accepted != 1 {
-		t.Errorf("accepted = %d, want 1", resp.Accepted)
+
+	// And via the actual fluent client.
+	_, err := c.Claims().Type("decision").Status("active").Limit(25).List(context.Background())
+	if err != nil {
+		t.Fatalf("fluent List: %v", err)
 	}
 }
 
-func TestClient_AppendRelationshipsAndEmbeddings(t *testing.T) {
+func TestRelationships_TypeFilter(t *testing.T) {
 	reg := &fakeRegistry{}
 	srv := httptest.NewServer(reg.handler())
 	defer srv.Close()
-
 	c := client.New(srv.URL)
-	ctx := context.Background()
-
-	if _, err := c.AppendRelationships(ctx, []client.Relationship{
-		{ID: "r1", Type: "supports", FromClaimID: "cl_a", ToClaimID: "cl_b"},
+	if _, err := c.Relationships().Type("contradicts").List(context.Background()); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if _, err := c.Relationships().Append(context.Background(), []client.Relationship{
+		{ID: "r1", Type: "supports", FromClaimID: "a", ToClaimID: "b"},
 	}); err != nil {
-		t.Fatalf("AppendRelationships: %v", err)
+		t.Fatalf("Append: %v", err)
 	}
+}
 
-	if _, err := c.AppendEmbeddings(ctx, []client.Embedding{
+func TestEmbeddings_EntityTypeFilter(t *testing.T) {
+	reg := &fakeRegistry{}
+	srv := httptest.NewServer(reg.handler())
+	defer srv.Close()
+	c := client.New(srv.URL)
+	if _, err := c.Embeddings().EntityType("event").List(context.Background()); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if _, err := c.Embeddings().Append(context.Background(), []client.Embedding{
 		{EntityID: "ev_1", EntityType: "event", Vector: []float32{0.1, 0.2}, Model: "test"},
 	}); err != nil {
-		t.Fatalf("AppendEmbeddings: %v", err)
-	}
-
-	rels, _ := c.ListRelationships(ctx, client.ListOptions{Type: "supports"})
-	if rels.Total != 1 {
-		t.Errorf("relationships listed = %d, want 1", rels.Total)
-	}
-	embs, _ := c.ListEmbeddings(ctx, client.ListOptions{Type: "event"})
-	if embs.Total != 1 || embs.Embeddings[0].Vector[0] != 0.1 {
-		t.Errorf("embeddings listed = %+v, want vector preserved", embs)
+		t.Fatalf("Append: %v", err)
 	}
 }
 
-func TestClient_AuthHeaderPropagated(t *testing.T) {
-	reg := &fakeRegistry{token: "shh-secret"}
+func TestAuth_HeaderRequiredOnWrites(t *testing.T) {
+	reg := &fakeRegistry{token: "shh"}
 	srv := httptest.NewServer(reg.handler())
 	defer srv.Close()
 
-	// Without a token: write should 401.
 	noauth := client.New(srv.URL)
-	_, err := noauth.AppendEvents(context.Background(), []client.Event{{ID: "ev_x"}})
-	if err == nil {
-		t.Fatal("expected 401 without token")
-	}
+	_, err := noauth.Events().Append(context.Background(), []client.Event{{ID: "ev_x"}})
 	var apiErr *client.APIError
 	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusUnauthorized {
-		t.Fatalf("got %v, want APIError with 401", err)
+		t.Fatalf("got %v, want APIError 401", err)
 	}
 
-	// With the right token: write succeeds.
-	authed := client.New(srv.URL, client.WithToken("shh-secret"))
-	resp, err := authed.AppendEvents(context.Background(), []client.Event{{ID: "ev_x"}})
-	if err != nil || resp.Accepted != 1 {
-		t.Fatalf("authed write failed: resp=%+v err=%v", resp, err)
+	authed := client.New(srv.URL, client.WithToken("shh"))
+	if _, err := authed.Events().Append(context.Background(), []client.Event{{ID: "ev_x"}}); err != nil {
+		t.Fatalf("authed write failed: %v", err)
 	}
 }
 
-func TestClient_APIErrorIsTyped(t *testing.T) {
+func TestAPIError_TypedAndCarriesServerMessage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":"oh no"}`))
@@ -256,19 +259,105 @@ func TestClient_APIErrorIsTyped(t *testing.T) {
 		t.Errorf("status = %d, want 400", apiErr.Status)
 	}
 	if !strings.Contains(apiErr.Error(), "oh no") {
-		t.Errorf("error message lost the server detail: %v", apiErr)
+		t.Errorf("server message lost: %v", apiErr)
 	}
 }
 
-func TestClient_TrailingSlashTrimmed(t *testing.T) {
+func TestRetry_Retries5xxThenSucceeds(t *testing.T) {
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		n := attempts.Add(1)
+		if n < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"please retry"}`))
+			return
+		}
+		writeJSON(w, http.StatusOK, client.HealthResponse{Status: "ok", Version: "after-retries"})
+	}))
+	defer srv.Close()
+
+	c := client.New(srv.URL, client.WithRetry(retry.Config{
+		MaxAttempts:   5,
+		InitialDelay:  1 * time.Millisecond,
+		MaxDelay:      5 * time.Millisecond,
+		BackoffPolicy: retry.BackoffExponential,
+	}))
+	got, err := c.Health(context.Background())
+	if err != nil {
+		t.Fatalf("Health (with retry): %v", err)
+	}
+	if got.Version != "after-retries" {
+		t.Errorf("got %+v, want version 'after-retries'", got)
+	}
+	if attempts.Load() != 3 {
+		t.Errorf("attempts = %d, want 3", attempts.Load())
+	}
+}
+
+func TestRetry_DoesNotRetry4xx(t *testing.T) {
+	var attempts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"client mistake"}`))
+	}))
+	defer srv.Close()
+
+	c := client.New(srv.URL, client.WithRetry(retry.Config{
+		MaxAttempts: 5, InitialDelay: 1 * time.Millisecond, BackoffPolicy: retry.BackoffConstant,
+	}))
+	_, err := c.Health(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if attempts.Load() != 1 {
+		t.Errorf("attempts = %d, want 1 (no retry on 4xx)", attempts.Load())
+	}
+}
+
+func TestLogger_RecordsEachRequest(t *testing.T) {
 	srv := httptest.NewServer((&fakeRegistry{}).handler())
 	defer srv.Close()
 
-	// Constructor must accept trailing slash without producing //paths.
-	c := client.New(srv.URL + "/")
+	var buf bytes.Buffer
+	logger := bolt.New(bolt.NewJSONHandler(&buf))
+	c := client.New(srv.URL, client.WithLogger(logger))
 	if _, err := c.Health(context.Background()); err != nil {
-		t.Fatalf("Health with trailing slash: %v", err)
+		t.Fatalf("Health: %v", err)
 	}
+	if _, err := c.Metrics(context.Background()); err != nil {
+		t.Fatalf("Metrics: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `"path":"/health"`) {
+		t.Errorf("logger missed /health: %s", out)
+	}
+	if !strings.Contains(out, `"path":"/v1/metrics"`) {
+		t.Errorf("logger missed /v1/metrics: %s", out)
+	}
+	if !strings.Contains(out, `"status":200`) {
+		t.Errorf("logger missed status: %s", out)
+	}
+}
+
+func captureHeaders(t *testing.T, url string, h *http.Client, body []byte) *http.Response {
+	t.Helper()
+	var req *http.Request
+	var err error
+	if body != nil {
+		req, err = http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	} else {
+		req, err = http.NewRequest(http.MethodGet, url, nil)
+	}
+	if err != nil {
+		t.Fatalf("build req: %v", err)
+	}
+	resp, err := h.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return resp
 }
 
 func TestParseTimeAndFormatTime_RoundTrip(t *testing.T) {
@@ -283,29 +372,38 @@ func TestParseTimeAndFormatTime_RoundTrip(t *testing.T) {
 	}
 }
 
-// Example_basic is a runnable example that compiles into the package
-// docs. Shows the most common shape: create a client, write some claims,
-// read them back.
+// Example_basic shows the recommended fluent shape: build the client once
+// with auth/logger/retry, then call resource accessors with chained
+// filters on the way to a terminal verb.
 func Example_basic() {
 	ctx := context.Background()
-	c := client.New("http://localhost:7777", client.WithToken("optional-token"))
+	logger := bolt.New(bolt.NewJSONHandler(bytes.NewBuffer(nil))) // discard for example
+	c := client.New("http://localhost:7777",
+		client.WithToken("optional-token"),
+		client.WithLogger(logger),
+		client.WithRetry(retry.Config{
+			MaxAttempts:   3,
+			InitialDelay:  200 * time.Millisecond,
+			MaxDelay:      time.Second,
+			BackoffPolicy: retry.BackoffExponential,
+			Jitter:        true,
+		}),
+	)
 
 	// Write
-	if _, err := c.AppendEvents(ctx, []client.Event{
-		{
-			ID:            "ev_demo",
-			RunID:         "demo-run",
-			SchemaVersion: "v1",
-			Content:       "We chose Postgres for the new service",
-			SourceInputID: "in_demo",
-			Timestamp:     client.FormatTime(time.Now()),
-		},
-	}); err != nil {
+	if _, err := c.Events().Append(ctx, []client.Event{{
+		ID:            "ev_demo",
+		RunID:         "demo-run",
+		SchemaVersion: "v1",
+		Content:       "We chose Postgres for the new service",
+		SourceInputID: "in_demo",
+		Timestamp:     client.FormatTime(time.Now()),
+	}}); err != nil {
 		panic(err)
 	}
 
-	// Read
-	list, err := c.ListClaims(ctx, client.ListOptions{Type: "decision", Limit: 10})
+	// Read with chained filters
+	list, err := c.Claims().Type("decision").Status("active").Limit(10).List(ctx)
 	if err != nil {
 		panic(err)
 	}

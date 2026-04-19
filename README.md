@@ -182,21 +182,33 @@ The HTTP API at `mnemos serve` is the integration surface. Three flavors:
 **Go (typed client)** — `import "github.com/felixgeelhaar/mnemos/client"`:
 
 ```go
-c := client.New("http://localhost:7777", client.WithToken("optional-secret"))
+c := client.New("http://localhost:7777",
+    client.WithToken("optional-secret"),
+    client.WithLogger(logger),               // *bolt.Logger
+    client.WithRetry(retry.Config{           // fortify retry; 5xx + 429 retry, 4xx fail fast
+        MaxAttempts:   3,
+        InitialDelay:  200 * time.Millisecond,
+        MaxDelay:      time.Second,
+        BackoffPolicy: retry.BackoffExponential,
+        Jitter:        true,
+    }),
+)
 
-c.AppendEvents(ctx, []client.Event{{
+// Write
+c.Events().Append(ctx, []client.Event{{
     ID: "ev_1", RunID: "session-A", SchemaVersion: "v1",
     Content: "We chose Postgres for the new service",
     SourceInputID: "src_1", Timestamp: client.FormatTime(time.Now()),
 }})
 
-list, _ := c.ListClaims(ctx, client.ListOptions{Type: "decision", Limit: 25})
+// Read with chained filters
+list, _ := c.Claims().Type("decision").Status("active").Limit(25).List(ctx)
 for _, claim := range list.Claims {
     fmt.Printf("[%s] %s\n", claim.Type, claim.Text)
 }
 ```
 
-The client wraps every endpoint, returns typed errors via `*client.APIError`, and is safe for concurrent use.
+Resource accessors (`Events()`, `Claims()`, `Relationships()`, `Embeddings()`) return fluent builders. Filter methods chain; terminal `List(ctx)` reads, `Append(ctx, ...)` writes. Non-2xx responses return `*client.APIError` with the server's status and message; works with `errors.As`. Built-in `bolt` request logging and `fortify` retry-with-backoff. Safe for concurrent use.
 
 **Any other language (curl)**:
 

@@ -4,21 +4,38 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/felixgeelhaar/bolt"
+	"github.com/felixgeelhaar/fortify/retry"
 )
 
 // Client is a typed Go client for the Mnemos registry HTTP API. It is
 // safe for concurrent use by multiple goroutines.
+//
+// The fluent surface groups every endpoint under a resource accessor:
+//
+//	c.Events().List(ctx)                       // GET  /v1/events
+//	c.Events().Append(ctx, events)             // POST /v1/events
+//	c.Claims().Type("decision").Limit(25).List(ctx)
+//	c.Claims().Append(ctx, claims, evidence)
+//	c.Relationships().Type("contradicts").List(ctx)
+//	c.Embeddings().Append(ctx, embs)
+//
+// Cross-cutting behavior — auth, structured logging via bolt, and
+// retry-with-backoff via fortify — is configured once at construction
+// and applied to every request.
 type Client struct {
 	baseURL string
 	token   string
 	httpc   *http.Client
+	logger  *bolt.Logger
+	retrier retry.Retry[*http.Response]
 }
 
 // Option configures a Client at construction time.
@@ -50,9 +67,28 @@ func WithTimeout(d time.Duration) Option {
 	}
 }
 
+// WithLogger wires a bolt logger into the client. Every request emits
+// an info-level event with method, path, status, and duration; failures
+// emit at error level. Pass a nil-checked logger or use bolt.New for
+// the default JSON handler.
+func WithLogger(l *bolt.Logger) Option {
+	return func(c *Client) { c.logger = l }
+}
+
+// WithRetry wraps every request in fortify's retry policy. By default
+// the client makes a single attempt; pass a retry.Config to enable
+// backoff. The client retries on network errors, 5xx, and 429; 2xx and
+// other 4xx codes pass through immediately so client mistakes don't
+// hammer the server.
+func WithRetry(cfg retry.Config) Option {
+	return func(c *Client) {
+		c.retrier = retry.New[*http.Response](cfg)
+	}
+}
+
 // New returns a Client pointing at the given Mnemos registry base URL
-// (e.g. "http://localhost:7777"). The trailing slash, if any, is
-// stripped. Default timeout is 30s; pass WithTimeout to change it.
+// (e.g. "http://localhost:7777"). Trailing slash is stripped. Default
+// timeout is 30s; pass WithTimeout to change it.
 func New(baseURL string, opts ...Option) *Client {
 	c := &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
@@ -82,182 +118,93 @@ func (c *Client) Metrics(ctx context.Context) (*MetricsResponse, error) {
 	return &out, nil
 }
 
-// ListEvents hits GET /v1/events. Pass an empty ListOptions for defaults.
-func (c *Client) ListEvents(ctx context.Context, opts ListOptions) (*ListEventsResponse, error) {
-	var out ListEventsResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/events"+queryString(opts, false, false), nil, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
+// Events returns a fluent builder for the /v1/events endpoint.
+func (c *Client) Events() *EventsBuilder { return &EventsBuilder{c: c} }
 
-// AppendEvents hits POST /v1/events. Returns the server's accepted count.
-// Idempotent: events with IDs already in the registry are no-ops.
-func (c *Client) AppendEvents(ctx context.Context, events []Event) (*AppendResponse, error) {
-	var out AppendResponse
-	body := struct {
-		Events []Event `json:"events"`
-	}{Events: events}
-	if err := c.do(ctx, http.MethodPost, "/v1/events", body, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
+// Claims returns a fluent builder for the /v1/claims endpoint.
+func (c *Client) Claims() *ClaimsBuilder { return &ClaimsBuilder{c: c} }
 
-// ListClaims hits GET /v1/claims. ListOptions supports both Type
-// (fact|hypothesis|decision) and Status filters; either may be empty.
-func (c *Client) ListClaims(ctx context.Context, opts ListOptions) (*ListClaimsResponse, error) {
-	var out ListClaimsResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/claims"+queryString(opts, true, true), nil, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
+// Relationships returns a fluent builder for the /v1/relationships endpoint.
+func (c *Client) Relationships() *RelationshipsBuilder { return &RelationshipsBuilder{c: c} }
 
-// AppendClaims hits POST /v1/claims. Pass evidence links to be inserted
-// in the same request — they're FK-validated server-side, so the
-// referenced events must already exist.
-func (c *Client) AppendClaims(ctx context.Context, claims []Claim, evidence []EvidenceLink) (*AppendResponse, error) {
-	var out AppendResponse
-	body := AppendClaimsBody{Claims: claims, Evidence: evidence}
-	if err := c.do(ctx, http.MethodPost, "/v1/claims", body, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
+// Embeddings returns a fluent builder for the /v1/embeddings endpoint.
+func (c *Client) Embeddings() *EmbeddingsBuilder { return &EmbeddingsBuilder{c: c} }
 
-// ListRelationships hits GET /v1/relationships. ListOptions.Type filters
-// by supports|contradicts.
-func (c *Client) ListRelationships(ctx context.Context, opts ListOptions) (*ListRelationshipsResponse, error) {
-	var out ListRelationshipsResponse
-	if err := c.do(ctx, http.MethodGet, "/v1/relationships"+queryString(opts, true, false), nil, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// AppendRelationships hits POST /v1/relationships. The referenced
-// from/to claims must already exist.
-func (c *Client) AppendRelationships(ctx context.Context, rels []Relationship) (*AppendResponse, error) {
-	var out AppendResponse
-	body := struct {
-		Relationships []Relationship `json:"relationships"`
-	}{Relationships: rels}
-	if err := c.do(ctx, http.MethodPost, "/v1/relationships", body, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// ListEmbeddings hits GET /v1/embeddings. ListOptions.Type filters by
-// entity_type (event|claim).
-func (c *Client) ListEmbeddings(ctx context.Context, opts ListOptions) (*ListEmbeddingsResponse, error) {
-	// Embeddings use the param name entity_type, not type.
-	q := url.Values{}
-	if opts.Limit > 0 {
-		q.Set("limit", strconv.Itoa(opts.Limit))
-	}
-	if opts.Offset > 0 {
-		q.Set("offset", strconv.Itoa(opts.Offset))
-	}
-	if opts.Type != "" {
-		q.Set("entity_type", opts.Type)
-	}
-	path := "/v1/embeddings"
-	if encoded := q.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
-	var out ListEmbeddingsResponse
-	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// AppendEmbeddings hits POST /v1/embeddings. Vectors travel as JSON
-// float arrays and round-trip bit-exact through the server's
-// encode/decode cycle.
-func (c *Client) AppendEmbeddings(ctx context.Context, embs []Embedding) (*AppendResponse, error) {
-	var out AppendResponse
-	body := struct {
-		Embeddings []Embedding `json:"embeddings"`
-	}{Embeddings: embs}
-	if err := c.do(ctx, http.MethodPost, "/v1/embeddings", body, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// queryString builds the ?limit&offset&type&status portion. The two
-// bool parameters control which of those filters are applicable to the
-// endpoint being called.
-func queryString(opts ListOptions, includeType, includeStatus bool) string {
-	q := url.Values{}
-	if opts.Limit > 0 {
-		q.Set("limit", strconv.Itoa(opts.Limit))
-	}
-	if opts.Offset > 0 {
-		q.Set("offset", strconv.Itoa(opts.Offset))
-	}
-	if includeType && opts.Type != "" {
-		q.Set("type", opts.Type)
-	}
-	if includeStatus && opts.Status != "" {
-		q.Set("status", opts.Status)
-	}
-	encoded := q.Encode()
-	if encoded == "" {
-		return ""
-	}
-	return "?" + encoded
-}
-
-// do is the single point that sends a request and decodes a response.
-// All public methods funnel through here so logging, auth, and error
-// handling are consistent.
+// do is the single point that sends a request, decodes a response, and
+// applies cross-cutting concerns (logging + retry). All builder
+// terminal verbs funnel through here.
 func (c *Client) do(ctx context.Context, method, path string, body, dst any) error {
-	var reader io.Reader
+	var bodyBytes []byte
 	if body != nil {
-		buf, err := json.Marshal(body)
+		var err error
+		bodyBytes, err = json.Marshal(body)
 		if err != nil {
 			return fmt.Errorf("marshal request body: %w", err)
 		}
-		reader = bytes.NewReader(buf)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
-	if err != nil {
-		return fmt.Errorf("build request: %w", err)
-	}
-	if reader != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
+	send := func(ctx context.Context) (*http.Response, error) {
+		var reader io.Reader
+		if bodyBytes != nil {
+			reader = bytes.NewReader(bodyBytes)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
+		if err != nil {
+			return nil, fmt.Errorf("build request: %w", err)
+		}
+		if reader != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if c.token != "" {
+			req.Header.Set("Authorization", "Bearer "+c.token)
+		}
+		resp, err := c.httpc.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		// Surface retry-eligible HTTP statuses as errors so fortify
+		// retries them; 2xx and non-retryable 4xx return cleanly.
+		if shouldRetryStatus(resp.StatusCode) {
+			body, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			return nil, &retryableHTTPError{status: resp.StatusCode, body: body}
+		}
+		return resp, nil
 	}
 
-	resp, err := c.httpc.Do(req)
+	start := time.Now()
+	var resp *http.Response
+	var err error
+	if c.retrier != nil {
+		resp, err = c.retrier.Do(ctx, send)
+	} else {
+		resp, err = send(ctx)
+	}
+	elapsed := time.Since(start)
+
+	status := 0
+	if resp != nil {
+		status = resp.StatusCode
+	}
+	c.logRequest(method, path, status, elapsed, err)
+
 	if err != nil {
+		// retryableHTTPError carries the server status; surface as APIError.
+		var rh *retryableHTTPError
+		if errors.As(err, &rh) {
+			return &APIError{Status: rh.status, Message: fmt.Sprintf("%s %s: %d %s", method, path, rh.status, parseErrorMessage(rh.body))}
+		}
 		return fmt.Errorf("%s %s: %w", method, path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
+	respBody, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return fmt.Errorf("read response body: %w", readErr)
 	}
 
 	if resp.StatusCode/100 != 2 {
-		// Try to extract the server's error message; fall back to the
-		// raw body if it isn't JSON-shaped.
-		var errBody struct {
-			Error string `json:"error"`
-		}
-		msg := strings.TrimSpace(string(respBody))
-		if json.Unmarshal(respBody, &errBody) == nil && errBody.Error != "" {
-			msg = errBody.Error
-		}
-		return &APIError{Status: resp.StatusCode, Message: fmt.Sprintf("%s %s: %d %s", method, path, resp.StatusCode, msg)}
+		return &APIError{Status: resp.StatusCode, Message: fmt.Sprintf("%s %s: %d %s", method, path, resp.StatusCode, parseErrorMessage(respBody))}
 	}
 
 	if dst == nil {
@@ -267,4 +214,55 @@ func (c *Client) do(ctx context.Context, method, path string, body, dst any) err
 		return fmt.Errorf("decode %s response: %w", path, err)
 	}
 	return nil
+}
+
+func (c *Client) logRequest(method, path string, status int, elapsed time.Duration, err error) {
+	if c.logger == nil {
+		return
+	}
+	event := c.logger.Info()
+	if err != nil {
+		event = c.logger.Error()
+	}
+	event.
+		Str("method", method).
+		Str("path", path).
+		Int("status", status).
+		Dur("duration", elapsed)
+	if err != nil {
+		event = event.Err(err)
+	}
+	event.Msg("mnemos client request")
+}
+
+// shouldRetryStatus returns true for HTTP statuses worth retrying:
+// 5xx server errors and 429 rate-limit. Other 4xx codes indicate
+// caller mistakes and should fail fast.
+func shouldRetryStatus(code int) bool {
+	if code >= 500 && code <= 599 {
+		return true
+	}
+	return code == http.StatusTooManyRequests
+}
+
+// retryableHTTPError carries a status code through fortify's retry loop
+// so the outer do() can convert it to an APIError after retries are
+// exhausted.
+type retryableHTTPError struct {
+	status int
+	body   []byte
+}
+
+func (e *retryableHTTPError) Error() string {
+	return fmt.Sprintf("retryable HTTP %d", e.status)
+}
+
+func parseErrorMessage(body []byte) string {
+	var errBody struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(body, &errBody) == nil && errBody.Error != "" {
+		return errBody.Error
+	}
+	return strings.TrimSpace(string(body))
 }

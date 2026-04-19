@@ -503,6 +503,28 @@ func TestPrecisionRecall(t *testing.T) {
 	t.Logf("%-25s %6s %6s %6s %8s %8s", "--------", "--", "--", "---", "----", "------")
 	t.Logf("%-25s %6d %6d %6d %7.1f%% %7.1f%%", "AGGREGATE", aggregate.truePositives, aggregate.falseNegatives, aggregate.totalExtracted, precision*100, recall*100)
 	t.Logf("F1 Score: %.1f%%", f1*100)
+
+	// Reliability floor. Baseline at slice F (2026-04-19): P=81.9%
+	// R=94.6% F1=87.8%. We allow a 1pt buffer per metric so a
+	// genuinely-improving change with a tiny tradeoff doesn't
+	// flake; anything sliding worse than that is a reliability
+	// regression and the test fails. If a refactor legitimately
+	// moves the floor (up or down with justification), update the
+	// constants in the same commit.
+	const (
+		minPrecision = 0.80
+		minRecall    = 0.93
+		minF1        = 0.86
+	)
+	if precision < minPrecision {
+		t.Errorf("precision regression: got %.1f%%, baseline floor %.1f%%", precision*100, minPrecision*100)
+	}
+	if recall < minRecall {
+		t.Errorf("recall regression: got %.1f%%, baseline floor %.1f%%", recall*100, minRecall*100)
+	}
+	if f1 < minF1 {
+		t.Errorf("F1 regression: got %.1f%%, baseline floor %.1f%%", f1*100, minF1*100)
+	}
 }
 
 // TestRelationshipDetection evaluates the relate engine against annotated

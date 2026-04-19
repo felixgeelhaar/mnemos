@@ -37,12 +37,18 @@ type auditCounts struct {
 
 const auditSchemaVersion = "audit.v1"
 
-// handleAudit dumps the entire knowledge base to stdout as a single JSON
-// document. Intended for compliance reviews, point-in-time backups, and
-// debugging. Embeddings are included only when --include-embeddings is
-// passed because their float arrays inflate the output by an order of
-// magnitude and most audit consumers don't need them.
-func handleAudit(args []string, _ Flags) {
+// handleAudit dispatches `mnemos audit` and its subcommands.
+//
+// `mnemos audit` (no subcommand) keeps the legacy point-in-time
+// snapshot for backups and compliance reviews. `mnemos audit who
+// <id>` filters to a single principal's writes — the F.5 audit
+// surface that closes the loop on per-actor governance.
+func handleAudit(args []string, flags Flags) {
+	if len(args) > 0 && args[0] == "who" {
+		handleAuditWho(args[1:], flags)
+		return
+	}
+
 	includeEmbeddings := false
 	for _, a := range args {
 		switch a {

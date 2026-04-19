@@ -160,29 +160,6 @@ func handleMCP() {
 		mcp.WithInstructions("Use query_knowledge to read the knowledge base, process_text to ingest raw text, and watch_file to keep a specific file's claims fresh as it changes. Prefer process_text before querying when no knowledge exists yet."),
 	)
 
-	srv.Tool("query_knowledge").
-		Description("Query the Mnemos knowledge base and return evidence-backed results.").
-		OutputSchema(mcpQueryOutput{}).
-		ValidateInput().
-		Handler(func(ctx context.Context, input mcpQueryInput) (mcpQueryOutput, error) {
-			return mcpRunQuery(ctx, input)
-		})
-
-	srv.Tool("process_text").
-		Description("Ingest raw text, extract claims, detect relationships, and optionally generate embeddings.").
-		OutputSchema(mcpProcessTextOutput{}).
-		ValidateInput().
-		Handler(func(ctx context.Context, input mcpProcessTextInput) (mcpProcessTextOutput, error) {
-			return mcpRunProcessText(ctx, mcpActor, input)
-		})
-
-	srv.Tool("knowledge_metrics").
-		Description("Return counts and statistics about the Mnemos knowledge base.").
-		OutputSchema(mcpMetricsOutput{}).
-		Handler(func(_ context.Context, _ struct{}) (mcpMetricsOutput, error) {
-			return mcpRunMetrics()
-		})
-
 	// watch_file uses a long-lived DB connection separate from the
 	// per-call connections in the other handlers. Opened lazily so
 	// startup doesn't fail just because the watcher isn't needed.
@@ -203,11 +180,55 @@ func handleMCP() {
 		return watcher, watcherErr
 	}
 
+	// Build the axi-go kernel that wraps every MCP tool with effect
+	// gating, an evidence chain, and an execution budget. If the
+	// kernel fails to build the MCP server still starts — we fall
+	// back to direct dispatch so a kernel bug never blocks the agent.
+	kernel, kernelErr := buildMCPKernel(logger, mcpExecutorMap(mcpActor, getWatcher))
+	if kernelErr != nil {
+		fmt.Fprintf(os.Stderr, "mcp: axi-go kernel disabled: %v\n", kernelErr)
+	}
+
+	srv.Tool("query_knowledge").
+		Description("Query the Mnemos knowledge base and return evidence-backed results.").
+		OutputSchema(mcpQueryOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpQueryInput) (mcpQueryOutput, error) {
+			if kernel != nil {
+				return dispatchAxiTool[mcpQueryOutput](ctx, kernel, nil, "query_knowledge", input)
+			}
+			return mcpRunQuery(ctx, input)
+		})
+
+	srv.Tool("process_text").
+		Description("Ingest raw text, extract claims, detect relationships, and optionally generate embeddings.").
+		OutputSchema(mcpProcessTextOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpProcessTextInput) (mcpProcessTextOutput, error) {
+			if kernel != nil {
+				return dispatchAxiTool[mcpProcessTextOutput](ctx, kernel, nil, "process_text", input)
+			}
+			return mcpRunProcessText(ctx, mcpActor, input)
+		})
+
+	srv.Tool("knowledge_metrics").
+		Description("Return counts and statistics about the Mnemos knowledge base.").
+		OutputSchema(mcpMetricsOutput{}).
+		Handler(func(ctx context.Context, _ struct{}) (mcpMetricsOutput, error) {
+			if kernel != nil {
+				return dispatchAxiTool[mcpMetricsOutput](ctx, kernel, nil, "knowledge_metrics", struct{}{})
+			}
+			return mcpRunMetrics()
+		})
+
 	srv.Tool("list_claims").
 		Description("List claims with optional type/status filtering and pagination. Useful for browsing the knowledge base without a specific question.").
 		OutputSchema(mcpListClaimsOutput{}).
 		ValidateInput().
 		Handler(func(ctx context.Context, input mcpListClaimsInput) (mcpListClaimsOutput, error) {
+			if kernel != nil {
+				return dispatchAxiTool[mcpListClaimsOutput](ctx, kernel, nil, "list_claims", input)
+			}
 			return mcpRunListClaims(ctx, input)
 		})
 
@@ -217,6 +238,9 @@ func handleMCP() {
 		ValidateInput().
 		Handler(func(ctx context.Context, input mcpListClaimsInput) (mcpListClaimsOutput, error) {
 			input.Type = string(domain.ClaimTypeDecision)
+			if kernel != nil {
+				return dispatchAxiTool[mcpListClaimsOutput](ctx, kernel, nil, "list_decisions", input)
+			}
 			return mcpRunListClaims(ctx, input)
 		})
 
@@ -225,6 +249,9 @@ func handleMCP() {
 		OutputSchema(mcpListContradictionsOutput{}).
 		ValidateInput().
 		Handler(func(ctx context.Context, input mcpListContradictionsInput) (mcpListContradictionsOutput, error) {
+			if kernel != nil {
+				return dispatchAxiTool[mcpListContradictionsOutput](ctx, kernel, nil, "list_contradictions", input)
+			}
 			return mcpRunListContradictions(ctx, input)
 		})
 
@@ -233,6 +260,9 @@ func handleMCP() {
 		OutputSchema(mcpIngestGitPRsOutput{}).
 		ValidateInput().
 		Handler(func(ctx context.Context, input mcpIngestGitPRsInput) (mcpIngestGitPRsOutput, error) {
+			if kernel != nil {
+				return dispatchAxiTool[mcpIngestGitPRsOutput](ctx, kernel, nil, "ingest_git_prs", input)
+			}
 			return mcpRunIngestGitPRs(ctx, mcpActor, input)
 		})
 
@@ -241,6 +271,9 @@ func handleMCP() {
 		OutputSchema(mcpIngestGitLogOutput{}).
 		ValidateInput().
 		Handler(func(ctx context.Context, input mcpIngestGitLogInput) (mcpIngestGitLogOutput, error) {
+			if kernel != nil {
+				return dispatchAxiTool[mcpIngestGitLogOutput](ctx, kernel, nil, "ingest_git_log", input)
+			}
 			return mcpRunIngestGitLog(ctx, mcpActor, input)
 		})
 
@@ -248,20 +281,15 @@ func handleMCP() {
 		Description("Register a file to be re-ingested when its content changes. Polls every few seconds; in-memory only — restart drops all watches.").
 		OutputSchema(mcpWatchFileOutput{}).
 		ValidateInput().
-		Handler(func(_ context.Context, input mcpWatchFileInput) (mcpWatchFileOutput, error) {
-			w, err := getWatcher()
+		Handler(func(ctx context.Context, input mcpWatchFileInput) (mcpWatchFileOutput, error) {
+			if kernel != nil {
+				return dispatchAxiTool[mcpWatchFileOutput](ctx, kernel, nil, "watch_file", input)
+			}
+			out, err := runWatchFileTool(input, getWatcher)
 			if err != nil {
 				return mcpWatchFileOutput{}, err
 			}
-			count, err := w.Add(input.Path)
-			if err != nil {
-				return mcpWatchFileOutput{}, err
-			}
-			return mcpWatchFileOutput{
-				Watching:      true,
-				Path:          input.Path,
-				ActiveWatches: count,
-			}, nil
+			return out, nil
 		})
 
 	if err := mcp.ServeStdio(context.Background(), srv, mcp.WithMiddleware(mcp.DefaultMiddlewareWithTimeout(mcpBoltLogger{logger: logger}, 30*time.Second)...)); err != nil {

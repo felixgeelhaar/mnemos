@@ -1,6 +1,6 @@
 module github.com/felixgeelhaar/mnemos
 
-go 1.25.0
+go 1.26.2
 
 require (
 	github.com/felixgeelhaar/bolt v1.3.0
@@ -14,6 +14,7 @@ require (
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/felixgeelhaar/axi-go v1.2.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect

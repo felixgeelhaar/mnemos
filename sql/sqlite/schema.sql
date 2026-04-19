@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
   status TEXT NOT NULL DEFAULT 'active',
+  scopes_json TEXT NOT NULL DEFAULT '["*"]',
   created_at TEXT NOT NULL
 );
 

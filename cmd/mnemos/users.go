@@ -39,6 +39,7 @@ func handleUser(args []string, _ Flags) {
 
 func handleUserCreate(args []string) {
 	name, email := "", ""
+	var scopes []string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--name":
@@ -55,6 +56,13 @@ func handleUserCreate(args []string) {
 			}
 			email = args[i+1]
 			i++
+		case "--scope":
+			if i+1 >= len(args) {
+				exitWithMnemosError(false, NewUserError("--scope requires a value"))
+				return
+			}
+			scopes = append(scopes, args[i+1])
+			i++
 		default:
 			exitWithMnemosError(false, NewUserError("unknown flag %q", args[i]))
 			return
@@ -64,6 +72,10 @@ func handleUserCreate(args []string) {
 		exitWithMnemosError(false, NewUserError("--name and --email are both required"))
 		return
 	}
+	// Empty --scope leaves the slice nil; the schema default (["*"])
+	// applies on insert and the resulting user keeps full access.
+	// Operators who want a least-privilege user must pass explicit
+	// --scope arguments.
 
 	db, err := sqlite.Open(resolveDBPath())
 	if err != nil {
@@ -82,13 +94,19 @@ func handleUserCreate(args []string) {
 		Name:      name,
 		Email:     email,
 		Status:    domain.UserStatusActive,
+		Scopes:    scopes,
 		CreatedAt: time.Now().UTC(),
 	}
 	if err := sqlite.NewUserRepository(db).Create(context.Background(), user); err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "create user"))
 		return
 	}
-	fmt.Printf("user_id=%s name=%q email=%s status=%s\n", user.ID, user.Name, user.Email, user.Status)
+	scopeDisplay := strings.Join(scopes, ",")
+	if scopeDisplay == "" {
+		scopeDisplay = "* (default)"
+	}
+	fmt.Printf("user_id=%s name=%q email=%s status=%s scopes=%s\n",
+		user.ID, user.Name, user.Email, user.Status, scopeDisplay)
 	fmt.Println("\nNext: mnemos token issue --user " + user.ID + " — to mint a JWT for this user.")
 }
 
@@ -113,11 +131,15 @@ func handleUserList(args []string) {
 		fmt.Println("(no users)")
 		return
 	}
-	fmt.Printf("%-26s %-12s %-30s %-30s %s\n", "ID", "STATUS", "NAME", "EMAIL", "CREATED")
+	fmt.Printf("%-26s %-12s %-30s %-30s %-26s %s\n", "ID", "STATUS", "NAME", "EMAIL", "SCOPES", "CREATED")
 	for _, u := range users {
-		fmt.Printf("%-26s %-12s %-30s %-30s %s\n",
+		scopes := strings.Join(u.Scopes, ",")
+		if scopes == "" {
+			scopes = "*"
+		}
+		fmt.Printf("%-26s %-12s %-30s %-30s %-26s %s\n",
 			u.ID, u.Status, truncate(u.Name, 30), truncate(u.Email, 30),
-			u.CreatedAt.Format(time.RFC3339))
+			truncate(scopes, 26), u.CreatedAt.Format(time.RFC3339))
 	}
 }
 

@@ -427,6 +427,67 @@ func TestServe_Auth_AgentScopeEnforcement(t *testing.T) {
 	}
 }
 
+// TestServe_Auth_NarrowUserScopeRejectsOtherEndpoints proves the
+// F.3 contract end-to-end: a user with `events:write` only is
+// allowed at /v1/events but forbidden everywhere else.
+func TestServe_Auth_NarrowUserScopeRejectsOtherEndpoints(t *testing.T) {
+	secret, _ := setupJWTTestEnv(t)
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := domain.User{
+		ID: "usr_narrow", Name: "n", Email: "n@test.local",
+		Status:    domain.UserStatusActive,
+		Scopes:    []string{"events:write"},
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := sqlite.NewUserRepository(db).Create(context.Background(), user); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	tok, _, err := auth.NewIssuer(secret).IssueUserToken(user, time.Hour)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	hdrs := map[string]string{"Authorization": "Bearer " + tok}
+
+	srv := httptest.NewServer(newServerMux(db))
+	defer srv.Close()
+
+	// Allowed: events.
+	resp := postJSON(t, srv.URL+"/v1/events",
+		map[string]any{"events": []map[string]any{{
+			"id": "ev_n", "run_id": "r", "schema_version": "v1",
+			"content": "x", "source_input_id": "in",
+			"timestamp": time.Now().UTC().Format(time.RFC3339),
+		}}}, hdrs)
+	if resp.StatusCode != http.StatusCreated {
+		var msg errorResponse
+		_ = json.NewDecoder(resp.Body).Decode(&msg)
+		_ = resp.Body.Close()
+		t.Fatalf("events status = %d, want 201 (%v)", resp.StatusCode, msg.Error)
+	}
+	_ = resp.Body.Close()
+
+	// Forbidden: other resources.
+	for _, c := range []struct {
+		path string
+		body map[string]any
+	}{
+		{"/v1/claims", map[string]any{"claims": []map[string]any{{"id": "c1", "text": "x", "type": "fact", "confidence": 0.5, "status": "active"}}}},
+		{"/v1/relationships", map[string]any{"relationships": []map[string]any{{"id": "r1", "type": "supports", "from_claim_id": "a", "to_claim_id": "b"}}}},
+		{"/v1/embeddings", map[string]any{"embeddings": []map[string]any{{"entity_id": "e1", "entity_type": "event", "vector": []float32{1, 2}, "model": "m"}}}},
+	} {
+		r := postJSON(t, srv.URL+c.path, c.body, hdrs)
+		if r.StatusCode != http.StatusForbidden {
+			t.Errorf("%s status = %d, want 403", c.path, r.StatusCode)
+		}
+		_ = r.Body.Close()
+	}
+}
+
 // TestServe_Auth_UserTokenGetsAllScopes confirms the implicit-wildcard
 // behaviour: a user JWT can hit every POST endpoint without an
 // explicit scope list.

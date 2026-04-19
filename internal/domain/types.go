@@ -149,11 +149,18 @@ const (
 // User represents a human or service identity that can authenticate
 // against the Mnemos registry. Tokens are issued to users; every
 // audit-bearing action records the issuing user as created_by.
+//
+// Scopes is the authorisation list embedded into tokens issued for
+// this user. Empty scopes is treated as the legacy default (full
+// access via "*") so pre-F.3 users keep working — F.3 added the
+// column with a default of '["*"]', and unmarshalled empty slices
+// are interpreted the same way at issuance time.
 type User struct {
 	ID        string
 	Name      string
 	Email     string
 	Status    UserStatus
+	Scopes    []string
 	CreatedAt time.Time
 }
 
@@ -176,6 +183,11 @@ func (u User) Validate() error {
 	case UserStatusActive, UserStatusRevoked:
 	default:
 		return fmt.Errorf("invalid user status %q", u.Status)
+	}
+	for _, s := range u.Scopes {
+		if strings.TrimSpace(s) == "" {
+			return errors.New("user scope entries must be non-empty")
+		}
 	}
 	return nil
 }

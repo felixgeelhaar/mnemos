@@ -84,12 +84,17 @@ func NewVerifier(secret []byte, revoked ports.RevokedTokenRepository) *Verifier 
 	return &Verifier{secret: secret, revoked: revoked}
 }
 
-// IssueUserToken mints a JWT for a human user, valid for ttl. Returns
-// the signed token string and the JTI (so callers that want to record
-// the issuance can do so). User tokens implicitly carry the wildcard
-// scope — per-user scope policy is a future addition.
+// IssueUserToken mints a JWT for a human user, valid for ttl.
+// Returns the signed token string and the JTI (so callers that want
+// to record the issuance can do so). The token's scopes mirror the
+// user's recorded Scopes; an empty list is treated as the legacy
+// wildcard so users created before F.3 keep working.
 func (i *Issuer) IssueUserToken(user domain.User, ttl time.Duration) (token, jti string, err error) {
-	return i.issue(user.ID, TokenKindUser, []string{"*"}, ttl)
+	scopes := user.Scopes
+	if len(scopes) == 0 {
+		scopes = []string{"*"}
+	}
+	return i.issue(user.ID, TokenKindUser, append([]string(nil), scopes...), ttl)
 }
 
 // IssueAgentToken mints a JWT for an automated agent, valid for ttl.

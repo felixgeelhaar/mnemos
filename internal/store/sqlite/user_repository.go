@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -26,12 +27,49 @@ func (r UserRepository) Create(ctx context.Context, u domain.User) error {
 	if err := u.Validate(); err != nil {
 		return fmt.Errorf("invalid user: %w", err)
 	}
-	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO users (id, name, email, status, created_at) VALUES (?, ?, ?, ?, ?)`,
-		u.ID, u.Name, u.Email, string(u.Status), u.CreatedAt.UTC().Format(time.RFC3339Nano),
+	scopesJSON, err := encodeUserScopes(u.Scopes)
+	if err != nil {
+		return err
+	}
+	_, err = r.db.ExecContext(ctx,
+		`INSERT INTO users (id, name, email, status, scopes_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		u.ID, u.Name, u.Email, string(u.Status), scopesJSON, u.CreatedAt.UTC().Format(time.RFC3339Nano),
 	)
 	if err != nil {
 		return fmt.Errorf("insert user %s: %w", u.ID, err)
+	}
+	return nil
+}
+
+// encodeUserScopes is the inverse of decodeUserScopes — empty slice
+// becomes "[]" (not "null") so the column always parses on read.
+func encodeUserScopes(scopes []string) (string, error) {
+	if scopes == nil {
+		scopes = []string{}
+	}
+	b, err := json.Marshal(scopes)
+	if err != nil {
+		return "", fmt.Errorf("encode user scopes: %w", err)
+	}
+	return string(b), nil
+}
+
+// UpdateScopes replaces the user's scope list. Existing tokens still
+// in flight keep their original scopes — only freshly-issued tokens
+// see the new list.
+func (r UserRepository) UpdateScopes(ctx context.Context, id string, scopes []string) error {
+	scopesJSON, err := encodeUserScopes(scopes)
+	if err != nil {
+		return err
+	}
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE users SET scopes_json = ? WHERE id = ?`, scopesJSON, id)
+	if err != nil {
+		return fmt.Errorf("update user scopes %s: %w", id, err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("user %s: %w", id, sql.ErrNoRows)
 	}
 	return nil
 }
@@ -52,7 +90,7 @@ func (r UserRepository) GetByEmail(ctx context.Context, email string) (domain.Us
 // active and revoked users are returned; callers filter as needed.
 func (r UserRepository) List(ctx context.Context) ([]domain.User, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, email, status, created_at FROM users ORDER BY created_at ASC`)
+		`SELECT id, name, email, status, scopes_json, created_at FROM users ORDER BY created_at ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -88,14 +126,15 @@ func (r UserRepository) UpdateStatus(ctx context.Context, id string, status doma
 func (r UserRepository) scanOne(ctx context.Context, where string, args ...any) (domain.User, error) {
 	//nolint:gosec // G202: where clause is one of two literal constants from internal callers, never user input
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, name, email, status, created_at FROM users `+where, args...)
+		`SELECT id, name, email, status, scopes_json, created_at FROM users `+where, args...)
 
 	var (
 		u         domain.User
 		statusStr string
+		scopesRaw string
 		createdAt string
 	)
-	if err := row.Scan(&u.ID, &u.Name, &u.Email, &statusStr, &createdAt); err != nil {
+	if err := row.Scan(&u.ID, &u.Name, &u.Email, &statusStr, &scopesRaw, &createdAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.User{}, fmt.Errorf("user %v: %w", args, sql.ErrNoRows)
 		}
@@ -107,6 +146,9 @@ func (r UserRepository) scanOne(ctx context.Context, where string, args ...any) 
 	}
 	u.Status = domain.UserStatus(statusStr)
 	u.CreatedAt = t
+	if err := json.Unmarshal([]byte(scopesRaw), &u.Scopes); err != nil {
+		return domain.User{}, fmt.Errorf("decode user scopes: %w", err)
+	}
 	return u, nil
 }
 
@@ -116,9 +158,10 @@ func scanUser(rows *sql.Rows) (domain.User, error) {
 	var (
 		u         domain.User
 		statusStr string
+		scopesRaw string
 		createdAt string
 	)
-	if err := rows.Scan(&u.ID, &u.Name, &u.Email, &statusStr, &createdAt); err != nil {
+	if err := rows.Scan(&u.ID, &u.Name, &u.Email, &statusStr, &scopesRaw, &createdAt); err != nil {
 		return domain.User{}, fmt.Errorf("scan user row: %w", err)
 	}
 	t, err := time.Parse(time.RFC3339Nano, createdAt)
@@ -127,5 +170,8 @@ func scanUser(rows *sql.Rows) (domain.User, error) {
 	}
 	u.Status = domain.UserStatus(statusStr)
 	u.CreatedAt = t
+	if err := json.Unmarshal([]byte(scopesRaw), &u.Scopes); err != nil {
+		return domain.User{}, fmt.Errorf("decode user scopes: %w", err)
+	}
 	return u, nil
 }

@@ -174,6 +174,34 @@ func TestUserToken_CarriesWildcardScope(t *testing.T) {
 	}
 }
 
+// TestUserToken_HonoursRecordedScopes is the F.3 contract: a user
+// with a concrete scope list gets a token that grants exactly those
+// scopes — no implicit wildcard.
+func TestUserToken_HonoursRecordedScopes(t *testing.T) {
+	secret, _ := GenerateSecret()
+	revoked := newFakeRevoked()
+	user := domain.User{
+		ID: "usr_narrow", Name: "N", Email: "n@n.com",
+		Status: domain.UserStatusActive,
+		Scopes: []string{"events:write", "claims:write"},
+	}
+
+	tok, _, err := NewIssuer(secret).IssueUserToken(user, time.Hour)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	claims, err := NewVerifier(secret, revoked).ParseAndValidate(context.Background(), tok)
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if !claims.HasScope("events:write") || !claims.HasScope("claims:write") {
+		t.Errorf("granted scopes missing: %v", claims.Scopes)
+	}
+	if claims.HasScope("relationships:write") {
+		t.Errorf("user token unexpectedly includes wildcard or extra scope: %v", claims.Scopes)
+	}
+}
+
 func TestAgentTokenWithScopes_RoundTripsExactList(t *testing.T) {
 	secret, _ := GenerateSecret()
 	revoked := newFakeRevoked()

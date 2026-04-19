@@ -53,6 +53,7 @@ type UserRepository interface {
 	GetByEmail(ctx context.Context, email string) (domain.User, error)
 	List(ctx context.Context) ([]domain.User, error)
 	UpdateStatus(ctx context.Context, id string, status domain.UserStatus) error
+	UpdateScopes(ctx context.Context, id string, scopes []string) error
 }
 
 // RevokedTokenRepository persists and queries the JWT denylist.

@@ -1,0 +1,257 @@
+package main
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/felixgeelhaar/mnemos/internal/auth"
+	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
+)
+
+// handleAgent dispatches `mnemos agent <subcommand>`. The token
+// subcommand for agents lives here too rather than under `mnemos
+// token` so the agent surface stays self-contained — issuing an agent
+// token requires looking the agent up to fetch its scopes, which is
+// agent-shaped, not token-shaped.
+func handleAgent(args []string, _ Flags) {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "error: agent requires a subcommand")
+		fmt.Fprintln(os.Stderr, "  mnemos agent create --name <n> --owner <user-id> --scope <s> [--scope <s>...]")
+		fmt.Fprintln(os.Stderr, "  mnemos agent list")
+		fmt.Fprintln(os.Stderr, "  mnemos agent revoke <agent-id>")
+		fmt.Fprintln(os.Stderr, "  mnemos agent token issue --agent <id> [--ttl <duration>]")
+		os.Exit(int(ExitUsage))
+	}
+	switch args[0] {
+	case "create":
+		handleAgentCreate(args[1:])
+	case "list":
+		handleAgentList(args[1:])
+	case "revoke":
+		handleAgentRevoke(args[1:])
+	case "token":
+		handleAgentToken(args[1:])
+	default:
+		exitWithMnemosError(false, NewUserError("unknown agent subcommand %q", args[0]))
+	}
+}
+
+func handleAgentCreate(args []string) {
+	name, owner := "", ""
+	var scopes []string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--name":
+			if i+1 >= len(args) {
+				exitWithMnemosError(false, NewUserError("--name requires a value"))
+				return
+			}
+			name = args[i+1]
+			i++
+		case "--owner":
+			if i+1 >= len(args) {
+				exitWithMnemosError(false, NewUserError("--owner requires a value"))
+				return
+			}
+			owner = args[i+1]
+			i++
+		case "--scope":
+			if i+1 >= len(args) {
+				exitWithMnemosError(false, NewUserError("--scope requires a value"))
+				return
+			}
+			scopes = append(scopes, args[i+1])
+			i++
+		default:
+			exitWithMnemosError(false, NewUserError("unknown flag %q", args[i]))
+			return
+		}
+	}
+	if strings.TrimSpace(name) == "" || strings.TrimSpace(owner) == "" {
+		exitWithMnemosError(false, NewUserError("--name and --owner are both required"))
+		return
+	}
+
+	db, err := sqlite.Open(resolveDBPath())
+	if err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "open database"))
+		return
+	}
+	defer closeDB(db)
+	ctx := context.Background()
+
+	// Resolve owner up front so the FK error message stays a friendly
+	// "user not found" rather than a raw constraint violation.
+	if _, err := sqlite.NewUserRepository(db).GetByID(ctx, owner); err != nil {
+		exitWithMnemosError(false, NewUserError("owner user %q not found — create it with 'mnemos user create'", owner))
+		return
+	}
+
+	id, err := newAgentID()
+	if err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "generate agent id"))
+		return
+	}
+	agent := domain.Agent{
+		ID:        id,
+		Name:      name,
+		OwnerID:   owner,
+		Scopes:    scopes,
+		Status:    domain.AgentStatusActive,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := sqlite.NewAgentRepository(db).Create(ctx, agent); err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "create agent"))
+		return
+	}
+	scopeDisplay := strings.Join(scopes, ",")
+	if scopeDisplay == "" {
+		scopeDisplay = "(none)"
+	}
+	fmt.Printf("agent_id=%s name=%q owner=%s scopes=%s status=%s\n",
+		agent.ID, agent.Name, agent.OwnerID, scopeDisplay, agent.Status)
+	fmt.Println("\nNext: mnemos agent token issue --agent " + agent.ID + " — to mint a JWT for this agent.")
+}
+
+func handleAgentList(args []string) {
+	if len(args) > 0 {
+		exitWithMnemosError(false, NewUserError("agent list takes no arguments"))
+		return
+	}
+	db, err := sqlite.Open(resolveDBPath())
+	if err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "open database"))
+		return
+	}
+	defer closeDB(db)
+
+	agents, err := sqlite.NewAgentRepository(db).List(context.Background())
+	if err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "list agents"))
+		return
+	}
+	if len(agents) == 0 {
+		fmt.Println("(no agents)")
+		return
+	}
+	fmt.Printf("%-26s %-12s %-26s %-30s %s\n", "ID", "STATUS", "OWNER", "NAME", "SCOPES")
+	for _, a := range agents {
+		fmt.Printf("%-26s %-12s %-26s %-30s %s\n",
+			a.ID, a.Status, a.OwnerID, truncate(a.Name, 30), strings.Join(a.Scopes, ","))
+	}
+}
+
+func handleAgentRevoke(args []string) {
+	if len(args) != 1 {
+		exitWithMnemosError(false, NewUserError("agent revoke <agent-id>"))
+		return
+	}
+	id := args[0]
+
+	db, err := sqlite.Open(resolveDBPath())
+	if err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "open database"))
+		return
+	}
+	defer closeDB(db)
+
+	if err := sqlite.NewAgentRepository(db).UpdateStatus(context.Background(), id, domain.AgentStatusRevoked); err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "revoke agent"))
+		return
+	}
+	fmt.Printf("agent_id=%s status=revoked\n", id)
+	fmt.Println("Note: the agent's existing JWTs remain valid until they expire.")
+	fmt.Println("To revoke individual tokens, use: mnemos token revoke <jti>")
+}
+
+func handleAgentToken(args []string) {
+	if len(args) == 0 || args[0] != "issue" {
+		exitWithMnemosError(false, NewUserError("agent token issue --agent <id> [--ttl <duration>]"))
+		return
+	}
+	args = args[1:]
+
+	agentID := ""
+	ttl := defaultTokenTTL
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--agent":
+			if i+1 >= len(args) {
+				exitWithMnemosError(false, NewUserError("--agent requires a value"))
+				return
+			}
+			agentID = args[i+1]
+			i++
+		case "--ttl":
+			if i+1 >= len(args) {
+				exitWithMnemosError(false, NewUserError("--ttl requires a duration like 24h"))
+				return
+			}
+			d, err := time.ParseDuration(args[i+1])
+			if err != nil {
+				exitWithMnemosError(false, NewUserError("invalid --ttl: %v", err))
+				return
+			}
+			if d <= 0 {
+				exitWithMnemosError(false, NewUserError("--ttl must be positive"))
+				return
+			}
+			ttl = d
+			i++
+		default:
+			exitWithMnemosError(false, NewUserError("unknown flag %q", args[i]))
+			return
+		}
+	}
+	if strings.TrimSpace(agentID) == "" {
+		exitWithMnemosError(false, NewUserError("--agent is required"))
+		return
+	}
+
+	db, err := sqlite.Open(resolveDBPath())
+	if err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "open database"))
+		return
+	}
+	defer closeDB(db)
+
+	agent, err := sqlite.NewAgentRepository(db).GetByID(context.Background(), agentID)
+	if err != nil {
+		exitWithMnemosError(false, NewUserError("agent %s not found", agentID))
+		return
+	}
+	if agent.Status != domain.AgentStatusActive {
+		exitWithMnemosError(false, NewUserError("agent %s is %s; cannot issue token", agentID, agent.Status))
+		return
+	}
+
+	secret, err := loadJWTSecret()
+	if err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "load JWT secret"))
+		return
+	}
+	token, jti, err := auth.NewIssuer(secret).IssueAgentTokenWithScopes(agent.ID, agent.Scopes, ttl)
+	if err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "issue token"))
+		return
+	}
+
+	fmt.Printf("agent=%s jti=%s expires_in=%s scopes=%s\n",
+		agent.ID, jti, ttl, strings.Join(agent.Scopes, ","))
+	fmt.Println("\nToken (save this — it will not be shown again):")
+	fmt.Println(token)
+}
+
+func newAgentID() (string, error) {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return "agt_" + hex.EncodeToString(b), nil
+}

@@ -497,6 +497,9 @@ func parseTimeFlexible(s string) (time.Time, error) {
 }
 
 func appendEventsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, domain.ScopeEventsWrite) {
+		return
+	}
 	var req appendEventsRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
@@ -557,6 +560,9 @@ type claimEvidenceItem struct {
 }
 
 func appendClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, domain.ScopeClaimsWrite) {
+		return
+	}
 	var req appendClaimsRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
@@ -624,6 +630,9 @@ type appendRelationshipsRequest struct {
 }
 
 func appendRelationshipsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, domain.ScopeRelationshipsWrite) {
+		return
+	}
 	var req appendRelationshipsRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
@@ -763,6 +772,9 @@ func listEmbeddingsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 }
 
 func appendEmbeddingsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, domain.ScopeEmbeddingsWrite) {
+		return
+	}
 	var req appendEmbeddingsRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))

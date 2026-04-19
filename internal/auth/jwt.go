@@ -35,10 +35,28 @@ const (
 )
 
 // Claims is the parsed shape of a Mnemos JWT.
+//
+// Scopes carries the authorisations granted to the bearer. User
+// tokens always carry a single "*" scope (full access — there is no
+// per-user scope policy yet). Agent tokens carry exactly the scope
+// list recorded on the agent at issuance time.
 type Claims struct {
 	UserID string    `json:"sub"`
 	Kind   TokenKind `json:"knd"`
+	Scopes []string  `json:"scp,omitempty"`
 	jwt.RegisteredClaims
+}
+
+// HasScope reports whether the claims grant the requested scope. The
+// wildcard scope "*" matches everything; otherwise an exact string
+// match is required.
+func (c Claims) HasScope(want string) bool {
+	for _, s := range c.Scopes {
+		if s == "*" || s == want {
+			return true
+		}
+	}
+	return false
 }
 
 // Issuer mints new JWTs. It does not store anything — the resulting
@@ -68,18 +86,30 @@ func NewVerifier(secret []byte, revoked ports.RevokedTokenRepository) *Verifier 
 
 // IssueUserToken mints a JWT for a human user, valid for ttl. Returns
 // the signed token string and the JTI (so callers that want to record
-// the issuance can do so).
+// the issuance can do so). User tokens implicitly carry the wildcard
+// scope — per-user scope policy is a future addition.
 func (i *Issuer) IssueUserToken(user domain.User, ttl time.Duration) (token, jti string, err error) {
-	return i.issue(user.ID, TokenKindUser, ttl)
+	return i.issue(user.ID, TokenKindUser, []string{"*"}, ttl)
 }
 
 // IssueAgentToken mints a JWT for an automated agent, valid for ttl.
-// Same shape as a user token; the Kind field distinguishes them.
+// Equivalent to IssueAgentTokenWithScopes with the wildcard scope —
+// useful for tests and trusted-internal use cases. New code should
+// prefer IssueAgentTokenWithScopes so each agent's authority is
+// explicit.
 func (i *Issuer) IssueAgentToken(agentID string, ttl time.Duration) (token, jti string, err error) {
-	return i.issue(agentID, TokenKindAgent, ttl)
+	return i.issue(agentID, TokenKindAgent, []string{"*"}, ttl)
 }
 
-func (i *Issuer) issue(subject string, kind TokenKind, ttl time.Duration) (string, string, error) {
+// IssueAgentTokenWithScopes mints an agent JWT carrying the supplied
+// scope list. Empty scopes is allowed but the resulting token can
+// authorise nothing — callers usually want at least one resource
+// scope (e.g., "events:write").
+func (i *Issuer) IssueAgentTokenWithScopes(agentID string, scopes []string, ttl time.Duration) (token, jti string, err error) {
+	return i.issue(agentID, TokenKindAgent, append([]string(nil), scopes...), ttl)
+}
+
+func (i *Issuer) issue(subject string, kind TokenKind, scopes []string, ttl time.Duration) (string, string, error) {
 	if subject == "" {
 		return "", "", errors.New("subject is required")
 	}
@@ -94,6 +124,7 @@ func (i *Issuer) issue(subject string, kind TokenKind, ttl time.Duration) (strin
 	claims := Claims{
 		UserID: subject,
 		Kind:   kind,
+		Scopes: scopes,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ID:        jti,
 			IssuedAt:  jwt.NewNumericDate(now),

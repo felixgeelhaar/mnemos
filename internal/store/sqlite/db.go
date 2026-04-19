@@ -148,6 +148,19 @@ CREATE TABLE IF NOT EXISTS revoked_tokens (
 );
 
 CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires_at ON revoked_tokens(expires_at);
+
+CREATE TABLE IF NOT EXISTS agents (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	owner_id TEXT NOT NULL,
+	scopes_json TEXT NOT NULL DEFAULT '[]',
+	status TEXT NOT NULL DEFAULT 'active',
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (owner_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agents_owner_id ON agents(owner_id);
+CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
 `
 
 	if _, err := db.Exec(schema); err != nil {

@@ -371,3 +371,100 @@ func TestServe_Auth_ReadsAlwaysAllowed(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (reads open)", resp.StatusCode)
 	}
 }
+
+// TestServe_Auth_AgentScopeEnforcement verifies that agents only get
+// access to the resources their token's scopes name. An agent with
+// just events:write can append events but is forbidden from claims,
+// relationships, or embeddings — that's the whole point of governance.
+func TestServe_Auth_AgentScopeEnforcement(t *testing.T) {
+	secret, _ := setupJWTTestEnv(t)
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	srv := httptest.NewServer(newServerMux(db))
+	defer srv.Close()
+
+	// Mint a narrow agent token (events:write only).
+	tok, _, err := auth.NewIssuer(secret).IssueAgentTokenWithScopes("agt_narrow", []string{"events:write"}, time.Hour)
+	if err != nil {
+		t.Fatalf("issue agent token: %v", err)
+	}
+	hdrs := map[string]string{"Authorization": "Bearer " + tok}
+
+	// Allowed: events.
+	ts := time.Now().UTC().Format(time.RFC3339)
+	body := map[string]any{
+		"events": []map[string]any{{
+			"id": "ev_agent", "run_id": "r", "schema_version": "v1",
+			"content": "x", "source_input_id": "in", "timestamp": ts,
+		}},
+	}
+	resp := postJSON(t, srv.URL+"/v1/events", body, hdrs)
+	if resp.StatusCode != http.StatusCreated {
+		var msg errorResponse
+		_ = json.NewDecoder(resp.Body).Decode(&msg)
+		_ = resp.Body.Close()
+		t.Fatalf("events status = %d, want 201 (%v)", resp.StatusCode, msg.Error)
+	}
+	_ = resp.Body.Close()
+
+	// Forbidden: claims, relationships, embeddings.
+	for _, c := range []struct {
+		path string
+		body map[string]any
+	}{
+		{"/v1/claims", map[string]any{"claims": []map[string]any{{"id": "c1", "text": "x", "type": "fact", "confidence": 0.5, "status": "active"}}}},
+		{"/v1/relationships", map[string]any{"relationships": []map[string]any{{"id": "r1", "type": "supports", "from_claim_id": "a", "to_claim_id": "b"}}}},
+		{"/v1/embeddings", map[string]any{"embeddings": []map[string]any{{"entity_id": "e1", "entity_type": "event", "vector": []float32{1, 2}, "model": "m"}}}},
+	} {
+		r := postJSON(t, srv.URL+c.path, c.body, hdrs)
+		if r.StatusCode != http.StatusForbidden {
+			t.Errorf("%s status = %d, want 403", c.path, r.StatusCode)
+		}
+		_ = r.Body.Close()
+	}
+}
+
+// TestServe_Auth_UserTokenGetsAllScopes confirms the implicit-wildcard
+// behaviour: a user JWT can hit every POST endpoint without an
+// explicit scope list.
+func TestServe_Auth_UserTokenGetsAllScopes(t *testing.T) {
+	secret, _ := setupJWTTestEnv(t)
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	seedUser(t, db, "usr_full")
+	srv := httptest.NewServer(newServerMux(db))
+	defer srv.Close()
+
+	hdrs := map[string]string{"Authorization": issueTestToken(t, secret, "usr_full")}
+	now := time.Now().UTC()
+	seedEvent(t, db, "ev_for_full", "r", "x", "in", `{}`, now)
+	seedClaim(t, db, "cl_a", "a", "fact", "active", 0.8, now)
+	seedClaim(t, db, "cl_b", "b", "fact", "active", 0.8, now)
+
+	for _, c := range []struct {
+		name string
+		path string
+		body map[string]any
+	}{
+		{"events", "/v1/events", map[string]any{"events": []map[string]any{{"id": "ev_full_1", "content": "x", "timestamp": now.Format(time.RFC3339)}}}},
+		{"claims", "/v1/claims", map[string]any{"claims": []map[string]any{{"id": "cl_full_1", "text": "x", "type": "fact", "confidence": 0.7, "status": "active", "created_at": now.Format(time.RFC3339)}}}},
+		{"relationships", "/v1/relationships", map[string]any{"relationships": []map[string]any{{"id": "r_full_1", "type": "supports", "from_claim_id": "cl_a", "to_claim_id": "cl_b"}}}},
+		{"embeddings", "/v1/embeddings", map[string]any{"embeddings": []map[string]any{{"entity_id": "ev_for_full", "entity_type": "event", "vector": []float32{0.1, 0.2}, "model": "m"}}}},
+	} {
+		r := postJSON(t, srv.URL+c.path, c.body, hdrs)
+		if r.StatusCode != http.StatusCreated {
+			var msg errorResponse
+			_ = json.NewDecoder(r.Body).Decode(&msg)
+			_ = r.Body.Close()
+			t.Errorf("%s status = %d, want 201 (%v)", c.name, r.StatusCode, msg.Error)
+			continue
+		}
+		_ = r.Body.Close()
+	}
+}

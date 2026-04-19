@@ -155,3 +155,41 @@ func TestIssue_RejectsZeroTTL(t *testing.T) {
 		t.Fatal("expected error on ttl=0")
 	}
 }
+
+func TestUserToken_CarriesWildcardScope(t *testing.T) {
+	secret, _ := GenerateSecret()
+	revoked := newFakeRevoked()
+	user := domain.User{ID: "usr_w", Name: "W", Email: "w@w.com", Status: domain.UserStatusActive}
+
+	tok, _, err := NewIssuer(secret).IssueUserToken(user, time.Hour)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	claims, err := NewVerifier(secret, revoked).ParseAndValidate(context.Background(), tok)
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if !claims.HasScope("events:write") || !claims.HasScope("anything:at:all") {
+		t.Errorf("user token should grant every scope via *, got %v", claims.Scopes)
+	}
+}
+
+func TestAgentTokenWithScopes_RoundTripsExactList(t *testing.T) {
+	secret, _ := GenerateSecret()
+	revoked := newFakeRevoked()
+
+	tok, _, err := NewIssuer(secret).IssueAgentTokenWithScopes("agt_x", []string{"events:write", "claims:write"}, time.Hour)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	claims, err := NewVerifier(secret, revoked).ParseAndValidate(context.Background(), tok)
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if !claims.HasScope("events:write") || !claims.HasScope("claims:write") {
+		t.Errorf("granted scopes missing: %v", claims.Scopes)
+	}
+	if claims.HasScope("relationships:write") {
+		t.Errorf("agent unexpectedly granted relationships:write: %v", claims.Scopes)
+	}
+}

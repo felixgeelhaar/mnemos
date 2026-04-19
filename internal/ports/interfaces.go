@@ -61,3 +61,12 @@ type RevokedTokenRepository interface {
 	IsRevoked(ctx context.Context, jti string) (bool, error)
 	PurgeExpired(ctx context.Context, before time.Time) (int, error)
 }
+
+// AgentRepository persists and retrieves non-human principals.
+type AgentRepository interface {
+	Create(ctx context.Context, agent domain.Agent) error
+	GetByID(ctx context.Context, id string) (domain.Agent, error)
+	List(ctx context.Context) ([]domain.Agent, error)
+	UpdateStatus(ctx context.Context, id string, status domain.AgentStatus) error
+	UpdateScopes(ctx context.Context, id string, scopes []string) error
+}

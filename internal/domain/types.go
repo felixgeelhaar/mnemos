@@ -190,6 +190,71 @@ type RevokedToken struct {
 	ExpiresAt time.Time
 }
 
+// AgentStatus mirrors UserStatus for non-human principals.
+type AgentStatus string
+
+// Supported AgentStatus values.
+const (
+	AgentStatusActive  AgentStatus = "active"
+	AgentStatusRevoked AgentStatus = "revoked"
+)
+
+// Scope strings recognised by the auth middleware. "*" matches every
+// scope. Resource-level scopes follow `<resource>:<verb>` so future
+// additions stay grep-friendly.
+const (
+	ScopeWildcard           = "*"
+	ScopeEventsWrite        = "events:write"
+	ScopeClaimsWrite        = "claims:write"
+	ScopeRelationshipsWrite = "relationships:write"
+	ScopeEmbeddingsWrite    = "embeddings:write"
+)
+
+// Agent represents a non-human principal — a coding assistant, CI job,
+// or other automated identity. Agents always have an owning user (so
+// every action traces back to a human accountable party) and an
+// explicit scope list. There is no "implicit *" for agents: tokens
+// issued for an agent carry exactly the scopes recorded on the agent,
+// nothing more.
+type Agent struct {
+	ID        string
+	Name      string
+	OwnerID   string // user_id of the human accountable for this agent
+	Scopes    []string
+	Status    AgentStatus
+	CreatedAt time.Time
+}
+
+// Validate enforces the minimum invariants for a persistable Agent.
+// Scope strings are not validated against the constant list — agents
+// may legitimately carry forward-compatible scopes the current binary
+// doesn't yet recognise.
+func (a Agent) Validate() error {
+	if strings.TrimSpace(a.ID) == "" {
+		return errors.New("agent id is required")
+	}
+	if strings.TrimSpace(a.Name) == "" {
+		return errors.New("agent name is required")
+	}
+	if strings.TrimSpace(a.OwnerID) == "" {
+		return errors.New("agent owner_id is required")
+	}
+	if a.Status == "" {
+		return errors.New("agent status is required")
+	}
+	switch a.Status {
+	case AgentStatusActive, AgentStatusRevoked:
+	default:
+		return fmt.Errorf("invalid agent status %q", a.Status)
+	}
+	for _, s := range a.Scopes {
+		if strings.TrimSpace(s) == "" {
+			return errors.New("agent scope entries must be non-empty")
+		}
+	}
+	return nil
+}
+
 // EmbeddingRecord holds a stored vector embedding with its metadata.
 type EmbeddingRecord struct {
 	EntityID   string

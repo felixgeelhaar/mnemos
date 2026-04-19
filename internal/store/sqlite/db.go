@@ -124,6 +124,24 @@ CREATE TABLE IF NOT EXISTS embeddings (
 );
 
 CREATE INDEX IF NOT EXISTS idx_embeddings_entity_type ON embeddings(entity_type);
+
+CREATE TABLE IF NOT EXISTS users (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	email TEXT NOT NULL UNIQUE,
+	status TEXT NOT NULL DEFAULT 'active',
+	created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
+
+CREATE TABLE IF NOT EXISTS revoked_tokens (
+	jti TEXT PRIMARY KEY,
+	revoked_at TEXT NOT NULL,
+	expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_revoked_tokens_expires_at ON revoked_tokens(expires_at);
 `
 
 	if _, err := db.Exec(schema); err != nil {

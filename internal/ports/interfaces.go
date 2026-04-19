@@ -2,6 +2,7 @@ package ports
 
 import (
 	"context"
+	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 )
@@ -43,4 +44,20 @@ type QueryEngine interface {
 type EmbeddingRepository interface {
 	Upsert(ctx context.Context, entityID, entityType string, vector []float32, model string) error
 	ListByEntityType(ctx context.Context, entityType string) ([]domain.EmbeddingRecord, error)
+}
+
+// UserRepository persists and retrieves user identities.
+type UserRepository interface {
+	Create(ctx context.Context, user domain.User) error
+	GetByID(ctx context.Context, id string) (domain.User, error)
+	GetByEmail(ctx context.Context, email string) (domain.User, error)
+	List(ctx context.Context) ([]domain.User, error)
+	UpdateStatus(ctx context.Context, id string, status domain.UserStatus) error
+}
+
+// RevokedTokenRepository persists and queries the JWT denylist.
+type RevokedTokenRepository interface {
+	Add(ctx context.Context, token domain.RevokedToken) error
+	IsRevoked(ctx context.Context, jti string) (bool, error)
+	PurgeExpired(ctx context.Context, before time.Time) (int, error)
 }

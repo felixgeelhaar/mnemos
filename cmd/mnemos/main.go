@@ -155,6 +155,10 @@ func main() {
 		handleAudit(args, flags)
 	case "resolve":
 		handleResolve(args, flags)
+	case "user":
+		handleUser(args, flags)
+	case "token":
+		handleToken(args, flags)
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command %q\n", command)
 		if suggestion := suggestCommand(command); suggestion != "" {
@@ -860,6 +864,13 @@ func printUsage() {
 	fmt.Println("  metrics [--human]                    Knowledge base statistics")
 	fmt.Println("  audit [--include-embeddings]         Export the full knowledge base as JSON")
 	fmt.Println("  resolve <winner> --over <loser>      Resolve a contradiction: winner → resolved, loser → deprecated")
+	fmt.Println("")
+	fmt.Println("Identity:")
+	fmt.Println("  user create --name <n> --email <e>   Create a user identity")
+	fmt.Println("  user list                            List users")
+	fmt.Println("  user revoke <id>                     Revoke a user (soft delete)")
+	fmt.Println("  token issue --user <id> [--ttl <d>]  Mint a JWT for a user (default ttl 90 days)")
+	fmt.Println("  token revoke <jti>                   Add a JWT's jti to the denylist")
 	fmt.Println("  mcp                                  Start MCP server over stdio")
 	fmt.Println("  serve [--port <n>]                   Start HTTP registry server (default :7777)")
 	fmt.Println("")

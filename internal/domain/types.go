@@ -2,6 +2,7 @@ package domain
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -124,6 +125,59 @@ type ClaimStatusTransition struct {
 	ToStatus   ClaimStatus
 	ChangedAt  time.Time
 	Reason     string // free-form human context: "auto: contradiction detected", "resolved via mnemos resolve", etc.
+}
+
+// UserStatus represents the lifecycle state of a user account.
+type UserStatus string
+
+// Supported UserStatus values.
+const (
+	UserStatusActive  UserStatus = "active"
+	UserStatusRevoked UserStatus = "revoked"
+)
+
+// User represents a human or service identity that can authenticate
+// against the Mnemos registry. Tokens are issued to users; every
+// audit-bearing action records the issuing user as created_by.
+type User struct {
+	ID        string
+	Name      string
+	Email     string
+	Status    UserStatus
+	CreatedAt time.Time
+}
+
+// Validate checks that a User has the minimum required fields. Email
+// uniqueness is enforced at the storage layer.
+func (u User) Validate() error {
+	if strings.TrimSpace(u.ID) == "" {
+		return errors.New("user id is required")
+	}
+	if strings.TrimSpace(u.Name) == "" {
+		return errors.New("user name is required")
+	}
+	if strings.TrimSpace(u.Email) == "" {
+		return errors.New("user email is required")
+	}
+	if u.Status == "" {
+		return errors.New("user status is required")
+	}
+	switch u.Status {
+	case UserStatusActive, UserStatusRevoked:
+	default:
+		return fmt.Errorf("invalid user status %q", u.Status)
+	}
+	return nil
+}
+
+// RevokedToken records that a particular JWT (identified by its jti
+// claim) is no longer valid before its natural expiry. Auth middleware
+// consults this denylist on every request. Rows older than expires_at
+// can be purged because the token would have expired anyway.
+type RevokedToken struct {
+	JTI       string
+	RevokedAt time.Time
+	ExpiresAt time.Time
 }
 
 // EmbeddingRecord holds a stored vector embedding with its metadata.

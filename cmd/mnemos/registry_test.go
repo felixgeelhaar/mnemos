@@ -206,6 +206,38 @@ func TestPushPull_RoundTripsAllResources(t *testing.T) {
 	}
 }
 
+// TestPushBatched_IdempotentOnRetry covers the F-Slice E reliability
+// fix: pre-fix, pushing the same batch twice would fail with
+// PRIMARY KEY constraint violation on events because CreateEvent
+// was a plain INSERT. Now it's INSERT ... ON CONFLICT(id) DO NOTHING
+// so retried pushes after a flaky network are safe — the second
+// push silently merges into the first.
+func TestPushBatched_IdempotentOnRetry(t *testing.T) {
+	regURL, _, regToken, closeReg := newFakeRegistry(t)
+	defer closeReg()
+
+	ctx := context.Background()
+	client := &http.Client{Timeout: 10 * time.Second}
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	// First push.
+	batch := []map[string]any{{
+		"events": []eventDTO{{
+			ID: "ev_idem", RunID: "r", SchemaVersion: "v1",
+			Content: "x", SourceInputID: "in", Timestamp: now,
+			Metadata: map[string]string{},
+		}},
+	}}
+	if n, err := pushBatched(ctx, client, regURL+"/v1/events", regToken, "events", batch); err != nil || n != 1 {
+		t.Fatalf("first push n=%d err=%v", n, err)
+	}
+
+	// Second push of the exact same batch must succeed (idempotent).
+	if n, err := pushBatched(ctx, client, regURL+"/v1/events", regToken, "events", batch); err != nil || n != 1 {
+		t.Fatalf("retry push n=%d err=%v (pre-fix this would fail with PK violation)", n, err)
+	}
+}
+
 func TestPushBatched_FailsOnServerError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

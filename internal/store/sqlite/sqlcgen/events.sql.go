@@ -12,6 +12,7 @@ import (
 const createEvent = `-- name: CreateEvent :exec
 INSERT INTO events (id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at, created_by)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(id) DO NOTHING
 `
 
 type CreateEventParams struct {
@@ -26,6 +27,10 @@ type CreateEventParams struct {
 	CreatedBy     string `json:"created_by"`
 }
 
+// Idempotent so retried pushes (and re-runs of best-effort
+// pipelines) don't fail with PRIMARY KEY constraint violations.
+// Events are append-only by domain contract; once an id is in the
+// table its content is fixed, so the conflict path is a no-op.
 func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) error {
 	_, err := q.db.ExecContext(ctx, createEvent,
 		arg.ID,

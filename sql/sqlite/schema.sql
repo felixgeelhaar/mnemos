@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS agents (
   name TEXT NOT NULL,
   owner_id TEXT NOT NULL,
   scopes_json TEXT NOT NULL DEFAULT '[]',
+  allowed_runs_json TEXT NOT NULL DEFAULT '[]',
   status TEXT NOT NULL DEFAULT 'active',
   created_at TEXT NOT NULL,
   FOREIGN KEY (owner_id) REFERENCES users(id)

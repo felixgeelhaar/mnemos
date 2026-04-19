@@ -22,6 +22,10 @@ type actorContextKey struct{}
 // token.
 type scopesContextKey struct{}
 
+// runsContextKey tags the bearer's run-id whitelist onto the request
+// context. Empty list (no key set) means no run restriction.
+type runsContextKey struct{}
+
 // withActor returns a copy of ctx carrying the given user id.
 func withActor(ctx context.Context, userID string) context.Context {
 	return context.WithValue(ctx, actorContextKey{}, userID)
@@ -31,6 +35,25 @@ func withActor(ctx context.Context, userID string) context.Context {
 func withScopes(ctx context.Context, scopes []string) context.Context {
 	return context.WithValue(ctx, scopesContextKey{}, scopes)
 }
+
+// withAllowedRuns returns a copy of ctx carrying the bearer's
+// run-id whitelist. Pass nil/empty to leave the request unrestricted.
+func withAllowedRuns(ctx context.Context, runs []string) context.Context {
+	return context.WithValue(ctx, runsContextKey{}, runs)
+}
+
+// allowedRunsFromContext returns the bearer's run whitelist, or nil
+// when no token was presented or the token had no restriction.
+func allowedRunsFromContext(ctx context.Context) []string {
+	if v, ok := ctx.Value(runsContextKey{}).([]string); ok {
+		return v
+	}
+	return nil
+}
+
+// (requireRunAllowed deferred until a single-record write path
+// needs it; appendEventsHandler currently does a batch pre-check
+// inline because the request shape gives the run ids up front.)
 
 // actorFromContext returns the user id previously installed via withActor.
 // When the request is unauthenticated (reads), falls back to SystemUser so
@@ -101,6 +124,7 @@ func jwtAuthMiddleware(verifier *auth.Verifier, h http.Handler) http.Handler {
 
 		ctx := withActor(r.Context(), claims.UserID)
 		ctx = withScopes(ctx, claims.Scopes)
+		ctx = withAllowedRuns(ctx, claims.Runs)
 		h.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

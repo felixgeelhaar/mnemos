@@ -221,3 +221,35 @@ func TestAgentTokenWithScopes_RoundTripsExactList(t *testing.T) {
 		t.Errorf("agent unexpectedly granted relationships:write: %v", claims.Scopes)
 	}
 }
+
+func TestAgentTokenWithRuns_RoundTripsAndAllowsRun(t *testing.T) {
+	secret, _ := GenerateSecret()
+	revoked := newFakeRevoked()
+
+	tok, _, err := NewIssuer(secret).IssueAgentTokenWithScopesAndRuns(
+		"agt_runscope",
+		[]string{"events:write"},
+		[]string{"run-a", "run-b"},
+		time.Hour,
+	)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	claims, err := NewVerifier(secret, revoked).ParseAndValidate(context.Background(), tok)
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if !claims.AllowsRun("run-a") || !claims.AllowsRun("run-b") {
+		t.Errorf("expected run-a and run-b allowed: %v", claims.Runs)
+	}
+	if claims.AllowsRun("run-c") {
+		t.Errorf("run-c should be rejected by whitelist: %v", claims.Runs)
+	}
+}
+
+func TestAllowsRun_EmptyWhitelistMeansUnrestricted(t *testing.T) {
+	c := Claims{} // no Runs at all
+	if !c.AllowsRun("any-run-id") {
+		t.Errorf("empty Runs should mean every run allowed")
+	}
+}

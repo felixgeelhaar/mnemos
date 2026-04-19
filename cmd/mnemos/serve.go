@@ -510,6 +510,22 @@ func appendEventsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// F.4: enforce the bearer's run whitelist before any DB write so
+	// a partial batch can't sneak through. We pre-check every run_id
+	// up front; an empty whitelist short-circuits the loop.
+	if allowed := allowedRunsFromContext(r.Context()); len(allowed) > 0 {
+		allowedSet := make(map[string]struct{}, len(allowed))
+		for _, a := range allowed {
+			allowedSet[a] = struct{}{}
+		}
+		for i, e := range req.Events {
+			if _, ok := allowedSet[e.RunID]; !ok {
+				writeError(w, http.StatusForbidden, fmt.Sprintf("events[%d].run_id %q not in token whitelist", i, e.RunID))
+				return
+			}
+		}
+	}
+
 	repo := sqlite.NewEventRepository(db)
 	ctx := r.Context()
 	actor := actorFromContext(ctx)

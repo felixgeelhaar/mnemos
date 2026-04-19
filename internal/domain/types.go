@@ -228,13 +228,21 @@ const (
 // explicit scope list. There is no "implicit *" for agents: tokens
 // issued for an agent carry exactly the scopes recorded on the agent,
 // nothing more.
+//
+// AllowedRuns optionally restricts the agent to a whitelist of run
+// ids. Empty list means "every run is allowed" — F.x can extend with
+// glob patterns later. The whitelist gates write paths that carry a
+// run_id (today: events); claim/relationship/embedding writes
+// indirectly inherit because the agent must be able to seed the
+// underlying event first.
 type Agent struct {
-	ID        string
-	Name      string
-	OwnerID   string // user_id of the human accountable for this agent
-	Scopes    []string
-	Status    AgentStatus
-	CreatedAt time.Time
+	ID          string
+	Name        string
+	OwnerID     string // user_id of the human accountable for this agent
+	Scopes      []string
+	AllowedRuns []string
+	Status      AgentStatus
+	CreatedAt   time.Time
 }
 
 // Validate enforces the minimum invariants for a persistable Agent.
@@ -262,6 +270,11 @@ func (a Agent) Validate() error {
 	for _, s := range a.Scopes {
 		if strings.TrimSpace(s) == "" {
 			return errors.New("agent scope entries must be non-empty")
+		}
+	}
+	for _, r := range a.AllowedRuns {
+		if strings.TrimSpace(r) == "" {
+			return errors.New("agent allowed_runs entries must be non-empty")
 		}
 	}
 	return nil

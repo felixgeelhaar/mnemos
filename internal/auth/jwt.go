@@ -40,10 +40,17 @@ const (
 // tokens always carry a single "*" scope (full access — there is no
 // per-user scope policy yet). Agent tokens carry exactly the scope
 // list recorded on the agent at issuance time.
+//
+// Runs is an optional whitelist that further restricts which run_ids
+// the bearer may write. Empty list means "every run is allowed". A
+// non-empty list gates write paths that carry a run_id (today:
+// events) — anything outside the list is forbidden. The whitelist
+// only narrows authority; it never grants new scopes.
 type Claims struct {
 	UserID string    `json:"sub"`
 	Kind   TokenKind `json:"knd"`
 	Scopes []string  `json:"scp,omitempty"`
+	Runs   []string  `json:"run,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -53,6 +60,21 @@ type Claims struct {
 func (c Claims) HasScope(want string) bool {
 	for _, s := range c.Scopes {
 		if s == "*" || s == want {
+			return true
+		}
+	}
+	return false
+}
+
+// AllowsRun reports whether the bearer may write to the given
+// run_id. Empty Runs list means "no restriction" (allows every run).
+// Non-empty list requires an exact match.
+func (c Claims) AllowsRun(runID string) bool {
+	if len(c.Runs) == 0 {
+		return true
+	}
+	for _, r := range c.Runs {
+		if r == runID {
 			return true
 		}
 	}
@@ -94,7 +116,7 @@ func (i *Issuer) IssueUserToken(user domain.User, ttl time.Duration) (token, jti
 	if len(scopes) == 0 {
 		scopes = []string{"*"}
 	}
-	return i.issue(user.ID, TokenKindUser, append([]string(nil), scopes...), ttl)
+	return i.issue(user.ID, TokenKindUser, append([]string(nil), scopes...), nil, ttl)
 }
 
 // IssueAgentToken mints a JWT for an automated agent, valid for ttl.
@@ -103,18 +125,31 @@ func (i *Issuer) IssueUserToken(user domain.User, ttl time.Duration) (token, jti
 // prefer IssueAgentTokenWithScopes so each agent's authority is
 // explicit.
 func (i *Issuer) IssueAgentToken(agentID string, ttl time.Duration) (token, jti string, err error) {
-	return i.issue(agentID, TokenKindAgent, []string{"*"}, ttl)
+	return i.issue(agentID, TokenKindAgent, []string{"*"}, nil, ttl)
 }
 
 // IssueAgentTokenWithScopes mints an agent JWT carrying the supplied
 // scope list. Empty scopes is allowed but the resulting token can
 // authorise nothing — callers usually want at least one resource
-// scope (e.g., "events:write").
+// scope (e.g., "events:write"). The run whitelist is empty (every
+// run allowed) — use IssueAgentTokenWithScopesAndRuns to restrict.
 func (i *Issuer) IssueAgentTokenWithScopes(agentID string, scopes []string, ttl time.Duration) (token, jti string, err error) {
-	return i.issue(agentID, TokenKindAgent, append([]string(nil), scopes...), ttl)
+	return i.issueAgent(agentID, scopes, nil, ttl)
 }
 
-func (i *Issuer) issue(subject string, kind TokenKind, scopes []string, ttl time.Duration) (string, string, error) {
+// IssueAgentTokenWithScopesAndRuns mints an agent JWT with an
+// explicit run whitelist. An empty/nil runs slice keeps the legacy
+// "every run allowed" posture; a non-empty slice restricts writes
+// to those run_ids.
+func (i *Issuer) IssueAgentTokenWithScopesAndRuns(agentID string, scopes, runs []string, ttl time.Duration) (token, jti string, err error) {
+	return i.issueAgent(agentID, scopes, runs, ttl)
+}
+
+func (i *Issuer) issueAgent(agentID string, scopes, runs []string, ttl time.Duration) (string, string, error) {
+	return i.issue(agentID, TokenKindAgent, append([]string(nil), scopes...), append([]string(nil), runs...), ttl)
+}
+
+func (i *Issuer) issue(subject string, kind TokenKind, scopes, runs []string, ttl time.Duration) (string, string, error) {
 	if subject == "" {
 		return "", "", errors.New("subject is required")
 	}
@@ -130,6 +165,7 @@ func (i *Issuer) issue(subject string, kind TokenKind, scopes []string, ttl time
 		UserID: subject,
 		Kind:   kind,
 		Scopes: scopes,
+		Runs:   runs,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ID:        jti,
 			IssuedAt:  jwt.NewNumericDate(now),

@@ -22,7 +22,7 @@ import (
 func handleAgent(args []string, _ Flags) {
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "error: agent requires a subcommand")
-		fmt.Fprintln(os.Stderr, "  mnemos agent create --name <n> --owner <user-id> --scope <s> [--scope <s>...]")
+		fmt.Fprintln(os.Stderr, "  mnemos agent create --name <n> --owner <user-id> --scope <s> [--scope <s>...] [--run <id>...]")
 		fmt.Fprintln(os.Stderr, "  mnemos agent list")
 		fmt.Fprintln(os.Stderr, "  mnemos agent revoke <agent-id>")
 		fmt.Fprintln(os.Stderr, "  mnemos agent token issue --agent <id> [--ttl <duration>]")
@@ -44,7 +44,7 @@ func handleAgent(args []string, _ Flags) {
 
 func handleAgentCreate(args []string) {
 	name, owner := "", ""
-	var scopes []string
+	var scopes, runs []string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--name":
@@ -67,6 +67,13 @@ func handleAgentCreate(args []string) {
 				return
 			}
 			scopes = append(scopes, args[i+1])
+			i++
+		case "--run":
+			if i+1 >= len(args) {
+				exitWithMnemosError(false, NewUserError("--run requires a value"))
+				return
+			}
+			runs = append(runs, args[i+1])
 			i++
 		default:
 			exitWithMnemosError(false, NewUserError("unknown flag %q", args[i]))
@@ -99,12 +106,13 @@ func handleAgentCreate(args []string) {
 		return
 	}
 	agent := domain.Agent{
-		ID:        id,
-		Name:      name,
-		OwnerID:   owner,
-		Scopes:    scopes,
-		Status:    domain.AgentStatusActive,
-		CreatedAt: time.Now().UTC(),
+		ID:          id,
+		Name:        name,
+		OwnerID:     owner,
+		Scopes:      scopes,
+		AllowedRuns: runs,
+		Status:      domain.AgentStatusActive,
+		CreatedAt:   time.Now().UTC(),
 	}
 	if err := sqlite.NewAgentRepository(db).Create(ctx, agent); err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "create agent"))
@@ -114,8 +122,12 @@ func handleAgentCreate(args []string) {
 	if scopeDisplay == "" {
 		scopeDisplay = "(none)"
 	}
-	fmt.Printf("agent_id=%s name=%q owner=%s scopes=%s status=%s\n",
-		agent.ID, agent.Name, agent.OwnerID, scopeDisplay, agent.Status)
+	runDisplay := strings.Join(runs, ",")
+	if runDisplay == "" {
+		runDisplay = "* (any)"
+	}
+	fmt.Printf("agent_id=%s name=%q owner=%s scopes=%s runs=%s status=%s\n",
+		agent.ID, agent.Name, agent.OwnerID, scopeDisplay, runDisplay, agent.Status)
 	fmt.Println("\nNext: mnemos agent token issue --agent " + agent.ID + " — to mint a JWT for this agent.")
 }
 
@@ -140,10 +152,15 @@ func handleAgentList(args []string) {
 		fmt.Println("(no agents)")
 		return
 	}
-	fmt.Printf("%-26s %-12s %-26s %-30s %s\n", "ID", "STATUS", "OWNER", "NAME", "SCOPES")
+	fmt.Printf("%-26s %-12s %-26s %-22s %-22s %s\n", "ID", "STATUS", "OWNER", "NAME", "SCOPES", "ALLOWED_RUNS")
 	for _, a := range agents {
-		fmt.Printf("%-26s %-12s %-26s %-30s %s\n",
-			a.ID, a.Status, a.OwnerID, truncate(a.Name, 30), strings.Join(a.Scopes, ","))
+		runs := strings.Join(a.AllowedRuns, ",")
+		if runs == "" {
+			runs = "*"
+		}
+		fmt.Printf("%-26s %-12s %-26s %-22s %-22s %s\n",
+			a.ID, a.Status, a.OwnerID, truncate(a.Name, 22),
+			truncate(strings.Join(a.Scopes, ","), 22), runs)
 	}
 }
 
@@ -236,14 +253,18 @@ func handleAgentToken(args []string) {
 		exitWithMnemosError(false, NewSystemError(err, "load JWT secret"))
 		return
 	}
-	token, jti, err := auth.NewIssuer(secret).IssueAgentTokenWithScopes(agent.ID, agent.Scopes, ttl)
+	token, jti, err := auth.NewIssuer(secret).IssueAgentTokenWithScopesAndRuns(agent.ID, agent.Scopes, agent.AllowedRuns, ttl)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "issue token"))
 		return
 	}
 
-	fmt.Printf("agent=%s jti=%s expires_in=%s scopes=%s\n",
-		agent.ID, jti, ttl, strings.Join(agent.Scopes, ","))
+	runDisplay := strings.Join(agent.AllowedRuns, ",")
+	if runDisplay == "" {
+		runDisplay = "* (any)"
+	}
+	fmt.Printf("agent=%s jti=%s expires_in=%s scopes=%s runs=%s\n",
+		agent.ID, jti, ttl, strings.Join(agent.Scopes, ","), runDisplay)
 	fmt.Println("\nToken (save this — it will not be shown again):")
 	fmt.Println(token)
 }

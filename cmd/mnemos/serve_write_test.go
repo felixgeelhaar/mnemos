@@ -427,6 +427,118 @@ func TestServe_Auth_AgentScopeEnforcement(t *testing.T) {
 	}
 }
 
+// TestServe_Auth_AgentRunWhitelist exercises the F.4 contract: an
+// agent token whose Runs claim names "run-allowed" can POST events
+// tagged with that run_id; the same agent posting run_id
+// "run-forbidden" gets a 403 before any DB write happens. An agent
+// with empty Runs (the legacy default) writes every run.
+func TestServe_Auth_AgentRunWhitelist(t *testing.T) {
+	secret, _ := setupJWTTestEnv(t)
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	srv := httptest.NewServer(newServerMux(db))
+	defer srv.Close()
+
+	// Agent restricted to one run.
+	scopedTok, _, err := auth.NewIssuer(secret).IssueAgentTokenWithScopesAndRuns(
+		"agt_scoped", []string{"events:write"}, []string{"run-allowed"}, time.Hour,
+	)
+	if err != nil {
+		t.Fatalf("issue scoped: %v", err)
+	}
+	scopedHdrs := map[string]string{"Authorization": "Bearer " + scopedTok}
+
+	ts := time.Now().UTC().Format(time.RFC3339)
+	allowedBody := map[string]any{"events": []map[string]any{{
+		"id": "ev_ok", "run_id": "run-allowed", "schema_version": "v1",
+		"content": "x", "source_input_id": "in1", "timestamp": ts,
+	}}}
+	r := postJSON(t, srv.URL+"/v1/events", allowedBody, scopedHdrs)
+	if r.StatusCode != http.StatusCreated {
+		var msg errorResponse
+		_ = json.NewDecoder(r.Body).Decode(&msg)
+		_ = r.Body.Close()
+		t.Fatalf("allowed run status = %d, want 201 (%v)", r.StatusCode, msg.Error)
+	}
+	_ = r.Body.Close()
+
+	forbiddenBody := map[string]any{"events": []map[string]any{{
+		"id": "ev_no", "run_id": "run-forbidden", "schema_version": "v1",
+		"content": "x", "source_input_id": "in2", "timestamp": ts,
+	}}}
+	r = postJSON(t, srv.URL+"/v1/events", forbiddenBody, scopedHdrs)
+	if r.StatusCode != http.StatusForbidden {
+		t.Errorf("forbidden run status = %d, want 403", r.StatusCode)
+	}
+	_ = r.Body.Close()
+
+	// Agent with empty Runs whitelist (legacy default) can write any run.
+	openTok, _, err := auth.NewIssuer(secret).IssueAgentTokenWithScopes("agt_open", []string{"events:write"}, time.Hour)
+	if err != nil {
+		t.Fatalf("issue open: %v", err)
+	}
+	openHdrs := map[string]string{"Authorization": "Bearer " + openTok}
+
+	openBody := map[string]any{"events": []map[string]any{{
+		"id": "ev_open", "run_id": "run-anything", "schema_version": "v1",
+		"content": "x", "source_input_id": "in3", "timestamp": ts,
+	}}}
+	r = postJSON(t, srv.URL+"/v1/events", openBody, openHdrs)
+	if r.StatusCode != http.StatusCreated {
+		var msg errorResponse
+		_ = json.NewDecoder(r.Body).Decode(&msg)
+		_ = r.Body.Close()
+		t.Errorf("open agent status = %d, want 201 (%v)", r.StatusCode, msg.Error)
+	}
+	_ = r.Body.Close()
+}
+
+// TestServe_Auth_AgentRunWhitelist_BatchAllOrNothing verifies the
+// pre-check semantics: a batch where one event is forbidden makes
+// the whole batch fail before any row lands in the DB.
+func TestServe_Auth_AgentRunWhitelist_BatchAllOrNothing(t *testing.T) {
+	secret, _ := setupJWTTestEnv(t)
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	srv := httptest.NewServer(newServerMux(db))
+	defer srv.Close()
+
+	tok, _, err := auth.NewIssuer(secret).IssueAgentTokenWithScopesAndRuns(
+		"agt_batch", []string{"events:write"}, []string{"run-yes"}, time.Hour,
+	)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	hdrs := map[string]string{"Authorization": "Bearer " + tok}
+
+	ts := time.Now().UTC().Format(time.RFC3339)
+	body := map[string]any{"events": []map[string]any{
+		{"id": "ev_a", "run_id": "run-yes", "schema_version": "v1", "content": "x", "source_input_id": "i1", "timestamp": ts},
+		{"id": "ev_b", "run_id": "run-no", "schema_version": "v1", "content": "x", "source_input_id": "i2", "timestamp": ts},
+	}}
+	r := postJSON(t, srv.URL+"/v1/events", body, hdrs)
+	if r.StatusCode != http.StatusForbidden {
+		t.Errorf("mixed batch status = %d, want 403", r.StatusCode)
+	}
+	_ = r.Body.Close()
+
+	// And the allowed event should NOT have landed — pre-check happens
+	// before the DB write loop.
+	var n int
+	if err := db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM events WHERE id = ?`, "ev_a").Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("partial write leaked through: ev_a count = %d, want 0", n)
+	}
+}
+
 // TestServe_Auth_NarrowUserScopeRejectsOtherEndpoints proves the
 // F.3 contract end-to-end: a user with `events:write` only is
 // allowed at /v1/events but forbidden everywhere else.

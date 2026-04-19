@@ -70,4 +70,5 @@ type AgentRepository interface {
 	List(ctx context.Context) ([]domain.Agent, error)
 	UpdateStatus(ctx context.Context, id string, status domain.AgentStatus) error
 	UpdateScopes(ctx context.Context, id string, scopes []string) error
+	UpdateAllowedRuns(ctx context.Context, id string, runs []string) error
 }

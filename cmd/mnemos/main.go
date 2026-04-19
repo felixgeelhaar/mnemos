@@ -161,6 +161,8 @@ func main() {
 		handleToken(args, flags)
 	case "agent":
 		handleAgent(args, flags)
+	case "doctor":
+		handleDoctor(args, flags)
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command %q\n", command)
 		if suggestion := suggestCommand(command); suggestion != "" {

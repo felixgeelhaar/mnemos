@@ -133,7 +133,7 @@ func newServerMux(db *sql.DB) http.Handler {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleWebRoot)
-	mux.HandleFunc("/health", handleHealth)
+	mux.HandleFunc("/health", makeHealthHandler(db))
 	mux.HandleFunc("/v1/events", makeEventsHandler(db))
 	mux.HandleFunc("/v1/claims", makeClaimsHandler(db))
 	mux.HandleFunc("/v1/relationships", makeRelationshipsHandler(db))
@@ -155,12 +155,45 @@ func (r *statusRecorder) WriteHeader(status int) {
 }
 
 type healthResponse struct {
-	Status  string `json:"status"`
-	Version string `json:"version"`
+	Status  string             `json:"status"`
+	Version string             `json:"version"`
+	Healthy *bool              `json:"healthy,omitempty"`
+	Checks  []healthCheck      `json:"checks,omitempty"`
 }
 
-func handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, healthResponse{Status: "ok", Version: version})
+// makeHealthHandler returns the /health handler. Default response is
+// the cheap shallow check (status + version) for liveness probes;
+// callers asking for ?deep=true get the full subsystem report so an
+// orchestrator can readiness-gate on it.
+//
+// Returns 503 when deep=true reveals a failed probe so HTTP-aware
+// load balancers / Kubernetes readiness gates can react without
+// parsing the JSON.
+func makeHealthHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("deep") != "true" {
+			writeJSON(w, http.StatusOK, healthResponse{Status: "ok", Version: version})
+			return
+		}
+		result := runHealthChecks(r.Context(), db)
+		status := http.StatusOK
+		if !result.Healthy {
+			status = http.StatusServiceUnavailable
+		}
+		writeJSON(w, status, healthResponse{
+			Status:  ternary(result.Healthy, "ok", "degraded"),
+			Version: version,
+			Healthy: &result.Healthy,
+			Checks:  result.Checks,
+		})
+	}
+}
+
+func ternary(cond bool, t, f string) string {
+	if cond {
+		return t
+	}
+	return f
 }
 
 // handleWebRoot serves the embedded single-page UI at GET /. Any other

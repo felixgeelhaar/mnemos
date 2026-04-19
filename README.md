@@ -175,6 +175,57 @@ Defaults: `limit=50`, capped at `200`. Port also accepts `MNEMOS_SERVE_PORT`. Re
 
 **Authentication.** Set `MNEMOS_REGISTRY_TOKEN=<your-secret>` to require `Authorization: Bearer <your-secret>` on all write methods (POST/PUT/DELETE). Reads stay open by default — useful for browse-only dashboards. When the env var is unset, the registry is fully open (suitable for local dev and trusted networks).
 
+### Integrating Mnemos in your app
+
+The HTTP API at `mnemos serve` is the integration surface. Three flavors:
+
+**Go (typed client)** — `import "github.com/felixgeelhaar/mnemos/client"`:
+
+```go
+c := client.New("http://localhost:7777", client.WithToken("optional-secret"))
+
+c.AppendEvents(ctx, []client.Event{{
+    ID: "ev_1", RunID: "session-A", SchemaVersion: "v1",
+    Content: "We chose Postgres for the new service",
+    SourceInputID: "src_1", Timestamp: client.FormatTime(time.Now()),
+}})
+
+list, _ := c.ListClaims(ctx, client.ListOptions{Type: "decision", Limit: 25})
+for _, claim := range list.Claims {
+    fmt.Printf("[%s] %s\n", claim.Type, claim.Text)
+}
+```
+
+The client wraps every endpoint, returns typed errors via `*client.APIError`, and is safe for concurrent use.
+
+**Any other language (curl)**:
+
+```bash
+# Append an event
+curl -X POST http://localhost:7777/v1/events \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <optional-token>' \
+  -d '{"events":[{"id":"ev_1","content":"...","timestamp":"2026-04-19T10:00:00Z"}]}'
+
+# Browse claims, filtered
+curl 'http://localhost:7777/v1/claims?type=decision&limit=25'
+```
+
+**Python (stdlib)**:
+
+```python
+import json, urllib.request
+
+req = urllib.request.Request(
+    "http://localhost:7777/v1/events",
+    data=json.dumps({"events": [{"id": "ev_1", "content": "...", "timestamp": "2026-04-19T10:00:00Z"}]}).encode(),
+    headers={"Content-Type": "application/json", "Authorization": "Bearer <token>"},
+)
+urllib.request.urlopen(req)
+```
+
+For an AI agent: skip the HTTP API entirely and use the MCP transport (`mnemos mcp`). Agents that speak MCP get the same surface plus `query_knowledge`, `process_text`, browsing, file watching, and git ingestion already wired up.
+
 ### Push / Pull
 
 Once a project is connected to a registry, knowledge flows like git:

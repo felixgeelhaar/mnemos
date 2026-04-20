@@ -154,7 +154,10 @@ func newServerMux(db *sql.DB) http.Handler {
 	mux.HandleFunc("/v1/metrics", makeMetricsHandler(db))
 
 	logger := bolt.New(bolt.NewJSONHandler(os.Stderr))
-	return boltAccessLog(logger, jwtAuthMiddleware(verifier, mux))
+	// panicRecover is the outermost layer so a panic in any later
+	// middleware (auth, access log) still produces a clean 500
+	// response instead of leaving the client hanging.
+	return panicRecover(logger, boltAccessLog(logger, jwtAuthMiddleware(verifier, mux)))
 }
 
 type statusRecorder struct {
@@ -514,6 +517,26 @@ type appendResponse struct {
 
 const maxRequestBytes = 5 * 1024 * 1024 // 5 MB; bigger payloads should chunk
 
+// maxBatchRecords caps the number of items in any POST array. The
+// MaxBytesReader already bounds total payload size, but a JSON
+// payload of 5MB can contain tens of thousands of tiny records that
+// blow up downstream memory when decoded and held for the
+// per-record DB pass. 1000 is comfortable for real ingest workloads
+// (push batches are 250-500 by default) and keeps a pathological
+// client from forcing MB-scale intermediate maps.
+const maxBatchRecords = 1000
+
+// rejectOversizedBatch writes a 400 and returns false when n exceeds
+// maxBatchRecords. Called at the top of each POST handler so the
+// check runs before we enter the per-record validation loop.
+func rejectOversizedBatch(w http.ResponseWriter, resource string, n int) bool {
+	if n > maxBatchRecords {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("%s batch size %d exceeds max %d (split into multiple requests)", resource, n, maxBatchRecords))
+		return true
+	}
+	return false
+}
+
 func decodeJSON(r *http.Request, dst any) error {
 	r.Body = http.MaxBytesReader(nil, r.Body, maxRequestBytes)
 	dec := json.NewDecoder(r.Body)
@@ -553,6 +576,9 @@ func appendEventsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.Events) == 0 {
 		writeError(w, http.StatusBadRequest, "events array is empty")
+		return
+	}
+	if rejectOversizedBatch(w, "events", len(req.Events)) {
 		return
 	}
 
@@ -632,6 +658,12 @@ func appendClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.Claims) == 0 {
 		writeError(w, http.StatusBadRequest, "claims array is empty")
+		return
+	}
+	if rejectOversizedBatch(w, "claims", len(req.Claims)) {
+		return
+	}
+	if rejectOversizedBatch(w, "evidence", len(req.Evidence)) {
 		return
 	}
 
@@ -723,6 +755,9 @@ func appendRelationshipsHandler(db *sql.DB, w http.ResponseWriter, r *http.Reque
 	}
 	if len(req.Relationships) == 0 {
 		writeError(w, http.StatusBadRequest, "relationships array is empty")
+		return
+	}
+	if rejectOversizedBatch(w, "relationships", len(req.Relationships)) {
 		return
 	}
 
@@ -895,6 +930,9 @@ func appendEmbeddingsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request)
 	}
 	if len(req.Embeddings) == 0 {
 		writeError(w, http.StatusBadRequest, "embeddings array is empty")
+		return
+	}
+	if rejectOversizedBatch(w, "embeddings", len(req.Embeddings)) {
 		return
 	}
 

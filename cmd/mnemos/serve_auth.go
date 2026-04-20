@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -126,6 +128,36 @@ func jwtAuthMiddleware(verifier *auth.Verifier, h http.Handler) http.Handler {
 		ctx = withScopes(ctx, claims.Scopes)
 		ctx = withAllowedRuns(ctx, claims.Runs)
 		h.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// panicRecover is the outermost middleware: it catches any panic
+// raised by a handler, logs the full stack to stderr (so operators
+// can debug), and returns a sanitised 500 to the client. Go's
+// net/http already recovers panics and closes the connection, but
+// the default behaviour swallows the stack and writes nothing —
+// operators end up debugging blind. This middleware fixes that.
+//
+// Must wrap every other middleware so a panic in auth or the access
+// log itself still produces a clean response.
+func panicRecover(logger *bolt.Logger, h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			rec := recover()
+			if rec == nil {
+				return
+			}
+			logger.Error().
+				Str("method", r.Method).
+				Str("path", r.URL.RequestURI()).
+				Str("panic", fmt.Sprintf("%v", rec)).
+				Str("stack", string(debug.Stack())).
+				Msg("http_panic")
+			// The response may already be partially written. Best
+			// effort — http.Error will silently no-op in that case.
+			writeError(w, http.StatusInternalServerError, "internal error: panic")
+		}()
+		h.ServeHTTP(w, r)
 	})
 }
 

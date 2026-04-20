@@ -179,6 +179,31 @@ func TestServe_AppendEvents_RejectsEmptyArray(t *testing.T) {
 	}
 }
 
+// TestServe_AppendEvents_RejectsOversizedBatch covers the F-Slice L
+// batch cap: a single POST can't include more than maxBatchRecords
+// entries. The MaxBytesReader bounds total body size but doesn't
+// protect against 5MB of tiny rows that balloon on decode.
+func TestServe_AppendEvents_RejectsOversizedBatch(t *testing.T) {
+	st := newServeJWTTest(t)
+	ts := time.Now().UTC().Format(time.RFC3339)
+	events := make([]map[string]any, 1001) // one over maxBatchRecords
+	for i := range events {
+		events[i] = map[string]any{
+			"id":              "ev_batch_" + string(rune('a'+(i%26))),
+			"run_id":          "r",
+			"schema_version":  "v1",
+			"content":         "x",
+			"source_input_id": "in",
+			"timestamp":       ts,
+		}
+	}
+	resp := postJSON(t, st.Srv.URL+"/v1/events", map[string]any{"events": events}, st.Auth)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (batch cap)", resp.StatusCode)
+	}
+}
+
 func TestServe_AppendEvents_RejectsBadTimestamp(t *testing.T) {
 	st := newServeJWTTest(t)
 	body := map[string]any{

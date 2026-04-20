@@ -801,7 +801,7 @@ func TestServe_Auth_UserTokenGetsAllScopes(t *testing.T) {
 		path string
 		body map[string]any
 	}{
-		{"events", "/v1/events", map[string]any{"events": []map[string]any{{"id": "ev_full_1", "content": "x", "timestamp": now.Format(time.RFC3339)}}}},
+		{"events", "/v1/events", map[string]any{"events": []map[string]any{{"id": "ev_full_1", "content": "x", "source_input_id": "in_full_1", "timestamp": now.Format(time.RFC3339)}}}},
 		{"claims", "/v1/claims", map[string]any{"claims": []map[string]any{{"id": "cl_full_1", "text": "x", "type": "fact", "confidence": 0.7, "status": "active", "created_at": now.Format(time.RFC3339)}}}},
 		{"relationships", "/v1/relationships", map[string]any{"relationships": []map[string]any{{"id": "r_full_1", "type": "supports", "from_claim_id": "cl_a", "to_claim_id": "cl_b"}}}},
 		{"embeddings", "/v1/embeddings", map[string]any{"embeddings": []map[string]any{{"entity_id": "ev_for_full", "entity_type": "event", "vector": []float32{0.1, 0.2}, "model": "m"}}}},

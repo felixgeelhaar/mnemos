@@ -24,7 +24,7 @@ func NewGeminiEmbedder(baseURL, apiKey, model string) *GeminiEmbedder {
 		baseURL: baseURL,
 		apiKey:  apiKey,
 		model:   model,
-		http:    &http.Client{},
+		http:    defaultEmbeddingHTTPClient(),
 	}
 }
 

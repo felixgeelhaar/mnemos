@@ -23,7 +23,7 @@ func NewAnthropicClient(baseURL, apiKey, model string) *AnthropicClient {
 		baseURL: baseURL,
 		apiKey:  apiKey,
 		model:   model,
-		http:    &http.Client{},
+		http:    defaultLLMHTTPClient(),
 	}
 }
 

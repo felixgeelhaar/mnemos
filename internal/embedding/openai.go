@@ -26,7 +26,7 @@ func NewOpenAIEmbedder(baseURL, apiKey, model string) *OpenAIEmbedder {
 		baseURL: strings.TrimRight(baseURL, "/"),
 		apiKey:  apiKey,
 		model:   model,
-		http:    &http.Client{},
+		http:    defaultEmbeddingHTTPClient(),
 	}
 }
 

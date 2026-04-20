@@ -24,8 +24,14 @@ func NewEventRepository(db *sql.DB) EventRepository {
 	return EventRepository{db: db, q: sqlcgen.New(db)}
 }
 
-// Append persists a single domain event to the database.
+// Append persists a single domain event to the database. The event
+// must pass domain.Event.Validate() — storage is the last line of
+// defense, so malformed events that slipped past earlier checks get
+// rejected here rather than polluting the store.
 func (r EventRepository) Append(ctx context.Context, event domain.Event) error {
+	if err := event.Validate(); err != nil {
+		return fmt.Errorf("invalid event: %w", err)
+	}
 	metadata, err := json.Marshal(event.Metadata)
 	if err != nil {
 		return fmt.Errorf("marshal event metadata: %w", err)

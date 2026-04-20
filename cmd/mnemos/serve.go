@@ -34,6 +34,17 @@ const (
 	serveWriteTimeout  = 30 * time.Second
 	serveIdleTimeout   = 60 * time.Second
 	serveShutdownGrace = 10 * time.Second
+
+	// serveReadHeaderTimeout caps header read separately from the
+	// rest of the request. Slowloris-style attacks dribble a header
+	// byte-at-a-time to hold connections open; a 5s header deadline
+	// is generous for legitimate clients while bounding the attack.
+	serveReadHeaderTimeout = 5 * time.Second
+
+	// serveMaxHeaderBytes caps per-request header size. Default in
+	// net/http is 1MB which is overkill for our REST API — we can
+	// budget much tighter without rejecting legitimate traffic.
+	serveMaxHeaderBytes = 64 * 1024
 )
 
 // handleServe runs the HTTP registry server. Phase 2B v1 — read-only
@@ -76,11 +87,13 @@ func handleServe(args []string, _ Flags) {
 	defer closeDB(db)
 
 	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", port),
-		Handler:      newServerMux(db),
-		ReadTimeout:  serveReadTimeout,
-		WriteTimeout: serveWriteTimeout,
-		IdleTimeout:  serveIdleTimeout,
+		Addr:              fmt.Sprintf(":%d", port),
+		Handler:           newServerMux(db),
+		ReadTimeout:       serveReadTimeout,
+		ReadHeaderTimeout: serveReadHeaderTimeout,
+		WriteTimeout:      serveWriteTimeout,
+		IdleTimeout:       serveIdleTimeout,
+		MaxHeaderBytes:    serveMaxHeaderBytes,
 	}
 
 	stop := make(chan os.Signal, 1)
@@ -256,7 +269,7 @@ func listEventsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 	var total int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&total); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("count events: %v", err))
+		writeInternalError(w, "count events", err)
 		return
 	}
 
@@ -264,7 +277,7 @@ func listEventsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		`SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at
 		 FROM events ORDER BY timestamp DESC LIMIT ? OFFSET ?`, limit, offset)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("list events: %v", err))
+		writeInternalError(w, "list events", err)
 		return
 	}
 	defer func() { _ = rows.Close() }()
@@ -276,7 +289,7 @@ func listEventsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 			metaJSON string
 		)
 		if err := rows.Scan(&e.ID, &e.RunID, &e.SchemaVersion, &e.Content, &e.SourceInputID, &e.Timestamp, &metaJSON, &e.IngestedAt); err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("scan event: %v", err))
+			writeInternalError(w, "scan event", err)
 			return
 		}
 		e.Metadata = map[string]string{}
@@ -347,7 +360,7 @@ func listClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 	var total int
 	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM claims"+where, args...).Scan(&total); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("count claims: %v", err))
+		writeInternalError(w, "count claims", err)
 		return
 	}
 
@@ -357,7 +370,7 @@ func listClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		"SELECT id, text, type, confidence, status, created_at FROM claims"+where+" ORDER BY created_at DESC LIMIT ? OFFSET ?",
 		rowArgs...)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("list claims: %v", err))
+		writeInternalError(w, "list claims", err)
 		return
 	}
 	defer func() { _ = rows.Close() }()
@@ -366,7 +379,7 @@ func listClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c claimDTO
 		if err := rows.Scan(&c.ID, &c.Text, &c.Type, &c.Confidence, &c.Status, &c.CreatedAt); err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("scan claim: %v", err))
+			writeInternalError(w, "scan claim", err)
 			return
 		}
 		claims = append(claims, c)
@@ -374,7 +387,7 @@ func listClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 	evidence, evErr := loadEvidenceForClaims(ctx, db, claims)
 	if evErr != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("load evidence: %v", evErr))
+		writeInternalError(w, "load evidence", evErr)
 		return
 	}
 
@@ -460,7 +473,7 @@ func listRelationshipsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request
 
 	var total int
 	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM relationships"+where, args...).Scan(&total); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("count relationships: %v", err))
+		writeInternalError(w, "count relationships", err)
 		return
 	}
 
@@ -470,7 +483,7 @@ func listRelationshipsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request
 		"SELECT id, type, from_claim_id, to_claim_id, created_at FROM relationships"+where+" ORDER BY created_at DESC LIMIT ? OFFSET ?",
 		rowArgs...)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("list relationships: %v", err))
+		writeInternalError(w, "list relationships", err)
 		return
 	}
 	defer func() { _ = rows.Close() }()
@@ -479,7 +492,7 @@ func listRelationshipsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request
 	for rows.Next() {
 		var rel relationshipDTO
 		if err := rows.Scan(&rel.ID, &rel.Type, &rel.FromClaimID, &rel.ToClaimID, &rel.CreatedAt); err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("scan relationship: %v", err))
+			writeInternalError(w, "scan relationship", err)
 			return
 		}
 		rels = append(rels, rel)
@@ -668,7 +681,7 @@ func appendClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		}
 		bad, badRun, err := checkEventRunsAllowed(ctx, db, eventIDs, allowed)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("run-scope check: %v", err))
+			writeInternalError(w, "run-scope check", err)
 			return
 		}
 		if bad != "" {
@@ -678,7 +691,7 @@ func appendClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := repo.Upsert(ctx, claims); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("upsert claims: %v", err))
+		writeInternalError(w, "upsert claims", err)
 		return
 	}
 
@@ -688,7 +701,7 @@ func appendClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 			links = append(links, domain.ClaimEvidence{ClaimID: e.ClaimID, EventID: e.EventID})
 		}
 		if err := repo.UpsertEvidence(ctx, links); err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("upsert evidence: %v", err))
+			writeInternalError(w, "upsert evidence", err)
 			return
 		}
 	}
@@ -755,12 +768,12 @@ func appendRelationshipsHandler(db *sql.DB, w http.ResponseWriter, r *http.Reque
 		}
 		evIDs, err := claimEventIDs(r.Context(), db, claimIDs)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("run-scope lookup: %v", err))
+			writeInternalError(w, "run-scope lookup", err)
 			return
 		}
 		bad, badRun, err := checkEventRunsAllowed(r.Context(), db, evIDs, allowed)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("run-scope check: %v", err))
+			writeInternalError(w, "run-scope check", err)
 			return
 		}
 		if bad != "" {
@@ -771,7 +784,7 @@ func appendRelationshipsHandler(db *sql.DB, w http.ResponseWriter, r *http.Reque
 
 	repo := sqlite.NewRelationshipRepository(db)
 	if err := repo.Upsert(r.Context(), rels); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("upsert relationships: %v", err))
+		writeInternalError(w, "upsert relationships", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, appendResponse{Accepted: len(rels)})
@@ -833,7 +846,7 @@ func listEmbeddingsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 
 	var total int
 	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM embeddings"+where, args...).Scan(&total); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("count embeddings: %v", err))
+		writeInternalError(w, "count embeddings", err)
 		return
 	}
 
@@ -843,7 +856,7 @@ func listEmbeddingsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		"SELECT entity_id, entity_type, vector, model, dimensions FROM embeddings"+where+" ORDER BY entity_type, entity_id LIMIT ? OFFSET ?",
 		rowArgs...)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("list embeddings: %v", err))
+		writeInternalError(w, "list embeddings", err)
 		return
 	}
 	defer func() { _ = rows.Close() }()
@@ -856,12 +869,12 @@ func listEmbeddingsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 			dims int64
 		)
 		if err := rows.Scan(&e.EntityID, &e.EntityType, &blob, &e.Model, &dims); err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("scan embedding: %v", err))
+			writeInternalError(w, "scan embedding", err)
 			return
 		}
 		vec, err := embedding.DecodeVector(blob)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("decode embedding for %s/%s: %v", e.EntityID, e.EntityType, err))
+			writeInternalError(w, "decode embedding", err)
 			return
 		}
 		e.Vector = vec
@@ -904,13 +917,13 @@ func appendEmbeddingsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request)
 		}
 		extraEvents, err := claimEventIDs(ctx, db, claimIDs)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("run-scope lookup: %v", err))
+			writeInternalError(w, "run-scope lookup", err)
 			return
 		}
 		eventIDs = append(eventIDs, extraEvents...)
 		bad, badRun, err := checkEventRunsAllowed(ctx, db, eventIDs, allowed)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("run-scope check: %v", err))
+			writeInternalError(w, "run-scope check", err)
 			return
 		}
 		if bad != "" {
@@ -938,7 +951,7 @@ func appendEmbeddingsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request)
 			return
 		}
 		if err := repo.UpsertAs(ctx, e.EntityID, e.EntityType, e.Vector, e.Model, actor); err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("upsert embedding %s/%s: %v", e.EntityID, e.EntityType, err))
+			writeInternalError(w, "upsert embedding", err)
 			return
 		}
 		accepted++
@@ -1017,6 +1030,22 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
+// writeError emits a typed error response. 4xx messages are shown to
+// the client verbatim because they describe a problem with the
+// client's request. 5xx messages leak internal state — raw SQL
+// errors, file paths, driver details — if passed through directly,
+// so callers hitting the 500 path should prefer writeInternalError
+// below.
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, errorResponse{Error: msg})
+}
+
+// writeInternalError is the sanitizing variant for the 500 code path.
+// The full detail is logged to stderr (so operators can debug) but
+// the HTTP response body only carries a generic "internal error"
+// plus the context label that helps bucket issues in dashboards
+// without leaking anything about the DB schema or filesystem.
+func writeInternalError(w http.ResponseWriter, label string, cause error) {
+	fmt.Fprintf(os.Stderr, "serve 500 [%s]: %v\n", label, cause)
+	writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal error: " + label})
 }

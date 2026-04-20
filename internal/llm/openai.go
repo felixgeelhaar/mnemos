@@ -26,7 +26,7 @@ func NewOpenAIClient(baseURL, apiKey, model string) *OpenAIClient {
 		baseURL: strings.TrimRight(baseURL, "/"),
 		apiKey:  apiKey,
 		model:   model,
-		http:    &http.Client{},
+		http:    defaultLLMHTTPClient(),
 	}
 }
 

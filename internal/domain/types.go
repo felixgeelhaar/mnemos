@@ -344,3 +344,58 @@ func (e ClaimEvidence) Validate() error {
 	}
 	return nil
 }
+
+// MaxEventContentBytes caps a single event's Content field. Events
+// are meant to be small paragraph-sized fragments of knowledge, not
+// entire documents — the ingest pipeline normalises documents into
+// sentence-level events. Anything much larger almost always means
+// the caller didn't chunk properly, and an unbounded field wastes
+// DB/index space plus makes extraction latency pathological. Keep
+// this comfortably larger than a typical paragraph (2KB) so
+// legitimate edge cases still fit.
+const MaxEventContentBytes = 64 * 1024
+
+// Validate checks that an Event has the minimum required fields and
+// that Content stays within MaxEventContentBytes.
+func (e Event) Validate() error {
+	if strings.TrimSpace(e.ID) == "" {
+		return errors.New("event id is required")
+	}
+	if strings.TrimSpace(e.Content) == "" {
+		return errors.New("event content is required")
+	}
+	if len(e.Content) > MaxEventContentBytes {
+		return fmt.Errorf("event content is %d bytes, max is %d (chunk longer documents into multiple events)", len(e.Content), MaxEventContentBytes)
+	}
+	if strings.TrimSpace(e.SourceInputID) == "" {
+		return errors.New("event source_input_id is required")
+	}
+	if e.Timestamp.IsZero() {
+		return errors.New("event timestamp is required")
+	}
+	return nil
+}
+
+// Validate checks that a Relationship has the required fields and a
+// valid type, and that it doesn't self-reference (a claim can't
+// support or contradict itself — that's either a no-op or a bug).
+func (r Relationship) Validate() error {
+	if strings.TrimSpace(r.ID) == "" {
+		return errors.New("relationship id is required")
+	}
+	if strings.TrimSpace(r.FromClaimID) == "" {
+		return errors.New("relationship from_claim_id is required")
+	}
+	if strings.TrimSpace(r.ToClaimID) == "" {
+		return errors.New("relationship to_claim_id is required")
+	}
+	if r.FromClaimID == r.ToClaimID {
+		return fmt.Errorf("relationship %s self-references claim %s", r.ID, r.FromClaimID)
+	}
+	switch r.Type {
+	case RelationshipTypeSupports, RelationshipTypeContradicts:
+	default:
+		return fmt.Errorf("relationship type %q invalid (want supports or contradicts)", r.Type)
+	}
+	return nil
+}

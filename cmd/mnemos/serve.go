@@ -171,10 +171,10 @@ func (r *statusRecorder) WriteHeader(status int) {
 }
 
 type healthResponse struct {
-	Status  string             `json:"status"`
-	Version string             `json:"version"`
-	Healthy *bool              `json:"healthy,omitempty"`
-	Checks  []healthCheck      `json:"checks,omitempty"`
+	Status  string        `json:"status"`
+	Version string        `json:"version"`
+	Healthy *bool         `json:"healthy,omitempty"`
+	Checks  []healthCheck `json:"checks,omitempty"`
 }
 
 // makeHealthHandler returns the /health handler. Default response is

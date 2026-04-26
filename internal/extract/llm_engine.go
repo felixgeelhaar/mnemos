@@ -130,6 +130,13 @@ func (e LLMEngine) buildClaims(rawClaims []llmClaim, sourceEvents []domain.Event
 			continue
 		}
 
+		// Filter conversational pollution (greetings, list-headers,
+		// status emojis) that LLMs frequently lift verbatim from chat
+		// transcripts as standalone "facts". See junk.go for rules.
+		if isJunkClaim(text) {
+			continue
+		}
+
 		dedupeKey := normalizeForDedupe(text)
 		if dedupeKey == "" {
 			continue

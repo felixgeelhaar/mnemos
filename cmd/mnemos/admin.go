@@ -312,15 +312,15 @@ func resetDB(ctx context.Context, db *sql.DB, keepEvents bool) (resetCounts, err
 
 func printResetSummary(c resetCounts, keepEvents bool) {
 	fmt.Printf("Reset complete (db=%s)\n", resolveDBPath())
-	fmt.Printf("  claims:        %d\n", c.Claims)
-	fmt.Printf("  evidence:      %d\n", c.Evidence)
-	fmt.Printf("  status hist:   %d\n", c.StatusHistory)
-	fmt.Printf("  relationships: %d\n", c.Relationships)
-	fmt.Printf("  embeddings:    %d\n", c.Embeddings)
+	fmt.Printf("  claims:        %-8d (deleted)\n", c.Claims)
+	fmt.Printf("  evidence:      %-8d (deleted)\n", c.Evidence)
+	fmt.Printf("  status hist:   %-8d (deleted)\n", c.StatusHistory)
+	fmt.Printf("  relationships: %-8d (deleted)\n", c.Relationships)
+	fmt.Printf("  embeddings:    %-8d (deleted)\n", c.Embeddings)
 	if keepEvents {
 		fmt.Printf("  events:        kept\n")
 	} else {
-		fmt.Printf("  events:        %d\n", c.Events)
+		fmt.Printf("  events:        %-8d (deleted)\n", c.Events)
 	}
 }
 

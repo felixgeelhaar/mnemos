@@ -740,6 +740,33 @@ func handleProcess(args []string, f Flags) {
 			printProgress("llm extraction: extracted %d claims", len(claims))
 		}
 
+		// Load the existing knowledge once: it feeds both cross-batch
+		// dedup (always) and incremental relate (unless --no-relate).
+		// Failure here is non-fatal — we still persist what we have.
+		var existingClaims []domain.Claim
+		{
+			claimRepo := sqlite.NewClaimRepository(db)
+			loadCtx, loadCancel := context.WithTimeout(ctx, 30*time.Second)
+			loaded, loadErr := claimRepo.ListAll(loadCtx)
+			loadCancel()
+			if loadErr != nil {
+				warnRelateSkipped(loadErr, "loading existing claims")
+			} else {
+				existingClaims = loaded
+			}
+		}
+
+		// Cross-batch dedup: collapse new claims that already exist by
+		// normalized text, rewriting evidence links to point at the
+		// canonical (existing) claim id. Without this, restating the
+		// same fact across chunks produces near-duplicate claim rows
+		// (#24).
+		preDedup := len(claims)
+		claims, links = pipeline.DedupeAgainstExisting(claims, links, existingClaims)
+		if dropped := preDedup - len(claims); dropped > 0 {
+			printProgress("dedup: collapsed %d claim(s) that match existing knowledge", dropped)
+		}
+
 		if err := job.SetStatus("relating", ""); err != nil {
 			return err
 		}
@@ -749,26 +776,15 @@ func handleProcess(args []string, f Flags) {
 			return NewSystemError(err, "relationship detection failed")
 		}
 
-		// Incremental: compare new claims against previously stored claims.
-		// Any failure here is surfaced as a warning rather than aborting the
-		// whole job — extraction succeeded, the user's claims should be
-		// persisted, and the next run will pick up the missing edges.
-		// Skipped entirely when --no-relate is set.
-		if !f.NoRelate {
-			claimRepo := sqlite.NewClaimRepository(db)
-			loadCtx, loadCancel := context.WithTimeout(ctx, 30*time.Second)
-			existingClaims, loadErr := claimRepo.ListAll(loadCtx)
-			loadCancel()
-			switch {
-			case loadErr != nil:
-				warnRelateSkipped(loadErr, "loading existing claims")
-			case len(existingClaims) > 0:
-				incrementalRels, incErr := relEngine.DetectIncremental(claims, existingClaims)
-				if incErr != nil {
-					warnRelateSkipped(incErr, "comparing against existing claims")
-				} else {
-					rels = append(rels, incrementalRels...)
-				}
+		// Incremental relate: compare new claims against the existing
+		// store. Skipped under --no-relate. Already-loaded claims feed
+		// straight in, so no second DB hit.
+		if !f.NoRelate && len(existingClaims) > 0 && len(claims) > 0 {
+			incrementalRels, incErr := relEngine.DetectIncremental(claims, existingClaims)
+			if incErr != nil {
+				warnRelateSkipped(incErr, "comparing against existing claims")
+			} else {
+				rels = append(rels, incrementalRels...)
 			}
 		}
 

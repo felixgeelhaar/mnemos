@@ -295,6 +295,17 @@ internal/
 | `MNEMOS_EMBED_MODEL` | Embedding model override (optional) |
 | `MNEMOS_EMBED_BASE_URL` | Embedding endpoint (same container/host caveat as `MNEMOS_LLM_BASE_URL`) |
 | `MNEMOS_EMBED_TIMEOUT` | Per-request embedding HTTP timeout (default `60s`) |
+| `MNEMOS_AUTH_DIR` | Directory for the JWT signing secret (default: project `.mnemos/` or `$HOME/.mnemos/`). Override when running on a read-only rootfs (Docker `read_only: true`, k8s `readOnlyRootFilesystem: true`) by pointing at a writable volume. |
+| `MNEMOS_JWT_SECRET` | Hex-encoded JWT signing secret (≥32 bytes). When set, takes precedence over the file path; useful in CI/Kubernetes where you'd rather inject the secret as an env var than mount a file. |
+
+### Upgrading
+
+Mnemos v0.6.1+ auto-migrates older databases on `sqlite.Open` — no
+`mnemos reset` or DB delete needed. The migration is idempotent and
+adds the `created_by` / `changed_by` columns the auth feature
+introduced in v0.6.0. Schema generation is tracked via
+`PRAGMA user_version`, so re-running on an already-migrated DB is a
+no-op.
 
 ### Local Models (Ollama)
 

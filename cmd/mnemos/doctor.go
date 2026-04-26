@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/felixgeelhaar/mnemos/internal/auth"
@@ -84,13 +85,43 @@ func probeProjectRoot() healthCheck {
 	return healthCheck{Name: "project_root", Status: "ok", Detail: fmt.Sprintf("root=%s db=%s", projectRoot, dbPath)}
 }
 
+// probeJWTSecret reports the state of JWT signing material without
+// implicitly creating it. Doctor is a diagnostic, not a setup step,
+// so we should not silently materialise a secret on a fresh install.
+//
+// States:
+//   - "ok"      MNEMOS_JWT_SECRET is set and valid, OR a secret file
+//     exists at the resolved path and loads cleanly.
+//   - "failed"  Configured (env or existing file) but malformed.
+//   - "skipped" Auth has not been configured. Reports the path the
+//     binary would write to, so users in read-only-rootfs
+//     containers (#21) see how to point MNEMOS_AUTH_DIR or
+//     MNEMOS_JWT_SECRET at a writable location before they
+//     start `mnemos serve` or `token issue`.
 func probeJWTSecret() healthCheck {
+	if envHex := strings.TrimSpace(os.Getenv("MNEMOS_JWT_SECRET")); envHex != "" {
+		if _, _, err := auth.LoadOrCreateSecret(""); err != nil {
+			return healthCheck{Name: "jwt_secret", Status: "failed", Detail: err.Error()}
+		}
+		return healthCheck{Name: "jwt_secret", Status: "ok", Detail: "from MNEMOS_JWT_SECRET"}
+	}
+
 	_, projectRoot, _ := findProjectDB()
 	path := auth.DefaultSecretPath(projectRoot)
-	if _, _, err := auth.LoadOrCreateSecret(path); err != nil {
-		return healthCheck{Name: "jwt_secret", Status: "failed", Detail: err.Error()}
+	if path == "" {
+		return healthCheck{Name: "jwt_secret", Status: "skipped", Detail: "no $HOME, no project root, no MNEMOS_AUTH_DIR — set MNEMOS_JWT_SECRET to use auth"}
 	}
-	return healthCheck{Name: "jwt_secret", Status: "ok", Detail: "loadable from " + path}
+	if _, err := os.Stat(path); err == nil {
+		if _, _, err := auth.LoadOrCreateSecret(path); err != nil {
+			return healthCheck{Name: "jwt_secret", Status: "failed", Detail: err.Error()}
+		}
+		return healthCheck{Name: "jwt_secret", Status: "ok", Detail: "loadable from " + path}
+	}
+	return healthCheck{
+		Name:   "jwt_secret",
+		Status: "skipped",
+		Detail: fmt.Sprintf("not configured; will be created at %s on first use of `serve` or `token issue` (set MNEMOS_AUTH_DIR or MNEMOS_JWT_SECRET to override)", filepath.Dir(path)),
+	}
 }
 
 // probeDoctorDB is the open-handle counterpart that also returns the

@@ -180,10 +180,108 @@ CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
 		return fmt.Errorf("ensure schema: %w", err)
 	}
 
-	// Pre-launch: bootstrap schema is the single source of truth. No
-	// in-place migration helpers — devs upgrading from an older snapshot
-	// drop their dev DB and start fresh. When we go live this section
-	// gains a real migration framework (golang-migrate or equivalent).
+	if err := migrate(db); err != nil {
+		return fmt.Errorf("schema migration: %w", err)
+	}
 
 	return nil
+}
+
+// currentSchemaVersion is the schema generation this binary expects.
+// Bump whenever a column or table is added; pair the bump with a step
+// in addMissingColumns so existing DBs upgrade in place.
+const currentSchemaVersion = 1
+
+// addMissingColumn declares one defensive column-add. Each entry is
+// idempotent: if the column already exists in the table we skip it,
+// so re-running the migration on an up-to-date DB is a no-op.
+type addMissingColumn struct {
+	table  string
+	column string
+	def    string // full column definition appended after ADD COLUMN
+}
+
+// v1Columns is the set of columns introduced after the v0.5 baseline.
+// They are added defensively because v0.5 DBs created the parent
+// tables without these columns; CREATE TABLE IF NOT EXISTS in the
+// bootstrap above doesn't touch existing tables, so a v0.5→v0.6+
+// upgrade would otherwise fail with the cryptic
+// "table events has no column named created_by" on the next write.
+var v1Columns = []addMissingColumn{
+	{"events", "created_by", "TEXT NOT NULL DEFAULT '<system>'"},
+	{"claims", "created_by", "TEXT NOT NULL DEFAULT '<system>'"},
+	{"relationships", "created_by", "TEXT NOT NULL DEFAULT '<system>'"},
+	{"claim_status_history", "changed_by", "TEXT NOT NULL DEFAULT '<system>'"},
+	{"embeddings", "created_by", "TEXT NOT NULL DEFAULT '<system>'"},
+}
+
+// migrate applies every column-add this binary knows about to bring an
+// older DB up to currentSchemaVersion. It is invoked after ensureSchema
+// runs the CREATE TABLE statements; new tables added to the schema
+// take care of themselves via CREATE TABLE IF NOT EXISTS, but added
+// columns on pre-existing tables need ALTER TABLE.
+//
+// Strategy: for every (table, column) the binary expects, query
+// PRAGMA table_info and ALTER TABLE ADD COLUMN only if missing. This
+// avoids tracking a brittle linear sequence of migrations — the only
+// state we need is "what columns does this DB have right now". After
+// every ALTER succeeds we bump PRAGMA user_version so future binaries
+// can spot a baseline and skip the column probes when possible.
+func migrate(db *sql.DB) error {
+	var userVersion int
+	if err := db.QueryRow("PRAGMA user_version").Scan(&userVersion); err != nil {
+		return fmt.Errorf("read user_version: %w", err)
+	}
+
+	if userVersion >= currentSchemaVersion {
+		return nil
+	}
+
+	for _, c := range v1Columns {
+		has, err := columnExists(db, c.table, c.column)
+		if err != nil {
+			return fmt.Errorf("inspect %s.%s: %w", c.table, c.column, err)
+		}
+		if has {
+			continue
+		}
+		stmt := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", c.table, c.column, c.def)
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("add %s.%s: %w", c.table, c.column, err)
+		}
+	}
+
+	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", currentSchemaVersion)); err != nil {
+		return fmt.Errorf("set user_version: %w", err)
+	}
+	return nil
+}
+
+// columnExists asks SQLite which columns a table currently has.
+// Cheap (PRAGMA table_info is O(columns)) and the only reliable way
+// to keep the migration idempotent across SQLite versions that don't
+// support ALTER TABLE ... ADD COLUMN IF NOT EXISTS.
+func columnExists(db *sql.DB, table, column string) (bool, error) {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }

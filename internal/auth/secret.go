@@ -60,9 +60,19 @@ func LoadOrCreateSecret(path string) ([]byte, bool, error) {
 }
 
 // DefaultSecretPath returns the default location for the JWT secret
-// file. Project-scoped (.mnemos/) when a project DB is in use, otherwise
-// XDG-equivalent under the user's home.
+// file. Resolution order:
+//  1. MNEMOS_AUTH_DIR env var — explicit override; intended for
+//     read-only-rootfs containers where the writable volume is not
+//     under $HOME (#21).
+//  2. .mnemos/jwt-secret inside the project root, when one is found.
+//  3. $HOME/.mnemos/jwt-secret as the XDG-equivalent fallback.
+//
+// Always returns "jwt-secret" as the basename so callers can compose
+// the full path without re-discovering it.
 func DefaultSecretPath(projectRoot string) string {
+	if dir := strings.TrimSpace(os.Getenv("MNEMOS_AUTH_DIR")); dir != "" {
+		return filepath.Join(dir, "jwt-secret")
+	}
 	if projectRoot != "" {
 		return filepath.Join(projectRoot, ".mnemos", "jwt-secret")
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -163,6 +164,14 @@ func main() {
 		handleAgent(args, flags)
 	case "doctor":
 		handleDoctor(args, flags)
+	case "reset":
+		handleReset(args, flags)
+	case "delete-claim":
+		handleDeleteClaim(args, flags)
+	case "delete-event":
+		handleDeleteEvent(args, flags)
+	case "reembed":
+		handleReembed(args, flags)
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command %q\n", command)
 		if suggestion := suggestCommand(command); suggestion != "" {
@@ -741,17 +750,26 @@ func handleProcess(args []string, f Flags) {
 		}
 
 		// Incremental: compare new claims against previously stored claims.
-		claimRepo := sqlite.NewClaimRepository(db)
-		existingClaims, err := claimRepo.ListAll(ctx)
-		if err != nil {
-			return NewSystemError(err, "failed to load existing claims for incremental detection")
-		}
-		if len(existingClaims) > 0 {
-			incrementalRels, err := relEngine.DetectIncremental(claims, existingClaims)
-			if err != nil {
-				return NewSystemError(err, "incremental relationship detection failed")
+		// Any failure here is surfaced as a warning rather than aborting the
+		// whole job — extraction succeeded, the user's claims should be
+		// persisted, and the next run will pick up the missing edges.
+		// Skipped entirely when --no-relate is set.
+		if !f.NoRelate {
+			claimRepo := sqlite.NewClaimRepository(db)
+			loadCtx, loadCancel := context.WithTimeout(ctx, 30*time.Second)
+			existingClaims, loadErr := claimRepo.ListAll(loadCtx)
+			loadCancel()
+			switch {
+			case loadErr != nil:
+				warnRelateSkipped(loadErr, "loading existing claims")
+			case len(existingClaims) > 0:
+				incrementalRels, incErr := relEngine.DetectIncremental(claims, existingClaims)
+				if incErr != nil {
+					warnRelateSkipped(incErr, "comparing against existing claims")
+				} else {
+					rels = append(rels, incrementalRels...)
+				}
 			}
-			rels = append(rels, incrementalRels...)
 		}
 
 		if err := job.SetStatus("saving", ""); err != nil {
@@ -910,6 +928,12 @@ func printUsage() {
 	fmt.Println("  push [--url U] [--token T]           Send local knowledge to the registry")
 	fmt.Println("  pull [--url U] [--token T]           Fetch knowledge from the registry")
 	fmt.Println("")
+	fmt.Println("Maintenance:")
+	fmt.Println("  reset [--keep-events] [--yes]        Wipe claims/relationships/embeddings (events optional)")
+	fmt.Println("  delete-claim <id> [<id>...]          Delete specific claims and their derived state")
+	fmt.Println("  delete-event <id> [<id>...]          Delete events and cascade to derived claims")
+	fmt.Println("  reembed [--force] [--dry-run]        (Re)generate claim embeddings under the current embed config")
+	fmt.Println("")
 	fmt.Println("Flags:")
 	fmt.Println("  -h, --help     show this help message")
 	fmt.Println("  --version      print version and exit")
@@ -918,6 +942,10 @@ func printUsage() {
 	fmt.Println("  --json         force JSON output (default for non-query commands)")
 	fmt.Println("  --llm          use LLM-powered extraction (requires MNEMOS_LLM_PROVIDER)")
 	fmt.Println("  --embed        generate embeddings for semantic search")
+	fmt.Println("  --no-relate    skip the relate stage in 'process' (faster ingest, no cross-claim edges)")
+	fmt.Println("  --force        with reembed: re-embed all claims, not just those missing")
+	fmt.Println("  --dry-run      with reembed: report what would change without writing")
+	fmt.Println("  -y, --yes      with reset: skip the confirmation prompt")
 	fmt.Println("")
 	fmt.Println("Environment Variables:")
 	fmt.Println("  MNEMOS_DB_PATH         database path (overrides project and global defaults)")
@@ -925,11 +953,20 @@ func printUsage() {
 	fmt.Println("  MNEMOS_LLM_PROVIDER    anthropic, openai, gemini, ollama, openai-compat")
 	fmt.Println("  MNEMOS_LLM_API_KEY     API key (required for cloud providers)")
 	fmt.Println("  MNEMOS_LLM_MODEL       model override (optional)")
-	fmt.Println("  MNEMOS_LLM_BASE_URL    custom endpoint (required for openai-compat)")
+	fmt.Println("  MNEMOS_LLM_BASE_URL    custom endpoint")
+	fmt.Println("                         - required for openai-compat")
+	fmt.Println("                         - required for ollama when not on the same host as Mnemos")
+	fmt.Println("                           (e.g. Mnemos in a container, Ollama on the host:")
+	fmt.Println("                            set http://host.docker.internal:11434 on Docker Desktop)")
+	fmt.Println("                         - defaults to http://localhost:11434 for ollama")
+	fmt.Println("  MNEMOS_LLM_TIMEOUT     per-request LLM HTTP timeout (default 120s; e.g. 60s, 5m)")
+	fmt.Println("  MNEMOS_EXTRACT_MODEL   override MNEMOS_LLM_MODEL just for the extract stage")
+	fmt.Println("  MNEMOS_JOB_TIMEOUT     overall job deadline (default 10m; raise for slow local LLMs)")
 	fmt.Println("  MNEMOS_EMBED_PROVIDER  embedding provider (falls back to LLM provider)")
 	fmt.Println("  MNEMOS_EMBED_API_KEY   embedding API key (falls back to LLM key)")
 	fmt.Println("  MNEMOS_EMBED_MODEL     embedding model override (optional)")
-	fmt.Println("  MNEMOS_EMBED_BASE_URL  embedding endpoint (optional)")
+	fmt.Println("  MNEMOS_EMBED_BASE_URL  embedding endpoint (optional; same container note as MNEMOS_LLM_BASE_URL)")
+	fmt.Println("  MNEMOS_EMBED_TIMEOUT   per-request embedding HTTP timeout (default 60s)")
 }
 
 func parseQueryArgs(args []string) (string, string, int, error) {
@@ -975,6 +1012,41 @@ done:
 	return question, runID, hops, nil
 }
 
+// warnRelateSkipped surfaces an incremental-relate failure as a warning
+// rather than a fatal error. Distinguishes a deadline-exceeded cause —
+// usually upstream budget exhaustion, not a real DB problem — from other
+// failures, and points users at the right knobs.
+func warnRelateSkipped(err error, stage string) {
+	warn := icon("⚠️", "(!)")
+	if errors.Is(err, context.DeadlineExceeded) {
+		fmt.Fprintf(os.Stderr, "\n  %s Skipped incremental relate (%s): job deadline exceeded.\n", warn, stage)
+		fmt.Fprintf(os.Stderr, "    Extracted claims have been persisted; cross-run edges will be picked up next time.\n")
+		fmt.Fprintf(os.Stderr, "    Tune MNEMOS_JOB_TIMEOUT (default 10m) or MNEMOS_LLM_TIMEOUT (default 120s) for slower providers,\n")
+		fmt.Fprintf(os.Stderr, "    or pass --no-relate to skip this stage entirely.\n\n")
+		return
+	}
+	fmt.Fprintf(os.Stderr, "\n  %s Skipped incremental relate (%s): %v\n", warn, stage, err)
+	fmt.Fprintf(os.Stderr, "    Extracted claims have been persisted; cross-run edges will be picked up next time.\n\n")
+}
+
+// jobTimeout returns the per-job workflow timeout, honoring MNEMOS_JOB_TIMEOUT.
+// Defaults to 10 minutes — generous enough for local-LLM extraction over
+// many events. The previous 20s default forced the downstream relate-stage
+// DB read onto an exhausted ctx, surfacing as the misleading "failed to
+// load existing claims: list all claims: context deadline exceeded".
+func jobTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("MNEMOS_JOB_TIMEOUT"))
+	if raw == "" {
+		return 10 * time.Minute
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		fmt.Fprintf(os.Stderr, "warning: invalid MNEMOS_JOB_TIMEOUT=%q (want 60s, 5m, etc.); using 10m\n", raw)
+		return 10 * time.Minute
+	}
+	return d
+}
+
 func runJob(kind string, scope map[string]string, verbose bool, fn func(context.Context, *workflow.Job, *sql.DB) error) error {
 	dbPath := resolveDBPath()
 
@@ -991,7 +1063,7 @@ func runJob(kind string, scope map[string]string, verbose bool, fn func(context.
 	defer closeDB(db)
 
 	runner := workflow.NewRunner(sqlite.NewCompilationJobRepository(db))
-	runner.Timeout = 20 * time.Second
+	runner.Timeout = jobTimeout()
 	runner.MaxRetries = 1
 	runner.Verbose = verbose
 

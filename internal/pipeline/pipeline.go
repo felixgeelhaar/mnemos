@@ -42,6 +42,13 @@ func NewExtractor(useLLM bool) (*Extractor, error) {
 		return nil, fmt.Errorf("LLM configuration error: %s\n  Set MNEMOS_LLM_PROVIDER and MNEMOS_LLM_API_KEY environment variables\n  Providers: anthropic, openai, gemini, ollama, openai-compat", err)
 	}
 
+	// Optional per-stage model override. Lets users pair a strong model
+	// for extraction with a smaller/faster model elsewhere without
+	// editing MNEMOS_LLM_MODEL. Falls back silently to the base config.
+	if override := os.Getenv("MNEMOS_EXTRACT_MODEL"); override != "" {
+		cfg.Model = override
+	}
+
 	client, err := llm.NewClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create LLM client: %w", err)

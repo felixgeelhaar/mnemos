@@ -14,25 +14,33 @@ import (
 // Works with OpenAI, Azure OpenAI, Ollama, Groq, Together, Fireworks,
 // Mistral, vLLM, LM Studio, and any other compatible endpoint.
 type OpenAIClient struct {
-	baseURL string
-	apiKey  string
-	model   string
-	http    *http.Client
+	baseURL  string
+	apiKey   string
+	model    string
+	provider string // for error labels: "openai", "ollama", "openai-compat"
+	http     *http.Client
 }
 
 // NewOpenAIClient creates a client for any OpenAI-compatible API.
-func NewOpenAIClient(baseURL, apiKey, model string) *OpenAIClient {
+// The provider label is used in error messages so users see the provider
+// they actually configured (e.g. "ollama response" not "openai response").
+func NewOpenAIClient(baseURL, apiKey, model, provider string) *OpenAIClient {
+	if provider == "" {
+		provider = "openai"
+	}
 	return &OpenAIClient{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		apiKey:  apiKey,
-		model:   model,
-		http:    defaultLLMHTTPClient(),
+		baseURL:  strings.TrimRight(baseURL, "/"),
+		apiKey:   apiKey,
+		model:    model,
+		provider: provider,
+		http:     defaultLLMHTTPClient(),
 	}
 }
 
 type openAIRequest struct {
 	Model          string             `json:"model"`
 	Messages       []openAIMessage    `json:"messages"`
+	Stream         bool               `json:"stream"` // explicit false: Ollama /api/chat defaults to streaming
 	ResponseFormat *openAIResponseFmt `json:"response_format,omitempty"`
 }
 
@@ -76,6 +84,7 @@ func (c *OpenAIClient) Complete(ctx context.Context, messages []Message) (Respon
 	reqBody := openAIRequest{
 		Model:    c.model,
 		Messages: apiMsgs,
+		Stream:   false,
 	}
 
 	// Enable JSON mode when the system prompt asks for JSON output.
@@ -88,18 +97,20 @@ func (c *OpenAIClient) Complete(ctx context.Context, messages []Message) (Respon
 
 	body, err := json.Marshal(reqBody)
 	if err != nil {
-		return Response{}, fmt.Errorf("marshal openai request: %w", err)
+		return Response{}, fmt.Errorf("marshal %s request: %w", c.provider, err)
 	}
 
-	// Ollama uses /api/chat, standard OpenAI uses /v1/chat/completions.
+	// All supported targets (OpenAI, Ollama, openai-compat backends)
+	// expose /v1/chat/completions. Ollama added the OpenAI-compat path
+	// in v0.1.30 (mid-2024); the legacy /api/chat route used a different
+	// response shape and defaulted to streaming, which produced
+	// concatenated JSON objects and the misleading "invalid character
+	// '{' after top-level value" parse error users hit on ollama.
 	endpoint := c.baseURL + "/v1/chat/completions"
-	if strings.Contains(c.baseURL, ":11434") {
-		endpoint = c.baseURL + "/api/chat"
-	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return Response{}, fmt.Errorf("create openai request: %w", err)
+		return Response{}, fmt.Errorf("create %s request: %w", c.provider, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.apiKey != "" {
@@ -108,30 +119,33 @@ func (c *OpenAIClient) Complete(ctx context.Context, messages []Message) (Respon
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return Response{}, fmt.Errorf("openai request failed: %w", err)
+		return Response{}, fmt.Errorf("%s request failed: %w", c.provider, err)
 	}
 	defer closeBody(resp.Body)
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return Response{}, fmt.Errorf("read openai response: %w", err)
+		return Response{}, fmt.Errorf("read %s response: %w", c.provider, err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return Response{}, fmt.Errorf("openai-compatible API returned status %d: %s", resp.StatusCode, string(respBody))
+		return Response{}, fmt.Errorf("%s API returned status %d: %s", c.provider, resp.StatusCode, string(respBody))
 	}
 
+	// Use a streaming Decoder rather than Unmarshal so a stray trailing
+	// frame (some Ollama versions emit one even with stream=false) does
+	// not fail the whole call. We only need the first JSON object.
 	var result openAIResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return Response{}, fmt.Errorf("unmarshal openai response: %w", err)
+	if err := json.NewDecoder(bytes.NewReader(respBody)).Decode(&result); err != nil {
+		return Response{}, fmt.Errorf("unmarshal %s response: %w", c.provider, err)
 	}
 
 	if result.Error != nil {
-		return Response{}, fmt.Errorf("openai error: %s: %s", result.Error.Type, result.Error.Message)
+		return Response{}, fmt.Errorf("%s error: %s: %s", c.provider, result.Error.Type, result.Error.Message)
 	}
 
 	if len(result.Choices) == 0 {
-		return Response{}, fmt.Errorf("openai returned no choices")
+		return Response{}, fmt.Errorf("%s returned no choices", c.provider)
 	}
 
 	return Response{

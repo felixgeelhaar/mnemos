@@ -9,6 +9,38 @@ import (
 	"context"
 )
 
+const deleteAllEmbeddings = `-- name: DeleteAllEmbeddings :exec
+DELETE FROM embeddings
+`
+
+func (q *Queries) DeleteAllEmbeddings(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, deleteAllEmbeddings)
+	return err
+}
+
+const deleteEmbeddingByEntity = `-- name: DeleteEmbeddingByEntity :exec
+DELETE FROM embeddings WHERE entity_id = ? AND entity_type = ?
+`
+
+type DeleteEmbeddingByEntityParams struct {
+	EntityID   string `json:"entity_id"`
+	EntityType string `json:"entity_type"`
+}
+
+func (q *Queries) DeleteEmbeddingByEntity(ctx context.Context, arg DeleteEmbeddingByEntityParams) error {
+	_, err := q.db.ExecContext(ctx, deleteEmbeddingByEntity, arg.EntityID, arg.EntityType)
+	return err
+}
+
+const deleteEmbeddingsByEntityType = `-- name: DeleteEmbeddingsByEntityType :exec
+DELETE FROM embeddings WHERE entity_type = ?
+`
+
+func (q *Queries) DeleteEmbeddingsByEntityType(ctx context.Context, entityType string) error {
+	_, err := q.db.ExecContext(ctx, deleteEmbeddingsByEntityType, entityType)
+	return err
+}
+
 const getEmbeddingByEntityID = `-- name: GetEmbeddingByEntityID :one
 SELECT entity_id, entity_type, vector, model, dimensions, created_at, created_by
 FROM embeddings
@@ -63,6 +95,36 @@ func (q *Queries) ListEmbeddingsByEntityType(ctx context.Context, entityType str
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEntityIDsMissingEmbedding = `-- name: ListEntityIDsMissingEmbedding :many
+SELECT id FROM claims
+WHERE id NOT IN (SELECT entity_id FROM embeddings WHERE entity_type = 'claim')
+ORDER BY created_at ASC
+`
+
+// Returns claim ids that don't yet have an embedding (entity_type='claim').
+func (q *Queries) ListEntityIDsMissingEmbedding(ctx context.Context) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listEntityIDsMissingEmbedding)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

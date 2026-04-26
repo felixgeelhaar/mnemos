@@ -18,3 +18,21 @@ ON CONFLICT(claim_id, event_id) DO NOTHING;
 SELECT id, text, type, confidence, status, created_at, created_by
 FROM claims
 ORDER BY created_at ASC;
+
+-- name: DeleteClaimByID :exec
+DELETE FROM claims WHERE id = ?;
+
+-- name: DeleteAllClaims :exec
+DELETE FROM claims;
+
+-- name: DeleteClaimEvidenceByClaimID :exec
+DELETE FROM claim_evidence WHERE claim_id = ?;
+
+-- name: DeleteAllClaimEvidence :exec
+DELETE FROM claim_evidence;
+
+-- name: DeleteClaimStatusHistoryByClaimID :exec
+DELETE FROM claim_status_history WHERE claim_id = ?;
+
+-- name: DeleteAllClaimStatusHistory :exec
+DELETE FROM claim_status_history;

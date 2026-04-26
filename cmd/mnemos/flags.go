@@ -4,13 +4,17 @@ import "strings"
 
 // Flags holds parsed CLI flags.
 type Flags struct {
-	Help    bool
-	Version bool
-	Verbose bool
-	Human   bool
-	JSON    bool
-	LLM     bool
-	Embed   bool
+	Help     bool
+	Version  bool
+	Verbose  bool
+	Human    bool
+	JSON     bool
+	LLM      bool
+	Embed    bool
+	NoRelate bool
+	Force    bool
+	DryRun   bool
+	Yes      bool
 	// Actor is the user id to attribute writes to ("--as <id>"). Empty
 	// means "fall back to MNEMOS_USER_ID, then to the <system> sentinel".
 	Actor string
@@ -37,6 +41,14 @@ func ParseFlags(args []string) (Flags, []string) {
 			f.LLM = true
 		case "--embed":
 			f.Embed = true
+		case "--no-relate":
+			f.NoRelate = true
+		case "--force":
+			f.Force = true
+		case "--dry-run":
+			f.DryRun = true
+		case "--yes", "-y":
+			f.Yes = true
 		case "--as":
 			// --as wants the next positional as its value. If the flag
 			// is trailing or followed by another flag, leave Actor empty

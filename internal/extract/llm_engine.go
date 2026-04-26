@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -64,8 +65,12 @@ func (e LLMEngine) Extract(events []domain.Event) ([]domain.Claim, []domain.Clai
 		return nil, nil, nil
 	}
 
-	// Call the LLM.
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Bound the entire extract operation (including up to 3 retries) by
+	// 3x the per-request LLM timeout. This lets MNEMOS_LLM_TIMEOUT govern
+	// both per-call HTTP budget and total extraction budget without a
+	// second knob: the user picks one timeout and gets enough headroom
+	// for retries.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*llm.Timeout())
 	defer cancel()
 
 	messages := []llm.Message{
@@ -225,25 +230,111 @@ func (e LLMEngine) ExtractClaims(events []domain.Event) ([]domain.Claim, error) 
 }
 
 // parseLLMResponse extracts the JSON claim array from the LLM response text.
+// Tolerates common local-LLM output quirks:
+//   - <think>...</think> reasoning blocks (qwen3, deepseek-r1)
+//   - prose preambles before the JSON ("Here are the claims: [...]")
+//   - markdown fences (```json ... ```)
+//   - trailing prose after the JSON
+//
+// Strict-JSON-only models (cloud providers) fall through unchanged.
 func parseLLMResponse(content string) ([]llmClaim, error) {
-	content = strings.TrimSpace(content)
-
-	// Strip markdown fences if the LLM ignored our instruction.
-	if strings.HasPrefix(content, "```") {
-		lines := strings.Split(content, "\n")
-		// Remove first and last lines (fences).
-		if len(lines) >= 3 {
-			content = strings.Join(lines[1:len(lines)-1], "\n")
-		}
-	}
-
-	content = strings.TrimSpace(content)
+	cleaned := sanitizeLLMJSON(content)
 
 	var claims []llmClaim
-	if err := json.Unmarshal([]byte(content), &claims); err != nil {
+	if err := json.Unmarshal([]byte(cleaned), &claims); err != nil {
 		return nil, fmt.Errorf("parse LLM claim JSON: %w", err)
 	}
 	return claims, nil
+}
+
+// thinkBlockRE matches <think>...</think> blocks emitted by reasoning
+// models. Case-insensitive so <THINK>, <Think> etc. all match. The (?s)
+// flag makes . span newlines.
+var thinkBlockRE = regexp.MustCompile(`(?is)<think>.*?</think>`)
+
+// sanitizeLLMJSON strips reasoning tokens, prose, and markdown fences,
+// then extracts the first balanced JSON array or object from the text.
+// Returns the cleaned string ready for json.Unmarshal.
+func sanitizeLLMJSON(content string) string {
+	content = thinkBlockRE.ReplaceAllString(content, "")
+	content = strings.TrimSpace(content)
+
+	// Strip ```json or ``` fences if present. We don't require them to be
+	// the first/last lines because some models put fences mid-response.
+	if idx := strings.Index(content, "```"); idx >= 0 {
+		// Trim through the opening fence and an optional language tag.
+		rest := content[idx+3:]
+		if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
+			rest = rest[nl+1:]
+		}
+		// Trim through the closing fence if present.
+		if end := strings.Index(rest, "```"); end >= 0 {
+			rest = rest[:end]
+		}
+		content = strings.TrimSpace(rest)
+	}
+
+	// Extract the first balanced JSON value (array or object). Falls back
+	// to the trimmed content so callers still see the original parse
+	// error if no JSON is present.
+	if extracted, ok := extractFirstJSONValue(content); ok {
+		return extracted
+	}
+	return content
+}
+
+// extractFirstJSONValue scans s for the first balanced JSON array or
+// object and returns it. Tracks string boundaries so braces inside
+// strings don't confuse the depth counter.
+func extractFirstJSONValue(s string) (string, bool) {
+	start := -1
+	var open, close byte
+	for i := 0; i < len(s); i++ {
+		if s[i] == '[' {
+			start, open, close = i, '[', ']'
+			break
+		}
+		if s[i] == '{' {
+			start, open, close = i, '{', '}'
+			break
+		}
+	}
+	if start < 0 {
+		return "", false
+	}
+
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(s); i++ {
+		c := s[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inString {
+			if c == '\\' {
+				escaped = true
+				continue
+			}
+			if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case open:
+			depth++
+		case close:
+			depth--
+			if depth == 0 {
+				return s[start : i+1], true
+			}
+		}
+	}
+	return "", false
 }
 
 // parseLLMClaimType converts LLM string output to a domain ClaimType.

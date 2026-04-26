@@ -9,6 +9,60 @@ import (
 	"context"
 )
 
+const deleteAllClaimEvidence = `-- name: DeleteAllClaimEvidence :exec
+DELETE FROM claim_evidence
+`
+
+func (q *Queries) DeleteAllClaimEvidence(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, deleteAllClaimEvidence)
+	return err
+}
+
+const deleteAllClaimStatusHistory = `-- name: DeleteAllClaimStatusHistory :exec
+DELETE FROM claim_status_history
+`
+
+func (q *Queries) DeleteAllClaimStatusHistory(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, deleteAllClaimStatusHistory)
+	return err
+}
+
+const deleteAllClaims = `-- name: DeleteAllClaims :exec
+DELETE FROM claims
+`
+
+func (q *Queries) DeleteAllClaims(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, deleteAllClaims)
+	return err
+}
+
+const deleteClaimByID = `-- name: DeleteClaimByID :exec
+DELETE FROM claims WHERE id = ?
+`
+
+func (q *Queries) DeleteClaimByID(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteClaimByID, id)
+	return err
+}
+
+const deleteClaimEvidenceByClaimID = `-- name: DeleteClaimEvidenceByClaimID :exec
+DELETE FROM claim_evidence WHERE claim_id = ?
+`
+
+func (q *Queries) DeleteClaimEvidenceByClaimID(ctx context.Context, claimID string) error {
+	_, err := q.db.ExecContext(ctx, deleteClaimEvidenceByClaimID, claimID)
+	return err
+}
+
+const deleteClaimStatusHistoryByClaimID = `-- name: DeleteClaimStatusHistoryByClaimID :exec
+DELETE FROM claim_status_history WHERE claim_id = ?
+`
+
+func (q *Queries) DeleteClaimStatusHistoryByClaimID(ctx context.Context, claimID string) error {
+	_, err := q.db.ExecContext(ctx, deleteClaimStatusHistoryByClaimID, claimID)
+	return err
+}
+
 const listAllClaims = `-- name: ListAllClaims :many
 SELECT id, text, type, confidence, status, created_at, created_by
 FROM claims

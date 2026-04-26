@@ -46,6 +46,24 @@ func (q *Queries) CreateEvent(ctx context.Context, arg CreateEventParams) error 
 	return err
 }
 
+const deleteAllEvents = `-- name: DeleteAllEvents :exec
+DELETE FROM events
+`
+
+func (q *Queries) DeleteAllEvents(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, deleteAllEvents)
+	return err
+}
+
+const deleteEventByID = `-- name: DeleteEventByID :exec
+DELETE FROM events WHERE id = ?
+`
+
+func (q *Queries) DeleteEventByID(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deleteEventByID, id)
+	return err
+}
+
 const getEventByID = `-- name: GetEventByID :one
 SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at, created_by
 FROM events
@@ -98,6 +116,36 @@ func (q *Queries) ListAllEvents(ctx context.Context) ([]Event, error) {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listClaimsByEventID = `-- name: ListClaimsByEventID :many
+SELECT c.id
+FROM claims c
+JOIN claim_evidence ce ON ce.claim_id = c.id
+WHERE ce.event_id = ?
+`
+
+func (q *Queries) ListClaimsByEventID(ctx context.Context, eventID string) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listClaimsByEventID, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

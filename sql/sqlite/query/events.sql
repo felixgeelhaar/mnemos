@@ -22,3 +22,15 @@ SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata
 FROM events
 WHERE run_id = ?
 ORDER BY timestamp ASC;
+
+-- name: DeleteEventByID :exec
+DELETE FROM events WHERE id = ?;
+
+-- name: DeleteAllEvents :exec
+DELETE FROM events;
+
+-- name: ListClaimsByEventID :many
+SELECT c.id
+FROM claims c
+JOIN claim_evidence ce ON ce.claim_id = c.id
+WHERE ce.event_id = ?;

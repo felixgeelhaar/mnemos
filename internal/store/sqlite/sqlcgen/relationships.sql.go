@@ -9,6 +9,29 @@ import (
 	"context"
 )
 
+const deleteAllRelationships = `-- name: DeleteAllRelationships :exec
+DELETE FROM relationships
+`
+
+func (q *Queries) DeleteAllRelationships(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, deleteAllRelationships)
+	return err
+}
+
+const deleteRelationshipsByClaimID = `-- name: DeleteRelationshipsByClaimID :exec
+DELETE FROM relationships WHERE from_claim_id = ? OR to_claim_id = ?
+`
+
+type DeleteRelationshipsByClaimIDParams struct {
+	FromClaimID string `json:"from_claim_id"`
+	ToClaimID   string `json:"to_claim_id"`
+}
+
+func (q *Queries) DeleteRelationshipsByClaimID(ctx context.Context, arg DeleteRelationshipsByClaimIDParams) error {
+	_, err := q.db.ExecContext(ctx, deleteRelationshipsByClaimID, arg.FromClaimID, arg.ToClaimID)
+	return err
+}
+
 const listRelationshipsByClaim = `-- name: ListRelationshipsByClaim :many
 SELECT id, type, from_claim_id, to_claim_id, created_at, created_by
 FROM relationships

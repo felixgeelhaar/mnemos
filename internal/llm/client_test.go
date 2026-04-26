@@ -78,7 +78,7 @@ func TestOpenAIClientComplete(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewOpenAIClient(server.URL, "test-key", "gpt-4o-mini")
+	client := NewOpenAIClient(server.URL, "test-key", "gpt-4o-mini", "openai")
 	resp, err := client.Complete(context.Background(), []Message{
 		{Role: RoleSystem, Content: "you are helpful"},
 		{Role: RoleUser, Content: "hi"},

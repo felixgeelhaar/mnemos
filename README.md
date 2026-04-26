@@ -142,6 +142,11 @@ mnemos mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over
 | `mnemos metrics` | Knowledge base statistics |
 | `mnemos audit [--include-embeddings]` | Export the full knowledge base as JSON for compliance/backup |
 | `mnemos resolve <winner> --over <loser> [--reason "..."]` | Resolve a contradiction: winner → resolved, loser → deprecated |
+| `mnemos reset [--keep-events] [--yes]` | Wipe claims/relationships/embeddings (events optional) |
+| `mnemos delete-claim <id>...` | Delete specific claims and their derived state |
+| `mnemos delete-event <id>...` | Delete events and cascade to derived claims |
+| `mnemos reembed [--force] [--dry-run]` | (Re)generate claim embeddings under the current embed config |
+| `mnemos process --no-relate ...` | Skip the relate stage for fast ingest; relate later in batch |
 
 ### Claim lifecycle
 
@@ -281,9 +286,47 @@ internal/
 | `MNEMOS_LLM_PROVIDER` | `anthropic`, `openai`, `gemini`, `ollama`, `openai-compat` |
 | `MNEMOS_LLM_API_KEY` | API key (required for cloud providers) |
 | `MNEMOS_LLM_MODEL` | Model override (optional) |
-| `MNEMOS_LLM_BASE_URL` | Custom endpoint (required for `openai-compat`) |
+| `MNEMOS_LLM_BASE_URL` | Custom endpoint. Required for `openai-compat`. **Required for `ollama` when Mnemos is not on the same host as the Ollama daemon** — most commonly when Mnemos runs in a container and Ollama runs on the host (`http://host.docker.internal:11434` on Docker Desktop, `http://172.17.0.1:11434` on Linux). Defaults to `http://localhost:11434` for `ollama`. |
+| `MNEMOS_LLM_TIMEOUT` | Per-request LLM HTTP timeout (default `120s`). Bump for slow local models or large completions: `MNEMOS_LLM_TIMEOUT=5m`. |
+| `MNEMOS_EXTRACT_MODEL` | Override `MNEMOS_LLM_MODEL` just for the extract stage. Lets you pair a strong model for extraction with a smaller model elsewhere. |
+| `MNEMOS_JOB_TIMEOUT` | Overall workflow-job deadline (default `10m`). Raise this if your provider is slow enough that an entire `process` run exceeds 10 minutes. |
 | `MNEMOS_EMBED_PROVIDER` | Embedding provider (falls back to `LLM_PROVIDER`) |
 | `MNEMOS_EMBED_API_KEY` | Embedding API key (falls back to `LLM_API_KEY`) |
+| `MNEMOS_EMBED_MODEL` | Embedding model override (optional) |
+| `MNEMOS_EMBED_BASE_URL` | Embedding endpoint (same container/host caveat as `MNEMOS_LLM_BASE_URL`) |
+| `MNEMOS_EMBED_TIMEOUT` | Per-request embedding HTTP timeout (default `60s`) |
+
+### Local Models (Ollama)
+
+Tested combinations and known quirks. The extract pipeline is tolerant to
+common reasoning-model output (`<think>` blocks, prose preambles, ` ```json `
+fences), so most models work; the table calls out exceptions.
+
+| Model | LLM | Embed | Notes |
+|---|---|---|---|
+| `llama3.2:latest` | ✅ | — | Fast, reliable, clean JSON |
+| `mistral:latest` | ✅ | — | Fast; occasional prose preamble (handled) |
+| `qwen3:*` | ✅ | — | Emits `<think>...</think>` blocks (stripped automatically); pair with `MNEMOS_LLM_TIMEOUT=2m+` if reasoning is long |
+| `deepseek-r1:*` | ✅ | — | Same reasoning-block handling as qwen3 |
+| `gpt-oss:20b` | ⚠️ | — | Strong structured output but slow on consumer hardware → set `MNEMOS_LLM_TIMEOUT=5m` and `MNEMOS_JOB_TIMEOUT=15m` |
+| `gemma3:*` | ❌ | — | No tool/structured-output support in current Ollama builds |
+| `nomic-embed-text` | — | ✅ | 768-dim embeddings, fast; the recommended local embed model |
+
+Quick start for fully-local Mnemos:
+
+```bash
+ollama pull llama3.2 nomic-embed-text
+export MNEMOS_LLM_PROVIDER=ollama
+export MNEMOS_LLM_MODEL=llama3.2
+export MNEMOS_EMBED_MODEL=nomic-embed-text
+mnemos process --llm --embed --text "Your knowledge here"
+```
+
+**Container note.** When Mnemos runs in Docker/Podman and Ollama runs on
+the host, set `MNEMOS_LLM_BASE_URL=http://host.docker.internal:11434`
+(Docker Desktop) or `http://172.17.0.1:11434` (Linux Docker). The default
+`http://localhost:11434` resolves to the container itself and will fail
+with connection refused.
 
 ## Development
 

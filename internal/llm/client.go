@@ -157,7 +157,7 @@ func NewClient(cfg Config) (Client, error) {
 	case ProviderAnthropic:
 		return NewAnthropicClient(cfg.BaseURL, cfg.APIKey, cfg.Model), nil
 	case ProviderOpenAI, ProviderOllama, ProviderOpenAICompat:
-		return NewOpenAIClient(cfg.BaseURL, cfg.APIKey, cfg.Model), nil
+		return NewOpenAIClient(cfg.BaseURL, cfg.APIKey, cfg.Model, string(cfg.Provider)), nil
 	case ProviderGemini:
 		return NewGeminiClient(cfg.BaseURL, cfg.APIKey, cfg.Model), nil
 	default:

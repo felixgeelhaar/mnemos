@@ -204,6 +204,29 @@ CREATE TABLE IF NOT EXISTS claim_entities (
 );
 
 CREATE INDEX IF NOT EXISTS idx_claim_entities_entity_id ON claim_entities(entity_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(event_id UNINDEXED, content);
+CREATE VIRTUAL TABLE IF NOT EXISTS claims_fts USING fts5(claim_id UNINDEXED, text);
+
+CREATE TRIGGER IF NOT EXISTS events_ai_fts AFTER INSERT ON events BEGIN
+	INSERT INTO events_fts(event_id, content) VALUES (new.id, new.content);
+END;
+CREATE TRIGGER IF NOT EXISTS events_ad_fts AFTER DELETE ON events BEGIN
+	DELETE FROM events_fts WHERE event_id = old.id;
+END;
+CREATE TRIGGER IF NOT EXISTS events_au_fts AFTER UPDATE OF content ON events BEGIN
+	UPDATE events_fts SET content = new.content WHERE event_id = old.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS claims_ai_fts AFTER INSERT ON claims BEGIN
+	INSERT INTO claims_fts(claim_id, text) VALUES (new.id, new.text);
+END;
+CREATE TRIGGER IF NOT EXISTS claims_ad_fts AFTER DELETE ON claims BEGIN
+	DELETE FROM claims_fts WHERE claim_id = old.id;
+END;
+CREATE TRIGGER IF NOT EXISTS claims_au_fts AFTER UPDATE OF text ON claims BEGIN
+	UPDATE claims_fts SET text = new.text WHERE claim_id = old.id;
+END;
 `
 
 	if _, err := db.Exec(schema); err != nil {
@@ -220,7 +243,7 @@ CREATE INDEX IF NOT EXISTS idx_claim_entities_entity_id ON claim_entities(entity
 // currentSchemaVersion is the schema generation this binary expects.
 // Bump whenever a column or table is added; pair the bump with a step
 // in addMissingColumns so existing DBs upgrade in place.
-const currentSchemaVersion = 4
+const currentSchemaVersion = 5
 
 // addMissingColumn declares one defensive column-add. Each entry is
 // idempotent: if the column already exists in the table we skip it,
@@ -311,6 +334,24 @@ func migrate(db *sql.DB) error {
 		// pipeline; this only catches rows that predate v0.8.
 		if _, err := db.Exec(`UPDATE claims SET valid_from = created_at WHERE valid_from = ''`); err != nil {
 			return fmt.Errorf("backfill claims.valid_from: %w", err)
+		}
+	}
+
+	if userVersion < 5 {
+		// Backfill the FTS5 indexes. The triggers in the bootstrap
+		// schema keep them current going forward; this catches every
+		// row that existed before v0.10. The empty-target check makes
+		// re-runs idempotent (re-applying schema on a v5 DB sees the
+		// FTS table already populated and adds nothing).
+		if _, err := db.Exec(`INSERT INTO events_fts(event_id, content)
+			SELECT id, content FROM events
+			WHERE id NOT IN (SELECT event_id FROM events_fts)`); err != nil {
+			return fmt.Errorf("backfill events_fts: %w", err)
+		}
+		if _, err := db.Exec(`INSERT INTO claims_fts(claim_id, text)
+			SELECT id, text FROM claims
+			WHERE id NOT IN (SELECT claim_id FROM claims_fts)`); err != nil {
+			return fmt.Errorf("backfill claims_fts: %w", err)
 		}
 	}
 

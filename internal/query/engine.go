@@ -23,12 +23,14 @@ type eventLister interface {
 // Engine answers natural-language questions by ranking events, resolving claims,
 // and detecting contradictions.
 type Engine struct {
-	events        eventLister
-	claims        ports.ClaimRepository
-	relationships ports.RelationshipRepository
-	embeddings    ports.EmbeddingRepository
-	embedClient   embedding.Client
-	llmClient     llm.Client
+	events          eventLister
+	claims          ports.ClaimRepository
+	relationships   ports.RelationshipRepository
+	embeddings      ports.EmbeddingRepository
+	embedClient     embedding.Client
+	llmClient       llm.Client
+	eventTextSearch ports.TextSearcher
+	claimTextSearch ports.TextSearcher
 }
 
 // NewEngine returns an Engine wired to the given event, claim, and relationship stores.
@@ -50,6 +52,18 @@ func (e Engine) WithEmbeddings(repo ports.EmbeddingRepository, client embedding.
 // a fixed template. Falls back to template answers on LLM failure.
 func (e Engine) WithLLM(client llm.Client) Engine {
 	e.llmClient = client
+	return e
+}
+
+// WithTextSearch wires the v0.10 hybrid retrieval path: a BM25
+// keyword index over events and another over claims. When both are
+// set, the engine combines BM25 with cosine similarity (when also
+// available) into a hybrid relevance score; when only BM25 is set,
+// it replaces the legacy token-overlap fallback. Either argument may
+// be nil to opt out of that side.
+func (e Engine) WithTextSearch(events, claims ports.TextSearcher) Engine {
+	e.eventTextSearch = events
+	e.claimTextSearch = claims
 	return e
 }
 
@@ -411,34 +425,41 @@ func (e Engine) computeClaimProvenance(ctx context.Context, claims []domain.Clai
 	return out
 }
 
-// rankEventsWithFallback tries cosine similarity first (if embeddings are available),
-// then falls back to token-overlap ranking.
+// rankEventsWithFallback chooses the best ranking strategy available:
+//   - Hybrid (BM25 + cosine) when both signals are wired up.
+//   - Either signal alone when only one is wired up.
+//   - Legacy token-overlap ranker when neither is available
+//     (in-memory test doubles and embedding-less, FTS-less DBs).
+//
+// Hybrid scoring rationale: BM25 catches lexical / proper-noun
+// matches that embeddings miss; embeddings catch synonyms and
+// paraphrases that BM25 misses. Combining them is a well-trodden
+// retrieval technique that typically yields a +20–40% nDCG over
+// either signal alone — see the "obvious choice" v0.10 design note.
 func (e Engine) rankEventsWithFallback(ctx context.Context, question string, events []domain.Event, limit int) []domain.Event {
-	if e.embeddings != nil && e.embedClient != nil {
-		result, err := e.rankEventsByCosine(ctx, question, events, limit)
-		if err == nil && len(result) > 0 {
-			return result
-		}
-		// Fall through to token overlap on error.
+	cosScores := e.cosineEventScores(ctx, question, events)
+	bm25Scores := e.bm25EventScores(ctx, question, len(events)+limit)
+	if len(cosScores) == 0 && len(bm25Scores) == 0 {
+		return rankEvents(question, events, limit)
 	}
-	return rankEvents(question, events, limit)
+	return rankEventsByHybridScore(events, cosScores, bm25Scores, limit)
 }
 
-// rankEventsByCosine embeds the question and ranks events by cosine similarity
-// against their stored embeddings.
-func (e Engine) rankEventsByCosine(ctx context.Context, question string, events []domain.Event, limit int) ([]domain.Event, error) {
+// cosineEventScores returns a map of event id → cosine similarity
+// against the question embedding, or an empty map when embeddings
+// aren't available (so the caller can detect "no signal").
+func (e Engine) cosineEventScores(ctx context.Context, question string, events []domain.Event) map[string]float64 {
+	if e.embeddings == nil || e.embedClient == nil || len(events) == 0 {
+		return nil
+	}
 	stored, err := e.embeddings.ListByEntityType(ctx, "event")
 	if err != nil || len(stored) == 0 {
-		return nil, fmt.Errorf("no embeddings available")
+		return nil
 	}
-
-	// Build lookup from entity_id → vector.
 	vecByID := make(map[string][]float32, len(stored))
 	for _, rec := range stored {
 		vecByID[rec.EntityID] = rec.Vector
 	}
-
-	// Check that at least some of the candidate events have embeddings.
 	hasAny := false
 	for _, ev := range events {
 		if _, ok := vecByID[ev.ID]; ok {
@@ -447,21 +468,14 @@ func (e Engine) rankEventsByCosine(ctx context.Context, question string, events 
 		}
 	}
 	if !hasAny {
-		return nil, fmt.Errorf("no matching embeddings for candidate events")
+		return nil
 	}
-
-	// Embed the question.
 	qVectors, err := e.embedClient.Embed(ctx, []string{question})
 	if err != nil || len(qVectors) == 0 {
-		return nil, fmt.Errorf("embed question: %w", err)
+		return nil
 	}
 	qVec := qVectors[0]
-
-	type scored struct {
-		event domain.Event
-		score float32
-	}
-	scoredEvents := make([]scored, 0, len(events))
+	out := make(map[string]float64, len(events))
 	for _, ev := range events {
 		vec, ok := vecByID[ev.ID]
 		if !ok {
@@ -469,44 +483,110 @@ func (e Engine) rankEventsByCosine(ctx context.Context, question string, events 
 		}
 		sim, err := embedding.CosineSimilarity(qVec, vec)
 		if err != nil {
-			continue // dimension mismatch — skip this event
+			continue
 		}
-		scoredEvents = append(scoredEvents, scored{event: ev, score: sim})
+		out[ev.ID] = float64(sim)
 	}
-
-	sort.Slice(scoredEvents, func(i, j int) bool {
-		if scoredEvents[i].score == scoredEvents[j].score {
-			return scoredEvents[i].event.Timestamp.After(scoredEvents[j].event.Timestamp)
-		}
-		return scoredEvents[i].score > scoredEvents[j].score
-	})
-
-	out := make([]domain.Event, 0, min(limit, len(scoredEvents)))
-	for i := 0; i < len(scoredEvents) && i < limit; i++ {
-		out = append(out, scoredEvents[i].event)
-	}
-	return out, nil
+	return out
 }
 
-// rankClaimsByCosine reorders claims by cosine similarity to the question when
-// claim embeddings and an embedding client are available. Returns the original
-// order on any error or when embeddings are not configured.
-func (e Engine) rankClaimsByCosine(ctx context.Context, question string, claims []domain.Claim) []domain.Claim {
-	if len(claims) <= 1 || e.embeddings == nil || e.embedClient == nil {
-		return claims
+// bm25EventScores returns event id → BM25 relevance from the FTS5
+// index. Already sign-flipped so higher = better. Empty when no
+// TextSearcher is wired or the search returns nothing.
+func (e Engine) bm25EventScores(ctx context.Context, question string, limit int) map[string]float64 {
+	if e.eventTextSearch == nil {
+		return nil
 	}
+	hits, err := e.eventTextSearch.SearchByText(ctx, question, limit)
+	if err != nil || len(hits) == 0 {
+		return nil
+	}
+	out := make(map[string]float64, len(hits))
+	for _, h := range hits {
+		out[h.ID] = h.Score
+	}
+	return out
+}
 
+// rankEventsByHybridScore combines the two signal maps into one
+// composite score and returns the top-`limit` events. The math is
+// deliberately conservative: max-normalise each signal into [0, 1]
+// independently, then take the equal-weighted sum. This avoids
+// arbitrary weighting decisions while letting either signal dominate
+// when the other is silent.
+func rankEventsByHybridScore(events []domain.Event, cos, bm25 map[string]float64, limit int) []domain.Event {
+	cosMax := maxScore(cos)
+	bmMax := maxScore(bm25)
+
+	type scored struct {
+		event domain.Event
+		score float64
+	}
+	out := make([]scored, 0, len(events))
+	for _, ev := range events {
+		var c, b float64
+		if cosMax > 0 {
+			c = cos[ev.ID] / cosMax
+		}
+		if bmMax > 0 {
+			b = bm25[ev.ID] / bmMax
+		}
+		if c == 0 && b == 0 {
+			// Neither signal saw this event — drop rather than
+			// pretend it's a relevant hit.
+			continue
+		}
+		// When only one signal is present, that score carries the
+		// full weight; when both, equal-weighted average.
+		switch {
+		case cosMax > 0 && bmMax > 0:
+			out = append(out, scored{ev, 0.5*c + 0.5*b})
+		case bmMax > 0:
+			out = append(out, scored{ev, b})
+		default:
+			out = append(out, scored{ev, c})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].score == out[j].score {
+			return out[i].event.Timestamp.After(out[j].event.Timestamp)
+		}
+		return out[i].score > out[j].score
+	})
+	end := limit
+	if end > len(out) {
+		end = len(out)
+	}
+	result := make([]domain.Event, 0, end)
+	for i := 0; i < end; i++ {
+		result = append(result, out[i].event)
+	}
+	return result
+}
+
+func maxScore(m map[string]float64) float64 {
+	max := 0.0
+	for _, v := range m {
+		if v > max {
+			max = v
+		}
+	}
+	return max
+}
+
+// cosineClaimScores mirrors cosineEventScores but for claim embeddings.
+func (e Engine) cosineClaimScores(ctx context.Context, question string, claims []domain.Claim) map[string]float64 {
+	if e.embeddings == nil || e.embedClient == nil || len(claims) == 0 {
+		return nil
+	}
 	stored, err := e.embeddings.ListByEntityType(ctx, "claim")
 	if err != nil || len(stored) == 0 {
-		return claims
+		return nil
 	}
-
 	vecByID := make(map[string][]float32, len(stored))
 	for _, rec := range stored {
 		vecByID[rec.EntityID] = rec.Vector
 	}
-
-	// Check that at least some claims have embeddings.
 	hasAny := false
 	for _, cl := range claims {
 		if _, ok := vecByID[cl.ID]; ok {
@@ -515,34 +595,93 @@ func (e Engine) rankClaimsByCosine(ctx context.Context, question string, claims 
 		}
 	}
 	if !hasAny {
-		return claims
+		return nil
 	}
-
 	qVectors, err := e.embedClient.Embed(ctx, []string{question})
 	if err != nil || len(qVectors) == 0 {
-		return claims
+		return nil
 	}
 	qVec := qVectors[0]
-
-	type scored struct {
-		claim domain.Claim
-		score float32
-		idx   int // original index for stable ordering
-	}
-	scoredClaims := make([]scored, 0, len(claims))
-	for i, cl := range claims {
+	out := make(map[string]float64, len(claims))
+	for _, cl := range claims {
 		vec, ok := vecByID[cl.ID]
 		if !ok {
-			// Keep claims without embeddings at their original position with a low score.
-			scoredClaims = append(scoredClaims, scored{claim: cl, score: -1, idx: i})
 			continue
 		}
 		sim, err := embedding.CosineSimilarity(qVec, vec)
 		if err != nil {
-			scoredClaims = append(scoredClaims, scored{claim: cl, score: -1, idx: i})
 			continue
 		}
-		scoredClaims = append(scoredClaims, scored{claim: cl, score: sim, idx: i})
+		out[cl.ID] = float64(sim)
+	}
+	return out
+}
+
+// bm25ClaimScores mirrors bm25EventScores but for the claims_fts index.
+func (e Engine) bm25ClaimScores(ctx context.Context, question string, limit int) map[string]float64 {
+	if e.claimTextSearch == nil {
+		return nil
+	}
+	hits, err := e.claimTextSearch.SearchByText(ctx, question, limit)
+	if err != nil || len(hits) == 0 {
+		return nil
+	}
+	out := make(map[string]float64, len(hits))
+	for _, h := range hits {
+		out[h.ID] = h.Score
+	}
+	return out
+}
+
+// rankClaimsByCosine reorders claims by relevance to the question.
+// Despite the legacy name, this is now the hybrid ranker: it
+// combines BM25 (when a TextSearcher is wired) with cosine
+// similarity (when embeddings are wired), max-normalising each
+// signal into [0, 1] before equal-weighted summation. Claims with
+// no signal at all retain their original relative position via the
+// idx tiebreak so callers see "embedding-less" claims at the bottom
+// rather than randomly shuffled.
+func (e Engine) rankClaimsByCosine(ctx context.Context, question string, claims []domain.Claim) []domain.Claim {
+	if len(claims) <= 1 {
+		return claims
+	}
+
+	cos := e.cosineClaimScores(ctx, question, claims)
+	bm := e.bm25ClaimScores(ctx, question, len(claims)+10)
+	if len(cos) == 0 && len(bm) == 0 {
+		return claims
+	}
+
+	cosMax := maxScore(cos)
+	bmMax := maxScore(bm)
+
+	type scored struct {
+		claim domain.Claim
+		score float64
+		idx   int // original index for stable ordering of tied / signal-less claims
+	}
+	scoredClaims := make([]scored, 0, len(claims))
+	for i, cl := range claims {
+		var c, b float64
+		if cosMax > 0 {
+			c = cos[cl.ID] / cosMax
+		}
+		if bmMax > 0 {
+			b = bm[cl.ID] / bmMax
+		}
+		var s float64
+		switch {
+		case cosMax > 0 && bmMax > 0:
+			s = 0.5*c + 0.5*b
+		case bmMax > 0:
+			s = b
+		case cosMax > 0:
+			s = c
+		}
+		if s == 0 {
+			s = -1 // signal-less claim; sinks below any positive hit but keeps original order
+		}
+		scoredClaims = append(scoredClaims, scored{claim: cl, score: s, idx: i})
 	}
 
 	sort.Slice(scoredClaims, func(i, j int) bool {

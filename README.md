@@ -332,6 +332,28 @@ trust-scoring policy lives in `internal/trust/trust.go` — change
 the constants there to retune for your corpus, then run
 `mnemos recompute-trust` to backfill.
 
+### Hybrid retrieval (v0.10+)
+
+Mnemos now ranks query results with a hybrid signal:
+
+- **BM25** over an FTS5 keyword index (added v0.10) catches lexical
+  hits — proper nouns, exact terminology, code snippets — that pure
+  cosine misses.
+- **Cosine similarity** over stored embeddings catches paraphrases
+  and synonyms that BM25 misses.
+
+Each signal is max-normalised into `[0, 1]` per query, then
+equal-weighted into a single composite score. When only one signal
+is available (no embeddings yet, or no FTS index for some reason),
+that signal carries full weight without further tuning. The
+in-memory token-overlap ranker survives as the ultimate fallback for
+test doubles and embedding-less, FTS-less deployments.
+
+The FTS5 indexes (`events_fts`, `claims_fts`) are auto-created and
+backfilled on the v0.9 → v0.10 schema migration; no operator action
+required. They're kept current by INSERT/UPDATE/DELETE triggers on
+the source tables so reads don't have to think about staleness.
+
 ### Entity layer (v0.9+)
 
 Mnemos canonicalises noun-phrases ("Felix Geelhaar", "Acme",

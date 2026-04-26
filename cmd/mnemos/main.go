@@ -357,11 +357,13 @@ func handleQuery(args []string, f Flags) {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
+		eventRepo := sqlite.NewEventRepository(db)
+		claimRepo := sqlite.NewClaimRepository(db)
 		engine := query.NewEngine(
-			sqlite.NewEventRepository(db),
-			sqlite.NewClaimRepository(db),
+			eventRepo,
+			claimRepo,
 			sqlite.NewRelationshipRepository(db),
-		)
+		).WithTextSearch(eventRepo, claimRepo)
 
 		if f.Embed {
 			printProgress("semantic search: preparing query embeddings")

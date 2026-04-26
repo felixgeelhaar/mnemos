@@ -46,6 +46,25 @@ type EmbeddingRepository interface {
 	ListByEntityType(ctx context.Context, entityType string) ([]domain.EmbeddingRecord, error)
 }
 
+// TextHit is one row of a keyword search: the matched row's id and a
+// positive relevance score (higher is better). Returned by
+// TextSearcher implementations so the query engine can rank without
+// caring whether the underlying index is FTS5, Lucene, or anything
+// else.
+type TextHit struct {
+	ID    string
+	Score float64
+}
+
+// TextSearcher exposes a keyword (BM25-style) search index over a
+// table of text rows. Optional capability: the query engine type-
+// asserts on this and falls back to cosine + token-overlap when the
+// repository doesn't implement it (older test doubles, in-memory
+// fakes, etc.).
+type TextSearcher interface {
+	SearchByText(ctx context.Context, query string, limit int) ([]TextHit, error)
+}
+
 // UserRepository persists and retrieves user identities.
 type UserRepository interface {
 	Create(ctx context.Context, user domain.User) error

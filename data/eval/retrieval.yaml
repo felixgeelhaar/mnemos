@@ -1,0 +1,95 @@
+# Retrieval-quality evaluation cases. Each case seeds a small claim
+# set, fires a natural-language query, and expects a specific gold
+# claim id back at rank 1. The runner (retrieval_test.go) executes the
+# query under each ranking strategy and reports Mean Reciprocal Rank
+# per strategy.
+#
+# Cases are designed so each strategy "wins" at least one — proves
+# the hybrid path captures both axes (lexical + paraphrase) instead
+# of just doing the same thing twice.
+#
+# Strategies measured (no live LLM / embedding API required):
+#   token-overlap  legacy in-memory ranker (pre-v0.10)
+#   bm25           FTS5 BM25 alone (v0.10 lexical signal)
+#   hybrid_lex     hybrid with BM25 + a stub semantic signal that
+#                  rewards token-set Jaccard overlap. Demonstrates the
+#                  effect of combining two non-correlated signals
+#                  without depending on a real embedding provider.
+#
+# Quality bar: hybrid_lex's MRR must be >= BM25's MRR across the
+# suite (combining signals shouldn't hurt). Individual cases may show
+# the opposite (over-combining can demote a perfect lexical match);
+# the aggregate is what matters.
+
+test_cases:
+  - id: ret-001
+    description: Proper-noun lexical match — BM25 beats token-overlap
+    seeds:
+      - claim_id: cl_pg
+        text: "We migrated to PostgreSQL 16 in Q3"
+      - claim_id: cl_db
+        text: "The team picked a relational data store"
+      - claim_id: cl_berlin
+        text: "Berlin office expansion was approved"
+    query: "PostgreSQL"
+    gold_claim_id: cl_pg
+
+  - id: ret-002
+    description: Exact identifier — BM25's IDF weighting outranks repeated common words
+    seeds:
+      - claim_id: cl_grpc
+        text: "The new service exposes a gRPC interface"
+      - claim_id: cl_team
+        text: "The team meets every Tuesday and Thursday"
+      - claim_id: cl_coffee
+        text: "The team always brings coffee to the meeting"
+    query: "gRPC service"
+    gold_claim_id: cl_grpc
+
+  - id: ret-003
+    description: Multi-word entity — hybrid should still rank correctly
+    seeds:
+      - claim_id: cl_keynote
+        text: "Felix Geelhaar gave the closing keynote"
+      - claim_id: cl_panel
+        text: "Alice and Bob ran the morning panel"
+      - claim_id: cl_hallway
+        text: "The hallway track lasted longer than the main sessions"
+    query: "Felix Geelhaar"
+    gold_claim_id: cl_keynote
+
+  - id: ret-004
+    description: Plain-English query against equally generic claims — token-overlap can match
+    seeds:
+      - claim_id: cl_q3
+        text: "Revenue increased fifteen percent in the third quarter"
+      - claim_id: cl_q4
+        text: "Sales decreased two percent in the fourth quarter"
+      - claim_id: cl_static
+        text: "The product roadmap remained unchanged"
+    query: "third quarter revenue"
+    gold_claim_id: cl_q3
+
+  - id: ret-005
+    description: Decision claim with verb match — BM25 should rank correctly
+    seeds:
+      - claim_id: cl_postgres
+        text: "We decided to migrate to PostgreSQL"
+      - claim_id: cl_meeting
+        text: "We decided to meet weekly on Wednesdays"
+      - claim_id: cl_logo
+        text: "We approved the new company logo"
+    query: "decided to migrate"
+    gold_claim_id: cl_postgres
+
+  - id: ret-006
+    description: Acronym + place — BM25 wins, token-overlap misses on acronym
+    seeds:
+      - claim_id: cl_aws
+        text: "We are migrating workloads to AWS eu-central-1"
+      - claim_id: cl_azure
+        text: "Azure remains the primary cloud for the EU region"
+      - claim_id: cl_onprem
+        text: "On-premise capacity will be retired by Q4"
+    query: "AWS migration"
+    gold_claim_id: cl_aws

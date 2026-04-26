@@ -15,9 +15,33 @@ VALUES (?, ?)
 ON CONFLICT(claim_id, event_id) DO NOTHING;
 
 -- name: ListAllClaims :many
-SELECT id, text, type, confidence, status, created_at, created_by
+SELECT id, text, type, confidence, status, created_at, created_by, trust_score
 FROM claims
 ORDER BY created_at ASC;
+
+-- name: UpdateClaimTrust :exec
+UPDATE claims SET trust_score = ? WHERE id = ?;
+
+-- name: ListClaimTrustInputs :many
+-- Inputs to recompute trust_score for every claim: confidence, the
+-- distinct evidence-event count, and the most-recent evidence event
+-- timestamp. LEFT JOIN so claims with no evidence still appear; the
+-- caller treats the missing aggregate as 0/empty.
+SELECT
+  c.id              AS claim_id,
+  c.confidence      AS confidence,
+  COUNT(DISTINCT ce.event_id) AS evidence_count,
+  CAST(COALESCE(MAX(e.timestamp), '') AS TEXT) AS latest_evidence_at
+FROM claims c
+LEFT JOIN claim_evidence ce ON ce.claim_id = c.id
+LEFT JOIN events e          ON e.id = ce.event_id
+GROUP BY c.id, c.confidence;
+
+-- name: AverageTrust :one
+SELECT CAST(COALESCE(AVG(trust_score), 0) AS REAL) AS avg_trust FROM claims;
+
+-- name: CountClaimsBelowTrust :one
+SELECT COUNT(*) AS n FROM claims WHERE trust_score < ?;
 
 -- name: DeleteClaimByID :exec
 DELETE FROM claims WHERE id = ?;

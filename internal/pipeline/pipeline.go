@@ -19,6 +19,7 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/llm"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
+	"github.com/felixgeelhaar/mnemos/internal/trust"
 )
 
 // Extractor wraps either the rule-based or LLM-powered extraction engine,
@@ -163,7 +164,32 @@ func PersistArtifacts(ctx context.Context, db *sql.DB, events []domain.Event, cl
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit transaction: %w", err)
 	}
+
+	// Trust scoring runs after the artifact transaction commits so the
+	// trust query can see the just-inserted evidence rows. Doing it
+	// inside the same tx would race against itself: the LEFT JOIN we
+	// use to count evidence sees uncommitted rows on the same conn,
+	// but the recompute path uses a fresh tx for safety. We accept the
+	// "trust briefly stale between commit and recompute" window —
+	// callers querying this DB right at that instant just see the
+	// previous trust_score. Failure of the trust pass is non-fatal:
+	// the artifacts are already persisted and a future
+	// `mnemos recompute-trust` will fix any drift.
+	repo := sqlite.NewClaimRepository(db)
+	if _, err := repo.RecomputeTrust(ctx, defaultTrustScorer()); err != nil {
+		return fmt.Errorf("recompute trust: %w", err)
+	}
 	return nil
+}
+
+// defaultTrustScorer wraps internal/trust.Score with a real wall
+// clock. Defined here (rather than inlined) so tests can swap in a
+// fixed clock if/when we add an integration test for the persist
+// → trust pipeline.
+func defaultTrustScorer() func(confidence float64, evidenceCount int, latestEvidence time.Time) float64 {
+	return func(confidence float64, evidenceCount int, latestEvidence time.Time) float64 {
+		return trust.Score(confidence, evidenceCount, latestEvidence, time.Now().UTC())
+	}
 }
 
 // GenerateEmbeddings creates vector embeddings for the given events and stores

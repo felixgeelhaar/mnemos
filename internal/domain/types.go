@@ -88,7 +88,8 @@ type Claim struct {
 	Confidence float64
 	Status     ClaimStatus
 	CreatedAt  time.Time
-	CreatedBy  string // user id of the actor that created this claim; "<system>" for unattributed
+	CreatedBy  string  // user id of the actor that created this claim; "<system>" for unattributed
+	TrustScore float64 // derived from confidence × corroboration × freshness; computed by internal/trust
 }
 
 // ClaimEvidence links a Claim to the Event that supports it.

@@ -8,9 +8,14 @@ import (
 	"os"
 	"strings"
 
+	"strconv"
+	"time"
+
 	"github.com/felixgeelhaar/mnemos/internal/embedding"
+	"github.com/felixgeelhaar/mnemos/internal/pipeline"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
+	"github.com/felixgeelhaar/mnemos/internal/trust"
 	"github.com/felixgeelhaar/mnemos/internal/workflow"
 )
 
@@ -160,6 +165,122 @@ func handleDeleteEvent(args []string, f Flags) {
 			return NewSystemError(err, "delete-event failed")
 		}
 		fmt.Printf("Deleted %d event(s); cascaded %d claim(s).\n", deletedEvents, cascadedClaims)
+		return nil
+	})
+	exitWithMnemosError(f.Verbose, err)
+}
+
+// handleDedupe runs the semantic-dedupe pipeline against the local
+// claim store. Defaults to dry-run because the operation is
+// destructive (claims are merged, others deleted); --apply commits.
+//
+// Threshold default 0.92 is conservative on purpose. Lowering to
+// 0.85 catches more paraphrases but also more legitimate distinct
+// claims. Users should re-tune for their corpus.
+func handleDedupe(args []string, f Flags) {
+	threshold := 0.92
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--threshold":
+			if i+1 >= len(args) {
+				exitWithMnemosError(false, NewUserError("--threshold requires a value in (0, 1]"))
+				return
+			}
+			t, err := strconv.ParseFloat(args[i+1], 64)
+			if err != nil || t <= 0 || t > 1 {
+				exitWithMnemosError(false, NewUserError("--threshold must be a float in (0, 1]"))
+				return
+			}
+			threshold = t
+			i++
+		default:
+			exitWithMnemosError(false, NewUserError("unknown argument %q for dedup", args[i]))
+			return
+		}
+	}
+
+	// --apply must be opt-in; default is dry-run. We borrow Flags.Force
+	// for "yes really apply this" so users get a single mental model
+	// across reembed, dedupe, etc.
+	apply := f.Force
+	if !apply && !f.DryRun {
+		// Neither flag set → still default to dry-run, just say so.
+		f.DryRun = true
+	}
+
+	err := runJob("dedup", map[string]string{
+		"threshold": strconv.FormatFloat(threshold, 'f', 2, 64),
+		"apply":     fmt.Sprintf("%t", apply),
+	}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB) error {
+		plan, err := pipeline.PlanSemanticDedupe(ctx, db, threshold)
+		if err != nil {
+			return NewSystemError(err, "plan semantic dedupe")
+		}
+		printDedupePlan(plan)
+		if !apply {
+			fmt.Println("\nDry run. Re-run with --force to apply.")
+			return nil
+		}
+		merged, err := pipeline.ApplySemanticDedupe(ctx, db, plan)
+		if err != nil {
+			return NewSystemError(err, "apply semantic dedupe")
+		}
+		fmt.Printf("\nMerged %d duplicate claim(s).\n", merged)
+		// Trust ranking depends on the evidence count we just
+		// changed; recompute so the next query sees fresh scores.
+		repo := sqlite.NewClaimRepository(db)
+		now := time.Now().UTC()
+		if _, err := repo.RecomputeTrust(ctx, func(confidence float64, evidenceCount int, latestEvidence time.Time) float64 {
+			return trust.Score(confidence, evidenceCount, latestEvidence, now)
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "  warning: post-dedupe trust recompute failed: %v\n", err)
+		}
+		return nil
+	})
+	exitWithMnemosError(f.Verbose, err)
+}
+
+func printDedupePlan(plan pipeline.SemanticDedupePlan) {
+	fmt.Printf("Semantic dedupe plan (threshold=%.2f)\n", plan.Threshold)
+	fmt.Printf("  scanned:   %d claim(s) with embeddings\n", plan.ClaimsScanned)
+	if plan.SkippedNoEmbedding > 0 {
+		fmt.Printf("  skipped:   %d claim(s) without embeddings (run 'mnemos reembed' to include them)\n", plan.SkippedNoEmbedding)
+	}
+	if len(plan.Merges) == 0 {
+		fmt.Println("  no near-duplicates found.")
+		return
+	}
+	fmt.Printf("  proposing: %d merge(s)\n", len(plan.Merges))
+	for i, m := range plan.Merges {
+		fmt.Printf("    %d. winner=%s sim=%.3f absorbs %d duplicate(s): %s\n",
+			i+1, m.WinnerID, m.MaxSimilarity, len(m.DuplicateIDs), strings.Join(m.DuplicateIDs, ", "))
+	}
+}
+
+// handleRecomputeTrust rebuilds trust_score for every claim under the
+// current scoring policy. Useful after upgrading (the v1→v2 migration
+// adds the column with default 0; this command actually populates
+// it), after tuning the trust constants in internal/trust, or as a
+// nightly cron via `mnemos schedule`.
+func handleRecomputeTrust(args []string, f Flags) {
+	for _, a := range args {
+		if a != "--all" {
+			fmt.Fprintf(os.Stderr, "error: unknown argument %q for recompute-trust\n", a)
+			fmt.Fprintln(os.Stderr, "  mnemos recompute-trust [--all]")
+			os.Exit(int(ExitUsage))
+		}
+	}
+
+	err := runJob("recompute-trust", map[string]string{}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB) error {
+		repo := sqlite.NewClaimRepository(db)
+		now := time.Now().UTC()
+		n, err := repo.RecomputeTrust(ctx, func(confidence float64, evidenceCount int, latestEvidence time.Time) float64 {
+			return trust.Score(confidence, evidenceCount, latestEvidence, now)
+		})
+		if err != nil {
+			return NewSystemError(err, "recompute trust")
+		}
+		fmt.Printf("Recomputed trust for %d claim(s).\n", n)
 		return nil
 	})
 	exitWithMnemosError(f.Verbose, err)

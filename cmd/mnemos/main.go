@@ -172,6 +172,10 @@ func main() {
 		handleDeleteEvent(args, flags)
 	case "reembed":
 		handleReembed(args, flags)
+	case "recompute-trust":
+		handleRecomputeTrust(args, flags)
+	case "dedup":
+		handleDedupe(args, flags)
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command %q\n", command)
 		if suggestion := suggestCommand(command); suggestion != "" {
@@ -321,10 +325,11 @@ func handleIngest(args []string, f Flags) {
 }
 
 func handleQuery(args []string, f Flags) {
-	question, runID, hops, err := parseQueryArgs(args)
+	qa, err := parseQueryArgs(args)
 	if err != nil {
 		exitWithMnemosError(f.Verbose, err)
 	}
+	question, runID, hops, minTrust := qa.question, qa.runID, qa.hops, qa.minTrust
 
 	scope := map[string]string{"question": question}
 	if runID != "" {
@@ -332,6 +337,9 @@ func handleQuery(args []string, f Flags) {
 	}
 	if hops > 0 {
 		scope["hops"] = strconv.Itoa(hops)
+	}
+	if minTrust > 0 {
+		scope["min_trust"] = strconv.FormatFloat(minTrust, 'f', 2, 64)
 	}
 
 	err = runJob("query", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
@@ -378,7 +386,7 @@ func handleQuery(args []string, f Flags) {
 		}
 		var answer domain.Answer
 		var queryErr error
-		opts := query.AnswerOptions{Hops: hops}
+		opts := query.AnswerOptions{Hops: hops, MinTrust: minTrust}
 		if runID != "" {
 			answer, queryErr = engine.AnswerForRunWithOptions(question, runID, opts)
 		} else {
@@ -490,6 +498,12 @@ func printHumanReadableAnswer(question string, answer domain.Answer) {
 			}
 
 			fmt.Printf("  %d. [%s] %s%s\n", i+1, typeLabel, claim.Text, status)
+			// Trust line: only printed when the score has been
+			// computed (>0). On older DBs the column is 0 by default
+			// until the first `recompute-trust` run.
+			if claim.TrustScore > 0 {
+				fmt.Printf("        trust=%.2f  conf=%.2f\n", claim.TrustScore, claim.Confidence)
+			}
 		}
 		fmt.Println("")
 	}
@@ -840,6 +854,15 @@ func handleMetrics(f Flags) {
 			return err
 		}
 
+		// Trust stats: 0.5 is the floor for "low-trust" — under that
+		// the claim is failing on at least one of confidence,
+		// corroboration, or freshness. Tunable via the constant
+		// internal/trust.LowTrustThreshold if it ever wants a knob.
+		const lowTrustThreshold = 0.5
+		claimRepo := sqlite.NewClaimRepository(db)
+		avgTrust, _ := claimRepo.AverageTrust(ctx)
+		lowTrust, _ := claimRepo.CountClaimsBelowTrust(ctx, lowTrustThreshold)
+
 		metrics := map[string]any{
 			"runs":                countValue(db, `SELECT COUNT(DISTINCT run_id) FROM events WHERE run_id <> ''`),
 			"events":              countValue(db, `SELECT COUNT(*) FROM events`),
@@ -848,6 +871,9 @@ func handleMetrics(f Flags) {
 			"relationships":       countValue(db, `SELECT COUNT(*) FROM relationships`),
 			"contradictions":      countValue(db, `SELECT COUNT(*) FROM relationships WHERE type = 'contradicts'`),
 			"embeddings":          countValue(db, `SELECT COUNT(*) FROM embeddings`),
+			"avg_trust":           roundTo(avgTrust, 3),
+			"low_trust_count":     lowTrust,
+			"low_trust_threshold": lowTrustThreshold,
 			"llm_cache_entries":   cacheEntryCount(),
 			"prompt_version":      extract.PromptVersion,
 			"eval_cases":          78,
@@ -863,6 +889,8 @@ func handleMetrics(f Flags) {
 			fmt.Printf("Relationships: %v\n", metrics["relationships"])
 			fmt.Printf("Contradictions: %v\n", metrics["contradictions"])
 			fmt.Printf("Embeddings: %v\n", metrics["embeddings"])
+			fmt.Printf("Avg trust: %.3f\n", avgTrust)
+			fmt.Printf("Low-trust claims (< %.2f): %v\n", lowTrustThreshold, lowTrust)
 			fmt.Printf("LLM cache entries: %v\n", metrics["llm_cache_entries"])
 			fmt.Printf("Eval cases: %v\n", metrics["eval_cases"])
 			fmt.Printf("Prompt version: %v\n", metrics["prompt_version"])
@@ -877,6 +905,16 @@ func handleMetrics(f Flags) {
 		return nil
 	})
 	exitWithMnemosError(f.Verbose, err)
+}
+
+// roundTo trims a float to n decimal places. Used for metrics so the
+// JSON output isn't a floating-point dust trail.
+func roundTo(f float64, n int) float64 {
+	shift := 1.0
+	for i := 0; i < n; i++ {
+		shift *= 10
+	}
+	return float64(int64(f*shift+0.5)) / shift
 }
 
 func countValue(db *sql.DB, query string) int64 {
@@ -949,6 +987,8 @@ func printUsage() {
 	fmt.Println("  delete-claim <id> [<id>...]          Delete specific claims and their derived state")
 	fmt.Println("  delete-event <id> [<id>...]          Delete events and cascade to derived claims")
 	fmt.Println("  reembed [--force] [--dry-run]        (Re)generate claim embeddings under the current embed config")
+	fmt.Println("  recompute-trust [--all]              Rebuild trust_score for every claim under the current policy")
+	fmt.Println("  dedup [--threshold T] [--force]      Merge near-duplicate claims by embedding similarity (dry-run by default)")
 	fmt.Println("")
 	fmt.Println("Flags:")
 	fmt.Println("  -h, --help     show this help message")
@@ -959,8 +999,9 @@ func printUsage() {
 	fmt.Println("  --llm          use LLM-powered extraction (requires MNEMOS_LLM_PROVIDER)")
 	fmt.Println("  --embed        generate embeddings for semantic search")
 	fmt.Println("  --no-relate    skip the relate stage in 'process' (faster ingest, no cross-claim edges)")
-	fmt.Println("  --force        with reembed: re-embed all claims, not just those missing")
-	fmt.Println("  --dry-run      with reembed: report what would change without writing")
+	fmt.Println("  --force        with reembed/dedup: actually apply (default is dry-run)")
+	fmt.Println("  --dry-run      report what would change without writing")
+	fmt.Println("  --min-trust X  query: only return claims with trust_score ≥ X (X in [0, 1])")
 	fmt.Println("  -y, --yes      with reset: skip the confirmation prompt")
 	fmt.Println("")
 	fmt.Println("Environment Variables:")
@@ -985,34 +1026,54 @@ func printUsage() {
 	fmt.Println("  MNEMOS_EMBED_TIMEOUT   per-request embedding HTTP timeout (default 60s)")
 }
 
-func parseQueryArgs(args []string) (string, string, int, error) {
+// queryArgs bundles the parsed --flag values for `mnemos query`.
+// Returned as a struct so adding the next flag doesn't churn every
+// caller's signature (parseQueryArgs went from 3-tuple to needing
+// MinTrust; the next addition will likely be --at for v0.8 temporal).
+type queryArgs struct {
+	question string
+	runID    string
+	hops     int
+	minTrust float64
+}
+
+func parseQueryArgs(args []string) (queryArgs, error) {
 	if len(args) == 0 {
-		return "", "", 0, NewUserError("query requires a question")
+		return queryArgs{}, NewUserError("query requires a question")
 	}
 
-	runID := ""
-	hops := 0
+	out := queryArgs{}
 	questionArgs := args
 	for len(questionArgs) > 0 {
 		switch questionArgs[0] {
 		case "--run":
 			if len(questionArgs) < 3 {
-				return "", "", 0, NewUserError("--run flag requires <run-id> followed by a question")
+				return queryArgs{}, NewUserError("--run flag requires <run-id> followed by a question")
 			}
-			runID = strings.TrimSpace(questionArgs[1])
-			if runID == "" {
-				return "", "", 0, NewUserError("--run flag requires a non-empty run-id")
+			out.runID = strings.TrimSpace(questionArgs[1])
+			if out.runID == "" {
+				return queryArgs{}, NewUserError("--run flag requires a non-empty run-id")
 			}
 			questionArgs = questionArgs[2:]
 		case "--hops":
 			if len(questionArgs) < 2 {
-				return "", "", 0, NewUserError("--hops flag requires a value")
+				return queryArgs{}, NewUserError("--hops flag requires a value")
 			}
 			n, err := strconv.Atoi(questionArgs[1])
 			if err != nil || n < 0 || n > 5 {
-				return "", "", 0, NewUserError("--hops must be an integer in [0, 5]")
+				return queryArgs{}, NewUserError("--hops must be an integer in [0, 5]")
 			}
-			hops = n
+			out.hops = n
+			questionArgs = questionArgs[2:]
+		case "--min-trust":
+			if len(questionArgs) < 2 {
+				return queryArgs{}, NewUserError("--min-trust flag requires a value in [0, 1]")
+			}
+			v, err := strconv.ParseFloat(questionArgs[1], 64)
+			if err != nil || v < 0 || v > 1 {
+				return queryArgs{}, NewUserError("--min-trust must be a float in [0, 1]")
+			}
+			out.minTrust = v
 			questionArgs = questionArgs[2:]
 		default:
 			goto done
@@ -1020,12 +1081,12 @@ func parseQueryArgs(args []string) (string, string, int, error) {
 	}
 done:
 
-	question := strings.TrimSpace(strings.Join(questionArgs, " "))
-	if question == "" {
-		return "", "", 0, NewUserError("query requires a question")
+	out.question = strings.TrimSpace(strings.Join(questionArgs, " "))
+	if out.question == "" {
+		return queryArgs{}, NewUserError("query requires a question")
 	}
 
-	return question, runID, hops, nil
+	return out, nil
 }
 
 // warnRelateSkipped surfaces an incremental-relate failure as a warning

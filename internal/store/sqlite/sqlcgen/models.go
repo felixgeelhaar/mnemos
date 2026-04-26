@@ -22,6 +22,7 @@ type Claim struct {
 	Status     string  `json:"status"`
 	CreatedAt  string  `json:"created_at"`
 	CreatedBy  string  `json:"created_by"`
+	TrustScore float64 `json:"trust_score"`
 }
 
 type ClaimEvidence struct {

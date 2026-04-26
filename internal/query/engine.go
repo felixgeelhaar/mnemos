@@ -56,8 +56,11 @@ func (e Engine) WithLLM(client llm.Client) Engine {
 // default behavior to learn a new constructor signature. Hops controls
 // graph-expansion of the directly-retrieved claim set: 0 means no expansion,
 // N means follow up to N supports/contradicts edges from the seed claims.
+// MinTrust filters out claims whose computed trust_score (see internal/trust)
+// is strictly below the threshold; 0 disables the filter.
 type AnswerOptions struct {
-	Hops int
+	Hops     int
+	MinTrust float64
 }
 
 // Answer searches all stored events for the best answer to the given question.
@@ -121,6 +124,19 @@ func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents
 	claims, err := e.claims.ListByEventIDs(ctx, eventIDs)
 	if err != nil {
 		return domain.Answer{}, fmt.Errorf("load claims for query: %w", err)
+	}
+
+	// Filter out low-trust claims before ranking — saves work on the
+	// cosine pass and prevents low-trust noise from displacing
+	// high-trust answers in the top-N.
+	if opts.MinTrust > 0 {
+		filtered := make([]domain.Claim, 0, len(claims))
+		for _, c := range claims {
+			if c.TrustScore >= opts.MinTrust {
+				filtered = append(filtered, c)
+			}
+		}
+		claims = filtered
 	}
 
 	// Re-rank claims by semantic similarity when embeddings are available.

@@ -146,6 +146,9 @@ mnemos mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over
 | `mnemos delete-claim <id>...` | Delete specific claims and their derived state |
 | `mnemos delete-event <id>...` | Delete events and cascade to derived claims |
 | `mnemos reembed [--force] [--dry-run]` | (Re)generate claim embeddings under the current embed config |
+| `mnemos recompute-trust` | Rebuild `trust_score` for every claim (confidence × corroboration × freshness) |
+| `mnemos dedup [--threshold T] [--force]` | Merge near-duplicate claims by embedding cosine similarity (dry-run by default) |
+| `mnemos query --min-trust X "..."` | Only return claims whose `trust_score` ≥ X |
 | `mnemos process --no-relate ...` | Skip the relate stage for fast ingest; relate later in batch |
 
 ### Claim lifecycle
@@ -297,6 +300,29 @@ internal/
 | `MNEMOS_EMBED_TIMEOUT` | Per-request embedding HTTP timeout (default `60s`) |
 | `MNEMOS_AUTH_DIR` | Directory for the JWT signing secret (default: project `.mnemos/` or `$HOME/.mnemos/`). Override when running on a read-only rootfs (Docker `read_only: true`, k8s `readOnlyRootFilesystem: true`) by pointing at a writable volume. |
 | `MNEMOS_JWT_SECRET` | Hex-encoded JWT signing secret (≥32 bytes). When set, takes precedence over the file path; useful in CI/Kubernetes where you'd rather inject the secret as an env var than mount a file. |
+
+### Trust scoring (v0.7+)
+
+Every claim carries a `trust_score ∈ [0, 1]` derived from three
+signals the LLM cannot fake:
+
+```
+trust = confidence × corroboration × freshness
+
+corroboration = 1 + ln(evidence_count) × 0.2     # 1 source: 1.0; 5: 1.32; 20: 1.60
+freshness     = max(0.3, exp(-days_since_latest / 90))   # 90-day half-life, floor 0.3
+```
+
+The score is recomputed automatically after every `process` run; you
+can rebuild it manually with `mnemos recompute-trust` (e.g., after
+upgrading or tuning the constants in `internal/trust`).
+
+`mnemos query --min-trust 0.5 "..."` filters out low-confidence
+results before ranking. `mnemos metrics` reports `avg_trust` and
+`low_trust_count` for at-a-glance corpus quality. The
+trust-scoring policy lives in `internal/trust/trust.go` — change
+the constants there to retune for your corpus, then run
+`mnemos recompute-trust` to backfill.
 
 ### Upgrading
 

@@ -1,0 +1,116 @@
+package trust
+
+import (
+	"math"
+	"testing"
+	"time"
+)
+
+func TestScore_ConfidenceFloorAndCeiling(t *testing.T) {
+	now := time.Date(2026, 4, 26, 0, 0, 0, 0, time.UTC)
+
+	if got := Score(-0.5, 1, now, now); got < 0 || got > 1 {
+		t.Fatalf("negative confidence should clamp; got %v", got)
+	}
+	if got := Score(2.0, 1, now, now); got < 0 || got > 1 {
+		t.Fatalf(">1 confidence should clamp; got %v", got)
+	}
+	if got := Score(0, 1, now, now); got != 0 {
+		t.Fatalf("zero confidence should score zero; got %v", got)
+	}
+}
+
+func TestScore_SingleFreshSourceMatchesConfidence(t *testing.T) {
+	now := time.Date(2026, 4, 26, 0, 0, 0, 0, time.UTC)
+	got := Score(0.9, 1, now, now)
+	// 1 source → corroboration = 1.0; same-day → freshness = 1.0
+	if math.Abs(got-0.9) > 1e-9 {
+		t.Fatalf("single fresh source: got %v, want 0.9", got)
+	}
+}
+
+func TestScore_CorroborationBoosts(t *testing.T) {
+	now := time.Date(2026, 4, 26, 0, 0, 0, 0, time.UTC)
+	one := Score(0.7, 1, now, now)
+	five := Score(0.7, 5, now, now)
+	twenty := Score(0.7, 20, now, now)
+
+	if !(five > one) {
+		t.Fatalf("5 sources should outscore 1; got %v vs %v", five, one)
+	}
+	if !(twenty > five) {
+		t.Fatalf("20 sources should outscore 5; got %v vs %v", twenty, five)
+	}
+	// Logarithmic shape: gap 1→5 should be larger than 5→20.
+	if (five - one) <= (twenty - five) {
+		t.Fatalf("expected diminishing returns: 1→5 gap %v should exceed 5→20 gap %v", five-one, twenty-five)
+	}
+}
+
+func TestScore_FreshnessDecays(t *testing.T) {
+	now := time.Date(2026, 4, 26, 0, 0, 0, 0, time.UTC)
+	fresh := Score(0.9, 1, now, now)
+	month := Score(0.9, 1, now.Add(-30*24*time.Hour), now)
+	year := Score(0.9, 1, now.Add(-365*24*time.Hour), now)
+
+	if !(fresh > month) {
+		t.Fatalf("month-old should be lower than fresh; got fresh=%v month=%v", fresh, month)
+	}
+	if !(month > year) {
+		t.Fatalf("year-old should be lower than month-old; got month=%v year=%v", month, year)
+	}
+	// Floor: even the year-old claim must stay above FreshnessFloor*confidence.
+	if year < 0.9*FreshnessFloor {
+		t.Fatalf("year-old should not drop below floor*confidence (%v); got %v", 0.9*FreshnessFloor, year)
+	}
+}
+
+func TestScore_FreshnessFloorIsRespected(t *testing.T) {
+	now := time.Date(2026, 4, 26, 0, 0, 0, 0, time.UTC)
+	// 10 years old, but Paris is still the capital of France.
+	old := Score(0.95, 1, now.Add(-10*365*24*time.Hour), now)
+	if old < 0.95*FreshnessFloor-1e-9 {
+		t.Fatalf("ancient evidence should not collapse below floor; got %v", old)
+	}
+}
+
+func TestScore_ZeroLatestEvidenceDisablesFreshness(t *testing.T) {
+	// Backfill case: callers that haven't loaded evidence yet pass
+	// the zero timestamp; we should not punish them with stale-decay.
+	now := time.Date(2026, 4, 26, 0, 0, 0, 0, time.UTC)
+	got := Score(0.8, 3, time.Time{}, now)
+	want := 0.8 * (1 + math.Log(3)*CorroborationCoefficient)
+	if math.Abs(got-want) > 1e-9 {
+		t.Fatalf("zero timestamp should disable freshness; got %v want %v", got, want)
+	}
+}
+
+func TestScore_FutureTimestampActsAsFresh(t *testing.T) {
+	// Clock skew or a manually-stamped event in the future shouldn't
+	// produce an out-of-range score.
+	now := time.Date(2026, 4, 26, 0, 0, 0, 0, time.UTC)
+	got := Score(0.9, 1, now.Add(7*24*time.Hour), now)
+	if got != 0.9 {
+		t.Fatalf("future timestamp should score as fresh; got %v want 0.9", got)
+	}
+}
+
+func TestScore_StayInUnitInterval(t *testing.T) {
+	now := time.Date(2026, 4, 26, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		confidence float64
+		evCount    int
+		evAge      time.Duration
+	}{
+		{0.95, 100, 0},
+		{0.99, 1000, -1 * 24 * time.Hour},
+		{0.5, 500, 0},
+		{0.0, 1, 1000 * 24 * time.Hour},
+	}
+	for _, c := range cases {
+		got := Score(c.confidence, c.evCount, now.Add(-c.evAge), now)
+		if got < 0 || got > 1 {
+			t.Fatalf("trust %v out of [0,1] for case %+v", got, c)
+		}
+	}
+}

@@ -74,8 +74,12 @@ CREATE TABLE IF NOT EXISTS claims (
 	confidence REAL NOT NULL,
 	status TEXT NOT NULL,
 	created_at TEXT NOT NULL,
-	created_by TEXT NOT NULL DEFAULT '<system>'
+	created_by TEXT NOT NULL DEFAULT '<system>',
+	trust_score REAL NOT NULL DEFAULT 0
 );
+-- idx_claims_trust_score is created by migrate() after the v1→v2
+-- ALTER TABLE adds trust_score on legacy DBs. Defining it here would
+-- run before the column exists on those upgrades.
 
 CREATE TABLE IF NOT EXISTS claim_evidence (
 	claim_id TEXT NOT NULL,
@@ -190,7 +194,7 @@ CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
 // currentSchemaVersion is the schema generation this binary expects.
 // Bump whenever a column or table is added; pair the bump with a step
 // in addMissingColumns so existing DBs upgrade in place.
-const currentSchemaVersion = 1
+const currentSchemaVersion = 2
 
 // addMissingColumn declares one defensive column-add. Each entry is
 // idempotent: if the column already exists in the table we skip it,
@@ -201,19 +205,30 @@ type addMissingColumn struct {
 	def    string // full column definition appended after ADD COLUMN
 }
 
-// v1Columns is the set of columns introduced after the v0.5 baseline.
-// They are added defensively because v0.5 DBs created the parent
-// tables without these columns; CREATE TABLE IF NOT EXISTS in the
-// bootstrap above doesn't touch existing tables, so a v0.5→v0.6+
-// upgrade would otherwise fail with the cryptic
-// "table events has no column named created_by" on the next write.
-var v1Columns = []addMissingColumn{
+// expectedColumns is the set of columns added after the v0.5 baseline
+// across all schema generations this binary knows about. Each entry
+// is added defensively: pre-existing tables don't pick up new columns
+// from CREATE TABLE IF NOT EXISTS, so v0.5→v0.6+ upgrades would
+// otherwise fail with the cryptic "table events has no column named
+// created_by" on the next write.
+//
+// The order matters only when a later column references an earlier
+// one (none today). Newest schema generation last is fine.
+var expectedColumns = []addMissingColumn{
+	// v1 — auth-era audit columns.
 	{"events", "created_by", "TEXT NOT NULL DEFAULT '<system>'"},
 	{"claims", "created_by", "TEXT NOT NULL DEFAULT '<system>'"},
 	{"relationships", "created_by", "TEXT NOT NULL DEFAULT '<system>'"},
 	{"claim_status_history", "changed_by", "TEXT NOT NULL DEFAULT '<system>'"},
 	{"embeddings", "created_by", "TEXT NOT NULL DEFAULT '<system>'"},
+	// v2 — derived trust score.
+	{"claims", "trust_score", "REAL NOT NULL DEFAULT 0"},
 }
+
+// v1Columns is the legacy alias kept for any external callers (and for
+// tests that assert legacy migration behavior). New work should append
+// to expectedColumns instead.
+var v1Columns = expectedColumns
 
 // migrate applies every column-add this binary knows about to bring an
 // older DB up to currentSchemaVersion. It is invoked after ensureSchema
@@ -237,7 +252,7 @@ func migrate(db *sql.DB) error {
 		return nil
 	}
 
-	for _, c := range v1Columns {
+	for _, c := range expectedColumns {
 		has, err := columnExists(db, c.table, c.column)
 		if err != nil {
 			return fmt.Errorf("inspect %s.%s: %w", c.table, c.column, err)
@@ -249,6 +264,15 @@ func migrate(db *sql.DB) error {
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("add %s.%s: %w", c.table, c.column, err)
 		}
+	}
+
+	// Indexes that depend on migrated columns. Run after the column
+	// adds above so legacy DBs don't fail with "no such column".
+	const postMigrateIndexes = `
+CREATE INDEX IF NOT EXISTS idx_claims_trust_score ON claims(trust_score);
+`
+	if _, err := db.Exec(postMigrateIndexes); err != nil {
+		return fmt.Errorf("post-migrate indexes: %w", err)
 	}
 
 	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d", currentSchemaVersion)); err != nil {

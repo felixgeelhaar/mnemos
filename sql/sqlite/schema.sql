@@ -22,8 +22,11 @@ CREATE TABLE IF NOT EXISTS claims (
   confidence REAL NOT NULL,
   status TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  created_by TEXT NOT NULL DEFAULT '<system>'
+  created_by TEXT NOT NULL DEFAULT '<system>',
+  trust_score REAL NOT NULL DEFAULT 0
 );
+
+CREATE INDEX IF NOT EXISTS idx_claims_trust_score ON claims(trust_score);
 
 CREATE TABLE IF NOT EXISTS claim_evidence (
   claim_id TEXT NOT NULL,

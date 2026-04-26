@@ -164,7 +164,7 @@ func (r ClaimRepository) ListByEventIDs(ctx context.Context, eventIDs []string) 
 	}
 
 	query := fmt.Sprintf(`
-SELECT DISTINCT c.id, c.text, c.type, c.confidence, c.status, c.created_at, c.created_by
+SELECT DISTINCT c.id, c.text, c.type, c.confidence, c.status, c.created_at, c.created_by, c.trust_score
 FROM claims c
 JOIN claim_evidence ce ON ce.claim_id = c.id
 WHERE ce.event_id IN (%s)
@@ -295,7 +295,7 @@ func (r ClaimRepository) ListByIDs(ctx context.Context, claimIDs []string) ([]do
 	}
 
 	query := fmt.Sprintf(`
-SELECT id, text, type, confidence, status, created_at, created_by
+SELECT id, text, type, confidence, status, created_at, created_by, trust_score
 FROM claims
 WHERE id IN (%s)`, strings.Join(placeholders, ",")) //nolint:gosec // G201: placeholders are literal "?" strings, not user input
 
@@ -317,6 +317,56 @@ WHERE id IN (%s)`, strings.Join(placeholders, ",")) //nolint:gosec // G201: plac
 		return nil, fmt.Errorf("iterate claims by ids rows: %w", err)
 	}
 	return out, nil
+}
+
+// RecomputeTrust recalculates trust_score for every claim based on its
+// confidence, the count of distinct corroborating events, and the
+// freshness of the most recent evidence. Returns the number of claims
+// touched. Caller supplies the scoring function (typically
+// trust.Score) so the repository stays free of policy decisions.
+func (r ClaimRepository) RecomputeTrust(ctx context.Context, score func(confidence float64, evidenceCount int, latestEvidence time.Time) float64) (int, error) {
+	rows, err := r.q.ListClaimTrustInputs(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("list trust inputs: %w", err)
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	qtx := r.q.WithTx(tx)
+	for _, row := range rows {
+		var latest time.Time
+		if row.LatestEvidenceAt != "" {
+			if t, perr := time.Parse(time.RFC3339Nano, row.LatestEvidenceAt); perr == nil {
+				latest = t
+			}
+		}
+		s := score(row.Confidence, int(row.EvidenceCount), latest)
+		if err := qtx.UpdateClaimTrust(ctx, sqlcgen.UpdateClaimTrustParams{
+			TrustScore: s,
+			ID:         row.ClaimID,
+		}); err != nil {
+			return 0, fmt.Errorf("update trust for %s: %w", row.ClaimID, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit trust update: %w", err)
+	}
+	return len(rows), nil
+}
+
+// AverageTrust returns the mean trust_score across all claims; 0 when
+// the table is empty.
+func (r ClaimRepository) AverageTrust(ctx context.Context) (float64, error) {
+	return r.q.AverageTrust(ctx)
+}
+
+// CountClaimsBelowTrust returns how many claims fall under the given
+// trust_score threshold. Useful for the metrics output and for
+// surfacing low-quality knowledge to the user.
+func (r ClaimRepository) CountClaimsBelowTrust(ctx context.Context, threshold float64) (int64, error) {
+	return r.q.CountClaimsBelowTrust(ctx, threshold)
 }
 
 // ListAll returns every claim stored in the database.
@@ -346,6 +396,7 @@ func mapSQLClaim(row sqlcgen.Claim) (domain.Claim, error) {
 		Confidence: row.Confidence,
 		Status:     domain.ClaimStatus(row.Status),
 		CreatedBy:  row.CreatedBy,
+		TrustScore: row.TrustScore,
 	}
 
 	t, err := time.Parse(time.RFC3339Nano, row.CreatedAt)
@@ -381,6 +432,7 @@ func scanClaim(scanner claimRowScanner) (domain.Claim, error) {
 		&status,
 		&createdAt,
 		&claim.CreatedBy,
+		&claim.TrustScore,
 	); err != nil {
 		return domain.Claim{}, err
 	}

@@ -9,6 +9,28 @@ import (
 	"context"
 )
 
+const averageTrust = `-- name: AverageTrust :one
+SELECT CAST(COALESCE(AVG(trust_score), 0) AS REAL) AS avg_trust FROM claims
+`
+
+func (q *Queries) AverageTrust(ctx context.Context) (float64, error) {
+	row := q.db.QueryRowContext(ctx, averageTrust)
+	var avg_trust float64
+	err := row.Scan(&avg_trust)
+	return avg_trust, err
+}
+
+const countClaimsBelowTrust = `-- name: CountClaimsBelowTrust :one
+SELECT COUNT(*) AS n FROM claims WHERE trust_score < ?
+`
+
+func (q *Queries) CountClaimsBelowTrust(ctx context.Context, trustScore float64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countClaimsBelowTrust, trustScore)
+	var n int64
+	err := row.Scan(&n)
+	return n, err
+}
+
 const deleteAllClaimEvidence = `-- name: DeleteAllClaimEvidence :exec
 DELETE FROM claim_evidence
 `
@@ -64,7 +86,7 @@ func (q *Queries) DeleteClaimStatusHistoryByClaimID(ctx context.Context, claimID
 }
 
 const listAllClaims = `-- name: ListAllClaims :many
-SELECT id, text, type, confidence, status, created_at, created_by
+SELECT id, text, type, confidence, status, created_at, created_by, trust_score
 FROM claims
 ORDER BY created_at ASC
 `
@@ -86,6 +108,7 @@ func (q *Queries) ListAllClaims(ctx context.Context) ([]Claim, error) {
 			&i.Status,
 			&i.CreatedAt,
 			&i.CreatedBy,
+			&i.TrustScore,
 		); err != nil {
 			return nil, err
 		}
@@ -98,6 +121,71 @@ func (q *Queries) ListAllClaims(ctx context.Context) ([]Claim, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const listClaimTrustInputs = `-- name: ListClaimTrustInputs :many
+SELECT
+  c.id              AS claim_id,
+  c.confidence      AS confidence,
+  COUNT(DISTINCT ce.event_id) AS evidence_count,
+  CAST(COALESCE(MAX(e.timestamp), '') AS TEXT) AS latest_evidence_at
+FROM claims c
+LEFT JOIN claim_evidence ce ON ce.claim_id = c.id
+LEFT JOIN events e          ON e.id = ce.event_id
+GROUP BY c.id, c.confidence
+`
+
+type ListClaimTrustInputsRow struct {
+	ClaimID          string  `json:"claim_id"`
+	Confidence       float64 `json:"confidence"`
+	EvidenceCount    int64   `json:"evidence_count"`
+	LatestEvidenceAt string  `json:"latest_evidence_at"`
+}
+
+// Inputs to recompute trust_score for every claim: confidence, the
+// distinct evidence-event count, and the most-recent evidence event
+// timestamp. LEFT JOIN so claims with no evidence still appear; the
+// caller treats the missing aggregate as 0/empty.
+func (q *Queries) ListClaimTrustInputs(ctx context.Context) ([]ListClaimTrustInputsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listClaimTrustInputs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListClaimTrustInputsRow
+	for rows.Next() {
+		var i ListClaimTrustInputsRow
+		if err := rows.Scan(
+			&i.ClaimID,
+			&i.Confidence,
+			&i.EvidenceCount,
+			&i.LatestEvidenceAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateClaimTrust = `-- name: UpdateClaimTrust :exec
+UPDATE claims SET trust_score = ? WHERE id = ?
+`
+
+type UpdateClaimTrustParams struct {
+	TrustScore float64 `json:"trust_score"`
+	ID         string  `json:"id"`
+}
+
+func (q *Queries) UpdateClaimTrust(ctx context.Context, arg UpdateClaimTrustParams) error {
+	_, err := q.db.ExecContext(ctx, updateClaimTrust, arg.TrustScore, arg.ID)
+	return err
 }
 
 const upsertClaim = `-- name: UpsertClaim :exec

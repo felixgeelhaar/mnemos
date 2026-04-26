@@ -176,6 +176,10 @@ func main() {
 		handleRecomputeTrust(args, flags)
 	case "dedup":
 		handleDedupe(args, flags)
+	case "entities":
+		handleEntities(args, flags)
+	case "extract-entities":
+		handleExtractEntities(args, flags)
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command %q\n", command)
 		if suggestion := suggestCommand(command); suggestion != "" {
@@ -330,7 +334,7 @@ func handleQuery(args []string, f Flags) {
 		exitWithMnemosError(f.Verbose, err)
 	}
 	question, runID, hops, minTrust := qa.question, qa.runID, qa.hops, qa.minTrust
-	asOf, includeHistory := qa.asOf, qa.includeHistory
+	asOf, includeHistory, entity := qa.asOf, qa.includeHistory, qa.entity
 
 	scope := map[string]string{"question": question}
 	if runID != "" {
@@ -398,6 +402,24 @@ func handleQuery(args []string, f Flags) {
 			MinTrust:       minTrust,
 			AsOf:           asOf,
 			IncludeHistory: includeHistory,
+		}
+		if entity != "" {
+			entRepo := sqlite.NewEntityRepository(db)
+			ent, ok, rErr := resolveEntity(ctx, entRepo, entity)
+			if rErr != nil {
+				return NewSystemError(rErr, "resolve entity %q", entity)
+			}
+			if !ok {
+				return NewUserError("no entity matching %q (try `mnemos entities list`)", entity)
+			}
+			opts.AllowedClaimIDs = make(map[string]struct{})
+			ents, eErr := entRepo.ListClaimsForEntity(ctx, ent.ID)
+			if eErr != nil {
+				return NewSystemError(eErr, "load claims for entity")
+			}
+			for _, c := range ents {
+				opts.AllowedClaimIDs[c.ID] = struct{}{}
+			}
 		}
 		if runID != "" {
 			answer, queryErr = engine.AnswerForRunWithOptions(question, runID, opts)
@@ -623,7 +645,7 @@ func handleExtract(args []string, f Flags) {
 		if err != nil {
 			return err
 		}
-		claims, links, err := ext.ExtractFn(events)
+		claims, links, entities, err := ext.ExtractFn(events)
 		if err != nil {
 			return NewSystemError(err, "extraction failed")
 		}
@@ -641,6 +663,16 @@ func handleExtract(args []string, f Flags) {
 		}
 		if err := claimRepo.UpsertEvidence(ctx, links); err != nil {
 			return NewSystemError(err, "failed to persist claim evidence links")
+		}
+
+		// Materialise entities from the LLM tags. Same non-fatal
+		// treatment as the process command — claims are persisted;
+		// entities are an enrichment.
+		if n, entErr := pipeline.MaterializeEntities(ctx, db, entities, actor); entErr != nil {
+			warn := icon("⚠️", "(!)")
+			fmt.Fprintf(os.Stderr, "  %s entity materialisation failed at link %d: %v\n", warn, n, entErr)
+		} else if n > 0 {
+			printProgress("entities: linked %d entity reference(s)", n)
 		}
 
 		fmt.Printf("events=%d claims=%d evidence_links=%d db=%s\n", len(events), len(claims), len(links), resolveDBPath())
@@ -765,7 +797,7 @@ func handleProcess(args []string, f Flags) {
 		if f.LLM {
 			printProgress("llm extraction: sending content to %s", os.Getenv("MNEMOS_LLM_PROVIDER"))
 		}
-		claims, links, err := ext.ExtractFn(events)
+		claims, links, entities, err := ext.ExtractFn(events)
 		if err != nil {
 			return NewSystemError(err, "claim extraction failed")
 		}
@@ -831,6 +863,17 @@ func handleProcess(args []string, f Flags) {
 			return err
 		}
 
+		// Materialise entities the LLM tagged on each claim. Failure
+		// here is non-fatal — claims persist; a future
+		// `mnemos extract-entities` can backfill any that didn't
+		// land. Surfaced as a warning so the operator knows.
+		if n, entErr := pipeline.MaterializeEntities(ctx, db, entities, actor); entErr != nil {
+			warn := icon("⚠️", "(!)")
+			fmt.Fprintf(os.Stderr, "\n  %s Entity materialisation failed at link %d: %v\n", warn, n, entErr)
+		} else if n > 0 {
+			printProgress("entities: linked %d entity reference(s) across %d claim(s)", n, len(entities))
+		}
+
 		if f.Embed {
 			if err := job.SetStatus("embedding", ""); err != nil {
 				return err
@@ -881,6 +924,7 @@ func handleMetrics(f Flags) {
 		claimRepo := sqlite.NewClaimRepository(db)
 		avgTrust, _ := claimRepo.AverageTrust(ctx)
 		lowTrust, _ := claimRepo.CountClaimsBelowTrust(ctx, lowTrustThreshold)
+		entityCount, _ := sqlite.NewEntityRepository(db).Count(ctx)
 
 		metrics := map[string]any{
 			"runs":                countValue(db, `SELECT COUNT(DISTINCT run_id) FROM events WHERE run_id <> ''`),
@@ -893,6 +937,7 @@ func handleMetrics(f Flags) {
 			"avg_trust":           roundTo(avgTrust, 3),
 			"low_trust_count":     lowTrust,
 			"low_trust_threshold": lowTrustThreshold,
+			"entities":            entityCount,
 			"llm_cache_entries":   cacheEntryCount(),
 			"prompt_version":      extract.PromptVersion,
 			"eval_cases":          78,
@@ -910,6 +955,7 @@ func handleMetrics(f Flags) {
 			fmt.Printf("Embeddings: %v\n", metrics["embeddings"])
 			fmt.Printf("Avg trust: %.3f\n", avgTrust)
 			fmt.Printf("Low-trust claims (< %.2f): %v\n", lowTrustThreshold, lowTrust)
+			fmt.Printf("Entities: %v\n", entityCount)
 			fmt.Printf("LLM cache entries: %v\n", metrics["llm_cache_entries"])
 			fmt.Printf("Eval cases: %v\n", metrics["eval_cases"])
 			fmt.Printf("Prompt version: %v\n", metrics["prompt_version"])
@@ -986,6 +1032,11 @@ func printUsage() {
 	fmt.Println("  query --min-trust X <question>       Only return claims with trust_score >= X (X in [0, 1])")
 	fmt.Println("  query --at YYYY-MM-DD <question>     Point-in-time query against the temporal-validity layer")
 	fmt.Println("  query --include-history <question>   Include superseded claims (off by default)")
+	fmt.Println("  query --entity <name|id> <question>  Restrict the answer to claims linked to this entity")
+	fmt.Println("  entities list [--type T]             List canonicalised entities (people/orgs/projects/...)")
+	fmt.Println("  entities show <name|id>              Show one entity and the claims linked to it")
+	fmt.Println("  entities merge <winner> <loser>      Collapse one entity into another (manual canonicalisation)")
+	fmt.Println("  extract-entities [--all]             Backfill entity links over claims that lack them")
 	fmt.Println("  metrics [--human]                    Knowledge base statistics")
 	fmt.Println("  audit [--include-embeddings]         Export the full knowledge base as JSON")
 	fmt.Println("  resolve <winner> --over <loser>      Resolve a contradiction: winner -> resolved, loser -> deprecated")
@@ -1059,6 +1110,7 @@ type queryArgs struct {
 	minTrust       float64
 	asOf           time.Time
 	includeHistory bool
+	entity         string // filter answer to claims linked to this entity (id or name)
 }
 
 func parseQueryArgs(args []string) (queryArgs, error) {
@@ -1112,6 +1164,12 @@ func parseQueryArgs(args []string) (queryArgs, error) {
 		case "--include-history":
 			out.includeHistory = true
 			questionArgs = questionArgs[1:]
+		case "--entity":
+			if len(questionArgs) < 2 {
+				return queryArgs{}, NewUserError("--entity requires a name or id")
+			}
+			out.entity = strings.TrimSpace(questionArgs[1])
+			questionArgs = questionArgs[2:]
 		default:
 			goto done
 		}

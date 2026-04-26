@@ -583,11 +583,15 @@ func mcpRunProcessText(ctx context.Context, actor string, input mcpProcessTextIn
 		if err != nil {
 			return err
 		}
-		claims, links, err := ext.ExtractFn(events)
+		claims, links, mcpEntities, err := ext.ExtractFn(events)
 		if err != nil {
 			return err
 		}
 		_ = progress.Report(2, &total)
+		// MCP path defers entity materialisation to the
+		// post-PersistArtifacts step at the end of this handler so
+		// the audit/persist transaction stays focused on artifacts.
+		_ = mcpEntities
 
 		if err := job.SetStatus("relating", ""); err != nil {
 			return err
@@ -620,6 +624,13 @@ func mcpRunProcessText(ctx context.Context, actor string, input mcpProcessTextIn
 		stampRelationshipActor(rels, actor)
 		if err := pipeline.PersistArtifacts(ctx, db, events, claims, links, rels); err != nil {
 			return err
+		}
+		// Best-effort entity materialisation; failures are logged
+		// but don't abort the MCP response. The agent caller cares
+		// about the answer; entity tagging is enrichment that can
+		// be backfilled via `mnemos extract-entities`.
+		if _, entErr := pipeline.MaterializeEntities(ctx, db, mcpEntities, actor); entErr != nil {
+			fmt.Fprintf(os.Stderr, "  entity materialisation (mcp) failed: %v\n", entErr)
 		}
 
 		embeddingCount := 0

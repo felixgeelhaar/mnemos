@@ -71,6 +71,12 @@ type AnswerOptions struct {
 	MinTrust       float64
 	AsOf           time.Time
 	IncludeHistory bool
+	// AllowedClaimIDs, when non-nil, restricts the answer set to
+	// claims whose id is in the map. Used by `query --entity` to
+	// constrain results to a single entity's claims without
+	// rewriting the retrieval pipeline. nil disables the filter
+	// (the common case).
+	AllowedClaimIDs map[string]struct{}
 }
 
 // Answer searches all stored events for the best answer to the given question.
@@ -134,6 +140,20 @@ func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents
 	claims, err := e.claims.ListByEventIDs(ctx, eventIDs)
 	if err != nil {
 		return domain.Answer{}, fmt.Errorf("load claims for query: %w", err)
+	}
+
+	// Entity scope: if the caller restricted the answer to claims
+	// linked to a specific entity (--entity in the CLI), drop
+	// everything else before ranking. The map is small (one entity's
+	// worth of claim ids); the filter is O(claims).
+	if opts.AllowedClaimIDs != nil {
+		filtered := make([]domain.Claim, 0, len(claims))
+		for _, c := range claims {
+			if _, ok := opts.AllowedClaimIDs[c.ID]; ok {
+				filtered = append(filtered, c)
+			}
+		}
+		claims = filtered
 	}
 
 	// Filter out low-trust claims before ranking — saves work on the

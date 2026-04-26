@@ -258,7 +258,7 @@ func ingestSingleDoc(
 	for i := range events {
 		events[i].RunID = runID
 	}
-	claims, links, err := extractor.ExtractFn(events)
+	claims, links, autoEntities, err := extractor.ExtractFn(events)
 	if err != nil {
 		return fmt.Errorf("extract: %w", err)
 	}
@@ -285,6 +285,13 @@ func ingestSingleDoc(
 	stampRelationshipActor(rels, actor)
 	if err := pipeline.PersistArtifacts(ctx, db, events, claims, links, rels); err != nil {
 		return fmt.Errorf("persist: %w", err)
+	}
+	// Best-effort entity materialisation. Auto-ingest runs in a
+	// watcher loop; a transient failure here shouldn't pause file
+	// re-ingestion. The next manual `mnemos extract-entities` will
+	// catch up anything that didn't land.
+	if _, entErr := pipeline.MaterializeEntities(ctx, db, autoEntities, actor); entErr != nil {
+		fmt.Fprintf(os.Stderr, "auto-ingest: entity materialisation failed: %v\n", entErr)
 	}
 	generateEmbeddingsBestEffort(ctx, db, events, claims)
 	return nil

@@ -7,7 +7,7 @@ import (
 
 // PromptVersion tracks the extraction prompt revision. Bump when changing
 // the system prompt to invalidate cached results.
-const PromptVersion = "v1.3"
+const PromptVersion = "v1.4"
 
 const systemPrompt = `You are Mnemos, a knowledge extraction engine. Your job is to extract discrete, evidence-backed claims from source text.
 
@@ -30,31 +30,45 @@ Rules:
    - Single-word acknowledgements or status emojis: "Done", "OK", "Yes", "No", "✅", "👍 noted"
    - Imperatives without a fact payload: "Let me check that", "I'll do this"
    - Headers, boilerplate, or meta-commentary about the document itself
+8. For each claim, list the named entities it mentions in an "entities" array.
+   - Each entity object has "name" (verbatim from text or canonical), "type", and optional "role".
+   - "type" is one of: "person", "org", "project", "product", "place", "concept".
+   - "role" is one of: "subject" (the claim is about this entity), "object" (acted on or referenced), "mention" (passing reference). Default "mention" if unsure.
+   - Omit the array entirely (or return []) when no named entities are present.
+   - Do NOT invent entities. Only list ones present in the source text.
 
 Output format — a JSON array of objects:
 [
   {
     "text": "the claim text",
     "type": "fact|decision|hypothesis",
-    "confidence": 0.85
+    "confidence": 0.85,
+    "entities": [
+      {"name": "Felix", "type": "person", "role": "subject"}
+    ]
   }
 ]
 
 Examples:
 
-Input: "Q2 revenue grew 18%. We will expand to Germany next quarter. Customers might prefer annual billing."
+Input: "Q2 revenue grew 18%. Acme will expand to Germany next quarter. Customers might prefer annual billing."
 Output:
 [
-  {"text": "Q2 revenue grew 18%", "type": "fact", "confidence": 0.92},
-  {"text": "We will expand to Germany next quarter", "type": "decision", "confidence": 0.85},
-  {"text": "Customers might prefer annual billing", "type": "hypothesis", "confidence": 0.58}
+  {"text": "Q2 revenue grew 18%", "type": "fact", "confidence": 0.92, "entities": []},
+  {"text": "Acme will expand to Germany next quarter", "type": "decision", "confidence": 0.85, "entities": [
+    {"name": "Acme", "type": "org", "role": "subject"},
+    {"name": "Germany", "type": "place", "role": "object"}
+  ]},
+  {"text": "Customers might prefer annual billing", "type": "hypothesis", "confidence": 0.58, "entities": []}
 ]
 
 Input: "The team decided to use PostgreSQL after evaluating three databases. Response times averaged 45ms."
 Output:
 [
-  {"text": "The team decided to use PostgreSQL after evaluating three databases", "type": "decision", "confidence": 0.90},
-  {"text": "Response times averaged 45ms", "type": "fact", "confidence": 0.88}
+  {"text": "The team decided to use PostgreSQL after evaluating three databases", "type": "decision", "confidence": 0.90, "entities": [
+    {"name": "PostgreSQL", "type": "product", "role": "object"}
+  ]},
+  {"text": "Response times averaged 45ms", "type": "fact", "confidence": 0.88, "entities": []}
 ]
 
 Input: "Meeting Notes - Q3 Planning\n\nAttendees: Alice, Bob"

@@ -31,6 +31,12 @@ type Claim struct {
 	ValidTo    sql.NullString `json:"valid_to"`
 }
 
+type ClaimEntity struct {
+	ClaimID  string `json:"claim_id"`
+	EntityID string `json:"entity_id"`
+	Role     string `json:"role"`
+}
+
 type ClaimEvidence struct {
 	ClaimID string `json:"claim_id"`
 	EventID string `json:"event_id"`
@@ -64,6 +70,15 @@ type Embedding struct {
 	Dimensions int64  `json:"dimensions"`
 	CreatedAt  string `json:"created_at"`
 	CreatedBy  string `json:"created_by"`
+}
+
+type Entity struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	NormalizedName string `json:"normalized_name"`
+	Type           string `json:"type"`
+	CreatedAt      string `json:"created_at"`
+	CreatedBy      string `json:"created_by"`
 }
 
 type Event struct {

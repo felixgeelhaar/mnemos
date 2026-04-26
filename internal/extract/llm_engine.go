@@ -39,16 +39,53 @@ func NewLLMEngine(client llm.Client) LLMEngine {
 	}
 }
 
-// llmClaim is the JSON structure returned by the LLM.
+// llmClaim is the JSON structure returned by the LLM. Entities is
+// optional in the LLM output (older prompt versions emit nothing);
+// callers handle a nil/empty slice without complaint.
 type llmClaim struct {
-	Text       string  `json:"text"`
-	Type       string  `json:"type"`
-	Confidence float64 `json:"confidence"`
+	Text       string           `json:"text"`
+	Type       string           `json:"type"`
+	Confidence float64          `json:"confidence"`
+	Entities   []llmClaimEntity `json:"entities,omitempty"`
 }
 
-// Extract processes events through the LLM to extract claims and evidence
-// links. Falls back to rule-based extraction on LLM failure.
+// llmClaimEntity is the per-claim entity tag the v1.4+ prompt emits.
+// Mapped to ExtractedEntity (the package's external type) by
+// buildClaims so downstream code doesn't depend on JSON shapes.
+type llmClaimEntity struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Role string `json:"role"`
+}
+
+// ExtractedEntity is the package's externally-visible per-claim
+// entity record. Mirrors the LLM tag but bound to the canonical
+// claim id so downstream consumers (the pipeline, mostly) can
+// materialise entities into the entities/claim_entities tables
+// without re-parsing JSON.
+type ExtractedEntity struct {
+	Name string
+	Type string
+	Role string
+}
+
+// Extract processes events through the LLM to extract claims and
+// evidence links. Falls back to rule-based extraction on LLM failure.
+// Kept as a thin shim over ExtractWithEntities so callers that don't
+// care about entities (rule-based downstream paths, older tests) see
+// no behavior change.
 func (e LLMEngine) Extract(events []domain.Event) ([]domain.Claim, []domain.ClaimEvidence, error) {
+	claims, links, _, err := e.ExtractWithEntities(events)
+	return claims, links, err
+}
+
+// ExtractWithEntities is the v0.9 entity-aware extraction entry
+// point. The returned map is keyed by the canonical claim id and
+// holds the entities the LLM tagged for that claim. The map may be
+// nil when the rule-based fallback fires or when the model's output
+// predates the v1.4 prompt — callers should treat absent entries as
+// "no entities for this claim", not as an error.
+func (e LLMEngine) ExtractWithEntities(events []domain.Event) ([]domain.Claim, []domain.ClaimEvidence, map[string][]ExtractedEntity, error) {
 	// Collect non-empty event texts.
 	var texts []string
 	var sourceEvents []domain.Event
@@ -62,7 +99,7 @@ func (e LLMEngine) Extract(events []domain.Event) ([]domain.Claim, []domain.Clai
 	}
 
 	if len(texts) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	// Bound the entire extract operation (including up to 3 retries) by
@@ -80,7 +117,8 @@ func (e LLMEngine) Extract(events []domain.Event) ([]domain.Claim, []domain.Clai
 
 	cacheKey := e.cacheKey(texts)
 	if rawClaims, ok := e.loadCachedClaims(cacheKey); ok {
-		return e.buildClaims(rawClaims, sourceEvents)
+		claims, links, ents, err := e.buildClaims(rawClaims, sourceEvents)
+		return claims, links, ents, err
 	}
 
 	retrier := retry.New[llm.Response](retry.Config{
@@ -96,19 +134,21 @@ func (e LLMEngine) Extract(events []domain.Event) ([]domain.Claim, []domain.Clai
 		return e.client.Complete(ctx, messages)
 	})
 	if err != nil {
-		// Fallback to rule-based extraction.
-		return e.fallback.Extract(events)
+		// Fallback to rule-based extraction. Rule-based produces no
+		// entities, hence the nil third return.
+		c, l, ferr := e.fallback.Extract(events)
+		return c, l, nil, ferr
 	}
 
 	rawClaims, err := parseLLMResponse(resp.Content)
 	if err != nil {
-		// Fallback on parse failure.
-		return e.fallback.Extract(events)
+		c, l, ferr := e.fallback.Extract(events)
+		return c, l, nil, ferr
 	}
 
 	if len(rawClaims) == 0 {
 		e.storeCachedClaims(cacheKey, rawClaims)
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	if cacheKey != "" {
 		e.storeCachedClaims(cacheKey, rawClaims)
@@ -117,11 +157,15 @@ func (e LLMEngine) Extract(events []domain.Event) ([]domain.Claim, []domain.Clai
 	return e.buildClaims(rawClaims, sourceEvents)
 }
 
-// Convert LLM output to domain claims.
+// Convert LLM output to domain claims plus a per-claim entity map.
+// Entities are tagged on rawClaims by the v1.4+ prompt; the empty
+// map is a valid result (older models or claims without named
+// entities).
 
-func (e LLMEngine) buildClaims(rawClaims []llmClaim, sourceEvents []domain.Event) ([]domain.Claim, []domain.ClaimEvidence, error) {
+func (e LLMEngine) buildClaims(rawClaims []llmClaim, sourceEvents []domain.Event) ([]domain.Claim, []domain.ClaimEvidence, map[string][]ExtractedEntity, error) {
 	claims := make([]domain.Claim, 0, len(rawClaims))
 	evidence := make([]domain.ClaimEvidence, 0, len(rawClaims))
+	entities := make(map[string][]ExtractedEntity)
 	seen := map[string]struct{}{}
 
 	for _, rc := range rawClaims {
@@ -148,7 +192,7 @@ func (e LLMEngine) buildClaims(rawClaims []llmClaim, sourceEvents []domain.Event
 
 		claimID, err := e.nextID()
 		if err != nil {
-			return nil, nil, fmt.Errorf("generate claim id: %w", err)
+			return nil, nil, nil, fmt.Errorf("generate claim id: %w", err)
 		}
 
 		claimType := parseLLMClaimType(rc.Type)
@@ -175,12 +219,44 @@ func (e LLMEngine) buildClaims(rawClaims []llmClaim, sourceEvents []domain.Event
 
 		claims = append(claims, claim)
 		evidence = append(evidence, ce)
+
+		// Materialise the LLM's entity tags for this claim. Empty,
+		// missing-name, or duplicate entries are dropped silently —
+		// LLM output is noisy and we'd rather under-tag than poison
+		// the entity store.
+		if len(rc.Entities) > 0 {
+			seenEnt := make(map[string]struct{}, len(rc.Entities))
+			for _, ent := range rc.Entities {
+				name := strings.TrimSpace(ent.Name)
+				if name == "" {
+					continue
+				}
+				typ := strings.TrimSpace(strings.ToLower(ent.Type))
+				if typ == "" {
+					typ = "concept"
+				}
+				role := strings.TrimSpace(strings.ToLower(ent.Role))
+				if role == "" {
+					role = "mention"
+				}
+				key := strings.ToLower(name) + "\x00" + typ
+				if _, dup := seenEnt[key]; dup {
+					continue
+				}
+				seenEnt[key] = struct{}{}
+				entities[claim.ID] = append(entities[claim.ID], ExtractedEntity{
+					Name: name,
+					Type: typ,
+					Role: role,
+				})
+			}
+		}
 	}
 
 	// Run contested detection on the final claim set.
 	markContestedClaims(claims)
 
-	return claims, evidence, nil
+	return claims, evidence, entities, nil
 }
 
 func (e LLMEngine) cacheKey(texts []string) string {

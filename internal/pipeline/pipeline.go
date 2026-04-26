@@ -23,9 +23,12 @@ import (
 )
 
 // Extractor wraps either the rule-based or LLM-powered extraction engine,
-// presenting a uniform interface to command handlers.
+// presenting a uniform interface to command handlers. The entity map is
+// keyed by claim id and may be nil when the rule-based fallback runs
+// (rule-based extraction does not tag entities). Callers should treat a
+// nil map as "no entities to materialise", not as an error.
 type Extractor struct {
-	ExtractFn func([]domain.Event) ([]domain.Claim, []domain.ClaimEvidence, error)
+	ExtractFn func([]domain.Event) ([]domain.Claim, []domain.ClaimEvidence, map[string][]extract.ExtractedEntity, error)
 }
 
 // NewExtractor builds the appropriate extraction engine based on useLLM.
@@ -35,7 +38,13 @@ type Extractor struct {
 func NewExtractor(useLLM bool) (*Extractor, error) {
 	if !useLLM {
 		engine := extract.NewEngine()
-		return &Extractor{ExtractFn: engine.Extract}, nil
+		// Rule-based extraction doesn't tag entities — return nil for
+		// the entity map so the pipeline knows there's nothing to
+		// materialise.
+		return &Extractor{ExtractFn: func(events []domain.Event) ([]domain.Claim, []domain.ClaimEvidence, map[string][]extract.ExtractedEntity, error) {
+			c, l, err := engine.Extract(events)
+			return c, l, nil, err
+		}}, nil
 	}
 
 	cfg, err := llm.ConfigFromEnv()
@@ -56,7 +65,7 @@ func NewExtractor(useLLM bool) (*Extractor, error) {
 	}
 
 	engine := extract.NewLLMEngine(client)
-	return &Extractor{ExtractFn: engine.Extract}, nil
+	return &Extractor{ExtractFn: engine.ExtractWithEntities}, nil
 }
 
 // PersistArtifacts writes events, claims, evidence links, and relationships
@@ -221,6 +230,38 @@ func defaultTrustScorer() func(confidence float64, evidenceCount int, latestEvid
 	return func(confidence float64, evidenceCount int, latestEvidence time.Time) float64 {
 		return trust.Score(confidence, evidenceCount, latestEvidence, time.Now().UTC())
 	}
+}
+
+// MaterializeEntities walks the per-claim entity tags produced by the
+// extractor and writes them to the entities + claim_entities tables.
+// Idempotent: re-running over the same input is a no-op courtesy of
+// FindOrCreate (entities) and INSERT OR IGNORE (claim_entities).
+//
+// Runs after PersistArtifacts so the linked claim_id rows already
+// exist. Failure here is reported to the caller; current cmd/mnemos
+// callers treat it as a warning rather than aborting the whole job
+// — the claims are persisted and a future `mnemos extract-entities`
+// can backfill what didn't land.
+func MaterializeEntities(ctx context.Context, db *sql.DB, entities map[string][]extract.ExtractedEntity, createdBy string) (int, error) {
+	if len(entities) == 0 {
+		return 0, nil
+	}
+	repo := sqlite.NewEntityRepository(db)
+	linked := 0
+	for claimID, ents := range entities {
+		for _, ent := range ents {
+			etype := domain.EntityType(ent.Type)
+			e, err := repo.FindOrCreate(ctx, ent.Name, etype, createdBy)
+			if err != nil {
+				return linked, fmt.Errorf("find-or-create entity %q: %w", ent.Name, err)
+			}
+			if err := repo.LinkClaim(ctx, claimID, e.ID, ent.Role); err != nil {
+				return linked, fmt.Errorf("link claim %s -> entity %s: %w", claimID, e.ID, err)
+			}
+			linked++
+		}
+	}
+	return linked, nil
 }
 
 // GenerateEmbeddings creates vector embeddings for the given events and stores

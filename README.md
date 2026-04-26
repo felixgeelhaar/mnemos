@@ -145,6 +145,11 @@ mnemos mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over
 | `mnemos resolve <new> --supersedes <old> [--reason "..."]` | Temporal supersession: close `old.valid_to` at `new.valid_from`. Old claim keeps its status — it remained true while it was true. |
 | `mnemos query --at YYYY-MM-DD "..."` | Point-in-time query against the temporal-validity layer |
 | `mnemos query --include-history "..."` | Include superseded claims in the answer set (off by default) |
+| `mnemos query --entity <name\|id> "..."` | Restrict the answer to claims linked to this entity |
+| `mnemos entities list [--type T]` | List canonicalised entities (people/orgs/projects/...) |
+| `mnemos entities show <name\|id>` | Show one entity and the claims linked to it |
+| `mnemos entities merge <winner> <loser>` | Collapse one entity into another (manual canonicalisation) |
+| `mnemos extract-entities [--all]` | Backfill entity links for claims that predate the v0.9 prompt |
 | `mnemos reset [--keep-events] [--yes]` | Wipe claims/relationships/embeddings (events optional) |
 | `mnemos delete-claim <id>...` | Delete specific claims and their derived state |
 | `mnemos delete-event <id>...` | Delete events and cascade to derived claims |
@@ -326,6 +331,36 @@ results before ranking. `mnemos metrics` reports `avg_trust` and
 trust-scoring policy lives in `internal/trust/trust.go` — change
 the constants there to retune for your corpus, then run
 `mnemos recompute-trust` to backfill.
+
+### Entity layer (v0.9+)
+
+Mnemos canonicalises noun-phrases ("Felix Geelhaar", "Acme",
+"PostgreSQL", "Berlin", ...) into first-class entity nodes that
+exist independently of any one claim. Once entities exist you can
+ask entity-scoped questions:
+
+```bash
+mnemos entities list --type person
+mnemos entities show "Felix Geelhaar"
+mnemos query --entity "Felix Geelhaar" "what does he need this week?"
+```
+
+How they get created. The v1.4 LLM extraction prompt tags every
+claim with the named entities it mentions. After `mnemos process`
+persists claims, the pipeline materialises those tags into the
+`entities` and `claim_entities` tables, deduping by
+(normalized_name, type) so "Felix", "felixgeelhaar", and
+"Felix Geelhaar" land on different ids only if the LLM gives them
+different names — manual canonicalisation closes the gap:
+
+```bash
+mnemos entities merge en_abc123 en_def456   # winner absorbs loser
+```
+
+For databases that pre-date v0.9 (claims extracted under the v1.3
+prompt or earlier), `mnemos extract-entities --all` re-runs the
+LLM over stored claim text to backfill entity links. It batches
+through the LLM cache, so a re-run on the same content is free.
 
 ### Temporal validity (v0.8+)
 

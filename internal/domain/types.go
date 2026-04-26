@@ -168,6 +168,60 @@ type ClaimStatusTransition struct {
 // as "system" rather than as an unknown user id.
 const SystemUser = "<system>"
 
+// EntityType classifies a first-class node in the knowledge graph.
+// Entities exist independently of the claims that mention them so we
+// can answer "what do we know about X?" without scanning every claim.
+// The set is intentionally small: a longer ontology trades user
+// confusion for a marginal gain in retrieval. Future versions can add
+// types when there's clear demand.
+type EntityType string
+
+// Canonical EntityType values. The set is intentionally small; new
+// types should be added only when a real corpus needs them.
+const (
+	EntityTypePerson  EntityType = "person"
+	EntityTypeOrg     EntityType = "org"
+	EntityTypeProject EntityType = "project"
+	EntityTypeProduct EntityType = "product"
+	EntityTypePlace   EntityType = "place"
+	EntityTypeConcept EntityType = "concept"
+)
+
+// Entity is a canonicalised noun-phrase that appears across one or more
+// claims. The (NormalizedName, Type) pair is the dedup key; Name keeps
+// the human-readable casing.
+type Entity struct {
+	ID             string
+	Name           string
+	NormalizedName string // lower-cased, whitespace-collapsed; the dedup key
+	Type           EntityType
+	CreatedAt      time.Time
+	CreatedBy      string
+}
+
+// ClaimEntity links a Claim to an Entity. The Role field describes how
+// the entity participates: "subject" (the claim is *about* this entity),
+// "object" (the entity is acted on or referenced), "mention" (a passing
+// reference, the default). Querying by entity returns claims regardless
+// of role; the field is informational for now.
+type ClaimEntity struct {
+	ClaimID  string
+	EntityID string
+	Role     string
+}
+
+// NormalizeEntityName produces the dedup key for an entity name:
+// lower-case, trimmed, internal whitespace collapsed. Kept in domain
+// rather than storage because both extraction and querying need to
+// produce the same key from raw input.
+func NormalizeEntityName(name string) string {
+	out := strings.ToLower(strings.TrimSpace(name))
+	// Collapse runs of whitespace to a single space so "Felix  Geelhaar"
+	// and "Felix Geelhaar" hash to the same canonical form.
+	parts := strings.Fields(out)
+	return strings.Join(parts, " ")
+}
+
 // UserStatus represents the lifecycle state of a user account.
 type UserStatus string
 

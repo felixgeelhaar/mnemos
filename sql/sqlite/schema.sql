@@ -31,6 +31,30 @@ CREATE TABLE IF NOT EXISTS claims (
 CREATE INDEX IF NOT EXISTS idx_claims_trust_score ON claims(trust_score);
 CREATE INDEX IF NOT EXISTS idx_claims_valid_to ON claims(valid_to);
 
+CREATE TABLE IF NOT EXISTS entities (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  normalized_name TEXT NOT NULL,
+  type TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  created_by TEXT NOT NULL DEFAULT '<system>',
+  UNIQUE(normalized_name, type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_entities_normalized_name ON entities(normalized_name);
+CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type);
+
+CREATE TABLE IF NOT EXISTS claim_entities (
+  claim_id TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'mention',
+  PRIMARY KEY (claim_id, entity_id, role),
+  FOREIGN KEY (claim_id) REFERENCES claims(id),
+  FOREIGN KEY (entity_id) REFERENCES entities(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_claim_entities_entity_id ON claim_entities(entity_id);
+
 CREATE TABLE IF NOT EXISTS claim_evidence (
   claim_id TEXT NOT NULL,
   event_id TEXT NOT NULL,

@@ -330,6 +330,7 @@ func handleQuery(args []string, f Flags) {
 		exitWithMnemosError(f.Verbose, err)
 	}
 	question, runID, hops, minTrust := qa.question, qa.runID, qa.hops, qa.minTrust
+	asOf, includeHistory := qa.asOf, qa.includeHistory
 
 	scope := map[string]string{"question": question}
 	if runID != "" {
@@ -340,6 +341,12 @@ func handleQuery(args []string, f Flags) {
 	}
 	if minTrust > 0 {
 		scope["min_trust"] = strconv.FormatFloat(minTrust, 'f', 2, 64)
+	}
+	if !asOf.IsZero() {
+		scope["as_of"] = asOf.UTC().Format(time.RFC3339)
+	}
+	if includeHistory {
+		scope["include_history"] = "true"
 	}
 
 	err = runJob("query", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
@@ -386,7 +393,12 @@ func handleQuery(args []string, f Flags) {
 		}
 		var answer domain.Answer
 		var queryErr error
-		opts := query.AnswerOptions{Hops: hops, MinTrust: minTrust}
+		opts := query.AnswerOptions{
+			Hops:           hops,
+			MinTrust:       minTrust,
+			AsOf:           asOf,
+			IncludeHistory: includeHistory,
+		}
 		if runID != "" {
 			answer, queryErr = engine.AnswerForRunWithOptions(question, runID, opts)
 		} else {
@@ -503,6 +515,13 @@ func printHumanReadableAnswer(question string, answer domain.Answer) {
 			// until the first `recompute-trust` run.
 			if claim.TrustScore > 0 {
 				fmt.Printf("        trust=%.2f  conf=%.2f\n", claim.TrustScore, claim.Confidence)
+			}
+			// Evolution line: surfaced only when temporal data is
+			// non-trivial. Includes valid_from when known and
+			// "(superseded ...)" when valid_to is set so users
+			// browsing --include-history can see the timeline.
+			if !claim.ValidFrom.IsZero() || !claim.ValidTo.IsZero() {
+				fmt.Printf("        Evolution: %s\n", formatEvolution(claim))
 			}
 		}
 		fmt.Println("")
@@ -964,9 +983,13 @@ func printUsage() {
 	fmt.Println("  query [--run <run-id>] <question>    Query with evidence")
 	fmt.Println("  query --hops <N> <question>          Expand result claims via N hops of supports/contradicts")
 	fmt.Println("  query --llm <question>               Query with LLM-grounded answer")
+	fmt.Println("  query --min-trust X <question>       Only return claims with trust_score >= X (X in [0, 1])")
+	fmt.Println("  query --at YYYY-MM-DD <question>     Point-in-time query against the temporal-validity layer")
+	fmt.Println("  query --include-history <question>   Include superseded claims (off by default)")
 	fmt.Println("  metrics [--human]                    Knowledge base statistics")
 	fmt.Println("  audit [--include-embeddings]         Export the full knowledge base as JSON")
-	fmt.Println("  resolve <winner> --over <loser>      Resolve a contradiction: winner → resolved, loser → deprecated")
+	fmt.Println("  resolve <winner> --over <loser>      Resolve a contradiction: winner -> resolved, loser -> deprecated")
+	fmt.Println("  resolve <new> --supersedes <old>     Temporal supersession: close old.valid_to at new.valid_from")
 	fmt.Println("")
 	fmt.Println("Identity:")
 	fmt.Println("  user create --name <n> --email <e>   Create a user identity")
@@ -1028,13 +1051,14 @@ func printUsage() {
 
 // queryArgs bundles the parsed --flag values for `mnemos query`.
 // Returned as a struct so adding the next flag doesn't churn every
-// caller's signature (parseQueryArgs went from 3-tuple to needing
-// MinTrust; the next addition will likely be --at for v0.8 temporal).
+// caller's signature.
 type queryArgs struct {
-	question string
-	runID    string
-	hops     int
-	minTrust float64
+	question       string
+	runID          string
+	hops           int
+	minTrust       float64
+	asOf           time.Time
+	includeHistory bool
 }
 
 func parseQueryArgs(args []string) (queryArgs, error) {
@@ -1075,6 +1099,19 @@ func parseQueryArgs(args []string) (queryArgs, error) {
 			}
 			out.minTrust = v
 			questionArgs = questionArgs[2:]
+		case "--at":
+			if len(questionArgs) < 2 {
+				return queryArgs{}, NewUserError("--at flag requires a date (YYYY-MM-DD) or RFC3339 timestamp")
+			}
+			t, err := parseAsOf(questionArgs[1])
+			if err != nil {
+				return queryArgs{}, NewUserError("--at: %v", err)
+			}
+			out.asOf = t
+			questionArgs = questionArgs[2:]
+		case "--include-history":
+			out.includeHistory = true
+			questionArgs = questionArgs[1:]
 		default:
 			goto done
 		}
@@ -1087,6 +1124,49 @@ done:
 	}
 
 	return out, nil
+}
+
+// formatEvolution renders a one-line summary of a claim's temporal
+// validity for the human-readable answer output. Examples:
+//
+//	"valid since 2026-04-01"
+//	"valid 2026-04-01 → 2026-05-15 (superseded)"
+//	"valid until 2026-05-15 (superseded)"
+//
+// Only invoked when at least one of valid_from / valid_to is non-zero,
+// so callers don't have to gate.
+func formatEvolution(c domain.Claim) string {
+	const dateFmt = "2006-01-02"
+	switch {
+	case !c.ValidFrom.IsZero() && !c.ValidTo.IsZero():
+		return fmt.Sprintf("valid %s → %s (superseded)",
+			c.ValidFrom.UTC().Format(dateFmt),
+			c.ValidTo.UTC().Format(dateFmt))
+	case !c.ValidTo.IsZero():
+		return fmt.Sprintf("valid until %s (superseded)", c.ValidTo.UTC().Format(dateFmt))
+	case !c.ValidFrom.IsZero():
+		return fmt.Sprintf("valid since %s", c.ValidFrom.UTC().Format(dateFmt))
+	default:
+		return ""
+	}
+}
+
+// parseAsOf accepts a YYYY-MM-DD date or a full RFC3339(Nano)
+// timestamp. Date-only inputs anchor to 00:00:00 UTC, which means
+// `--at 2026-04-01` returns claims that were valid at the start of
+// April 1st (the most intuitive reading for "as of that day").
+func parseAsOf(s string) (time.Time, error) {
+	s = strings.TrimSpace(s)
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t.UTC(), nil
+	}
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t.UTC(), nil
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t.UTC(), nil
+	}
+	return time.Time{}, fmt.Errorf("unrecognized timestamp %q (want YYYY-MM-DD or RFC3339)", s)
 }
 
 // warnRelateSkipped surfaces an incremental-relate failure as a warning

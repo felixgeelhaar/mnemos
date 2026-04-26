@@ -6,6 +6,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/embedding"
@@ -58,9 +59,18 @@ func (e Engine) WithLLM(client llm.Client) Engine {
 // N means follow up to N supports/contradicts edges from the seed claims.
 // MinTrust filters out claims whose computed trust_score (see internal/trust)
 // is strictly below the threshold; 0 disables the filter.
+//
+// AsOf enables point-in-time queries against the temporal-validity layer
+// (see domain.Claim.IsValidAt). When non-zero, only claims that were in
+// force at that instant are returned; when zero, the engine substitutes
+// time.Now() so the default is "what is currently true". IncludeHistory
+// disables temporal filtering entirely — callers see superseded claims
+// alongside current ones, useful for `--history` / audit views.
 type AnswerOptions struct {
-	Hops     int
-	MinTrust float64
+	Hops           int
+	MinTrust       float64
+	AsOf           time.Time
+	IncludeHistory bool
 }
 
 // Answer searches all stored events for the best answer to the given question.
@@ -133,6 +143,24 @@ func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents
 		filtered := make([]domain.Claim, 0, len(claims))
 		for _, c := range claims {
 			if c.TrustScore >= opts.MinTrust {
+				filtered = append(filtered, c)
+			}
+		}
+		claims = filtered
+	}
+
+	// Temporal filter: by default, exclude claims that have been
+	// superseded (valid_to in the past). Callers asking for history
+	// (--include-history) opt out; --at <date> queries swap the
+	// cutoff for a point-in-time check.
+	if !opts.IncludeHistory {
+		asOf := opts.AsOf
+		if asOf.IsZero() {
+			asOf = time.Now().UTC()
+		}
+		filtered := make([]domain.Claim, 0, len(claims))
+		for _, c := range claims {
+			if c.IsValidAt(asOf) {
 				filtered = append(filtered, c)
 			}
 		}

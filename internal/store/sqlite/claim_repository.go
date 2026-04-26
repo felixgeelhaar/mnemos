@@ -72,6 +72,14 @@ func (r ClaimRepository) upsertWithReason(ctx context.Context, claims []domain.C
 			return fmt.Errorf("look up prior status for %s: %w", claim.ID, err)
 		}
 
+		// valid_from defaults to created_at when the caller hasn't
+		// already populated it (legacy code paths and tests). The
+		// pipeline normally fills this from the earliest evidence
+		// event before reaching the repo.
+		validFrom := claim.ValidFrom
+		if validFrom.IsZero() {
+			validFrom = claim.CreatedAt
+		}
 		err = qtx.UpsertClaim(ctx, sqlcgen.UpsertClaimParams{
 			ID:         claim.ID,
 			Text:       claim.Text,
@@ -80,6 +88,7 @@ func (r ClaimRepository) upsertWithReason(ctx context.Context, claims []domain.C
 			Status:     string(claim.Status),
 			CreatedAt:  claim.CreatedAt.UTC().Format(time.RFC3339Nano),
 			CreatedBy:  actorOr(claim.CreatedBy),
+			ValidFrom:  validFrom.UTC().Format(time.RFC3339Nano),
 		})
 		if err != nil {
 			return fmt.Errorf("upsert claim %s: %w", claim.ID, err)
@@ -164,7 +173,7 @@ func (r ClaimRepository) ListByEventIDs(ctx context.Context, eventIDs []string) 
 	}
 
 	query := fmt.Sprintf(`
-SELECT DISTINCT c.id, c.text, c.type, c.confidence, c.status, c.created_at, c.created_by, c.trust_score
+SELECT DISTINCT c.id, c.text, c.type, c.confidence, c.status, c.created_at, c.created_by, c.trust_score, c.valid_from, c.valid_to
 FROM claims c
 JOIN claim_evidence ce ON ce.claim_id = c.id
 WHERE ce.event_id IN (%s)
@@ -295,7 +304,7 @@ func (r ClaimRepository) ListByIDs(ctx context.Context, claimIDs []string) ([]do
 	}
 
 	query := fmt.Sprintf(`
-SELECT id, text, type, confidence, status, created_at, created_by, trust_score
+SELECT id, text, type, confidence, status, created_at, created_by, trust_score, valid_from, valid_to
 FROM claims
 WHERE id IN (%s)`, strings.Join(placeholders, ",")) //nolint:gosec // G201: placeholders are literal "?" strings, not user input
 
@@ -317,6 +326,21 @@ WHERE id IN (%s)`, strings.Join(placeholders, ",")) //nolint:gosec // G201: plac
 		return nil, fmt.Errorf("iterate claims by ids rows: %w", err)
 	}
 	return out, nil
+}
+
+// SetValidity sets a claim's valid_to timestamp. A zero `validTo`
+// clears the column (un-supersedes the claim) — useful when an
+// operator reverts a resolution. Returns an error if the claim does
+// not exist; callers that don't care should ignore sql.ErrNoRows.
+func (r ClaimRepository) SetValidity(ctx context.Context, claimID string, validTo time.Time) error {
+	val := sql.NullString{}
+	if !validTo.IsZero() {
+		val = sql.NullString{String: validTo.UTC().Format(time.RFC3339Nano), Valid: true}
+	}
+	return r.q.SetClaimValidity(ctx, sqlcgen.SetClaimValidityParams{
+		ValidTo: val,
+		ID:      claimID,
+	})
 }
 
 // RecomputeTrust recalculates trust_score for every claim based on its
@@ -405,11 +429,36 @@ func mapSQLClaim(row sqlcgen.Claim) (domain.Claim, error) {
 	}
 	claim.CreatedAt = t
 
+	if vf, perr := parseOptionalTime(row.ValidFrom); perr != nil {
+		return domain.Claim{}, fmt.Errorf("parse claim valid_from: %w", perr)
+	} else {
+		claim.ValidFrom = vf
+	}
+	if row.ValidTo.Valid {
+		if vt, perr := parseOptionalTime(row.ValidTo.String); perr != nil {
+			return domain.Claim{}, fmt.Errorf("parse claim valid_to: %w", perr)
+		} else {
+			claim.ValidTo = vt
+		}
+	}
+
 	if err := claim.Validate(); err != nil {
 		return domain.Claim{}, fmt.Errorf("validate persisted claim %s: %w", claim.ID, err)
 	}
 
 	return claim, nil
+}
+
+// parseOptionalTime returns the zero time for empty strings (the
+// sentinel produced by ALTER TABLE ADD COLUMN ... DEFAULT ” on
+// legacy rows that haven't been touched since the v0.8 migration ran
+// the backfill, and the storage form for "no upper bound" on
+// valid_to). RFC3339Nano otherwise.
+func parseOptionalTime(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse(time.RFC3339Nano, s)
 }
 
 type claimRowScanner interface {
@@ -422,6 +471,8 @@ func scanClaim(scanner claimRowScanner) (domain.Claim, error) {
 		claimType string
 		status    string
 		createdAt string
+		validFrom string
+		validTo   sql.NullString
 	)
 
 	if err := scanner.Scan(
@@ -433,6 +484,8 @@ func scanClaim(scanner claimRowScanner) (domain.Claim, error) {
 		&createdAt,
 		&claim.CreatedBy,
 		&claim.TrustScore,
+		&validFrom,
+		&validTo,
 	); err != nil {
 		return domain.Claim{}, err
 	}
@@ -445,6 +498,19 @@ func scanClaim(scanner claimRowScanner) (domain.Claim, error) {
 		return domain.Claim{}, fmt.Errorf("parse claim created_at: %w", err)
 	}
 	claim.CreatedAt = t
+
+	if vf, perr := parseOptionalTime(validFrom); perr != nil {
+		return domain.Claim{}, fmt.Errorf("parse claim valid_from: %w", perr)
+	} else {
+		claim.ValidFrom = vf
+	}
+	if validTo.Valid {
+		if vt, perr := parseOptionalTime(validTo.String); perr != nil {
+			return domain.Claim{}, fmt.Errorf("parse claim valid_to: %w", perr)
+		} else {
+			claim.ValidTo = vt
+		}
+	}
 
 	if err := claim.Validate(); err != nil {
 		return domain.Claim{}, fmt.Errorf("validate persisted claim %s: %w", claim.ID, err)

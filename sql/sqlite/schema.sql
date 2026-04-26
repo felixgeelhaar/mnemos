@@ -23,10 +23,13 @@ CREATE TABLE IF NOT EXISTS claims (
   status TEXT NOT NULL,
   created_at TEXT NOT NULL,
   created_by TEXT NOT NULL DEFAULT '<system>',
-  trust_score REAL NOT NULL DEFAULT 0
+  trust_score REAL NOT NULL DEFAULT 0,
+  valid_from TEXT NOT NULL DEFAULT '',
+  valid_to TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_claims_trust_score ON claims(trust_score);
+CREATE INDEX IF NOT EXISTS idx_claims_valid_to ON claims(valid_to);
 
 CREATE TABLE IF NOT EXISTS claim_evidence (
   claim_id TEXT NOT NULL,

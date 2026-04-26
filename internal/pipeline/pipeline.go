@@ -95,6 +95,28 @@ func PersistArtifacts(ctx context.Context, db *sql.DB, events []domain.Event, cl
 		}
 	}
 
+	// Index events by id and pre-compute earliest evidence-event
+	// timestamp per claim from `links`. The claim's valid_from
+	// reflects when the *fact was first observed in the source* —
+	// the earliest evidence event — not when we happened to extract
+	// it. For backfill / out-of-order ingest this is the only
+	// defensible default.
+	eventTS := make(map[string]time.Time, len(events))
+	for _, ev := range events {
+		eventTS[ev.ID] = ev.Timestamp
+	}
+	earliestEvidence := make(map[string]time.Time, len(claims))
+	for _, link := range links {
+		ts, ok := eventTS[link.EventID]
+		if !ok {
+			continue
+		}
+		cur, seen := earliestEvidence[link.ClaimID]
+		if !seen || ts.Before(cur) {
+			earliestEvidence[link.ClaimID] = ts
+		}
+	}
+
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, claim := range claims {
 		if err := claim.Validate(); err != nil {
@@ -110,6 +132,14 @@ func PersistArtifacts(ctx context.Context, db *sql.DB, events []domain.Event, cl
 		if createdBy == "" {
 			createdBy = domain.SystemUser
 		}
+		validFrom := claim.ValidFrom
+		if validFrom.IsZero() {
+			if ts, ok := earliestEvidence[claim.ID]; ok {
+				validFrom = ts
+			} else {
+				validFrom = claim.CreatedAt
+			}
+		}
 		err = q.UpsertClaim(ctx, sqlcgen.UpsertClaimParams{
 			ID:         claim.ID,
 			Text:       claim.Text,
@@ -118,6 +148,7 @@ func PersistArtifacts(ctx context.Context, db *sql.DB, events []domain.Event, cl
 			Status:     string(claim.Status),
 			CreatedAt:  claim.CreatedAt.UTC().Format(time.RFC3339Nano),
 			CreatedBy:  createdBy,
+			ValidFrom:  validFrom.UTC().Format(time.RFC3339Nano),
 		})
 		if err != nil {
 			return fmt.Errorf("upsert claim %s: %w", claim.ID, err)

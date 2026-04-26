@@ -4,6 +4,10 @@
 
 package sqlcgen
 
+import (
+	"database/sql"
+)
+
 type Agent struct {
 	ID              string `json:"id"`
 	Name            string `json:"name"`
@@ -15,14 +19,16 @@ type Agent struct {
 }
 
 type Claim struct {
-	ID         string  `json:"id"`
-	Text       string  `json:"text"`
-	Type       string  `json:"type"`
-	Confidence float64 `json:"confidence"`
-	Status     string  `json:"status"`
-	CreatedAt  string  `json:"created_at"`
-	CreatedBy  string  `json:"created_by"`
-	TrustScore float64 `json:"trust_score"`
+	ID         string         `json:"id"`
+	Text       string         `json:"text"`
+	Type       string         `json:"type"`
+	Confidence float64        `json:"confidence"`
+	Status     string         `json:"status"`
+	CreatedAt  string         `json:"created_at"`
+	CreatedBy  string         `json:"created_by"`
+	TrustScore float64        `json:"trust_score"`
+	ValidFrom  string         `json:"valid_from"`
+	ValidTo    sql.NullString `json:"valid_to"`
 }
 
 type ClaimEvidence struct {

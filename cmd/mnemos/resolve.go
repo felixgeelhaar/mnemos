@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -10,28 +12,37 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
-// handleResolve implements the `mnemos resolve <winner-id> --over <loser-id>`
-// command. This is the operator-driven half of the issue #6 truth layer:
-// when two claims contradict each other, a human picks a winner. The
-// winning claim transitions to `resolved` and the losing one to
-// `deprecated`. Both transitions land in claim_status_history with the
-// provided reason so the audit trail captures not just what was decided
-// but why.
+// handleResolve implements two operator-driven primitives for the
+// truth layer:
+//
+//	mnemos resolve <winner> --over       <loser>      [--reason "..."]
+//	mnemos resolve <new>    --supersedes <old>        [--reason "..."]
+//
+// `--over` is the original "this contradicts that, pick a winner"
+// flow: winner → resolved, loser → deprecated, both transitions
+// audited. Use it for contradictions where one claim is true and the
+// other is false.
+//
+// `--supersedes` is the temporal-validity primitive added in v0.8:
+// the new claim takes effect, the old one is closed (valid_to = the
+// new claim's valid_from). The old claim is NOT marked deprecated —
+// it remained true while it was true, and history queries (`--at`,
+// `--include-history`) still surface it. Use it for facts that
+// changed over time, like job titles or chosen tools.
 //
 // Explicitly NOT implemented: automatic resolution by recency or
-// confidence. That path is risky (recency ≠ truth; confidence is
-// heuristic) and would undermine the project's "surface contradictions,
-// let humans judge" stance. If it ever lands, it will be as an opt-in
-// probe with its own eval, not a default.
+// confidence. That path is risky and would undermine the project's
+// "surface contradictions, let humans judge" stance.
 func handleResolve(args []string, f Flags) {
 	if len(args) < 1 {
-		exitWithMnemosError(false, NewUserError("resolve requires a winning claim id\n  mnemos resolve <winner-id> --over <loser-id> [--reason \"...\"]"))
+		exitWithMnemosError(false, NewUserError("resolve requires a claim id\n  mnemos resolve <winner-id> --over <loser-id> [--reason \"...\"]\n  mnemos resolve <new-id> --supersedes <old-id> [--reason \"...\"]"))
 		return
 	}
-	winnerID := args[0]
+	primaryID := args[0]
 	args = args[1:]
 
 	loserID := ""
+	supersededID := ""
 	reason := ""
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
@@ -41,6 +52,13 @@ func handleResolve(args []string, f Flags) {
 				return
 			}
 			loserID = args[i+1]
+			i++
+		case "--supersedes":
+			if i+1 >= len(args) {
+				exitWithMnemosError(false, NewUserError("--supersedes requires a claim id"))
+				return
+			}
+			supersededID = args[i+1]
 			i++
 		case "--reason":
 			if i+1 >= len(args) {
@@ -55,16 +73,17 @@ func handleResolve(args []string, f Flags) {
 		}
 	}
 
-	if strings.TrimSpace(winnerID) == "" || strings.TrimSpace(loserID) == "" {
-		exitWithMnemosError(false, NewUserError("both winner and --over <loser-id> are required"))
+	if strings.TrimSpace(primaryID) == "" {
+		exitWithMnemosError(false, NewUserError("primary claim id required"))
 		return
 	}
-	if winnerID == loserID {
-		exitWithMnemosError(false, NewUserError("winner and loser must be different claims"))
+	if loserID == "" && supersededID == "" {
+		exitWithMnemosError(false, NewUserError("either --over <loser-id> or --supersedes <old-id> is required"))
 		return
 	}
-	if reason == "" {
-		reason = "operator resolution via mnemos resolve"
+	if loserID != "" && supersededID != "" {
+		exitWithMnemosError(false, NewUserError("--over and --supersedes are mutually exclusive (contradiction vs temporal supersession)"))
+		return
 	}
 
 	dbPath := resolveDBPath()
@@ -78,6 +97,23 @@ func handleResolve(args []string, f Flags) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	if supersededID != "" {
+		runSupersession(ctx, db, primaryID, supersededID, reason, f.Actor)
+		return
+	}
+	runContradictionResolution(ctx, db, primaryID, loserID, reason, f.Actor)
+}
+
+// runContradictionResolution preserves the v0.6 `--over` behavior:
+// pick a winner, mark the other deprecated, audit the transition.
+func runContradictionResolution(ctx context.Context, db *sql.DB, winnerID, loserID, reason, actorFlag string) {
+	if winnerID == loserID {
+		exitWithMnemosError(false, NewUserError("winner and loser must be different claims"))
+		return
+	}
+	if reason == "" {
+		reason = "operator resolution via mnemos resolve"
+	}
 	claimRepo := sqlite.NewClaimRepository(db)
 	found, err := claimRepo.ListByIDs(ctx, []string{winnerID, loserID})
 	if err != nil {
@@ -99,7 +135,7 @@ func handleResolve(args []string, f Flags) {
 		return
 	}
 
-	actor, err := resolveActor(ctx, db, f.Actor)
+	actor, err := resolveActor(ctx, db, actorFlag)
 	if err != nil {
 		exitWithMnemosError(false, err)
 		return
@@ -108,15 +144,81 @@ func handleResolve(args []string, f Flags) {
 	winner.Status = domain.ClaimStatusResolved
 	loser.Status = domain.ClaimStatusDeprecated
 
-	// Single-batch upsert so both transitions succeed or fail together —
-	// the audit trail should never show a half-resolved pair. Pass the
-	// resolved actor so claim_status_history captures who decided.
 	if err := claimRepo.UpsertWithReasonAs(ctx, []domain.Claim{winner, loser}, reason, actor); err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "persist resolution"))
 		return
 	}
 
-	fmt.Printf("resolved: %s (%s → resolved) over %s (%s → deprecated)\n",
+	fmt.Printf("resolved: %s (%s -> resolved) over %s (%s -> deprecated)\n",
 		winner.ID, winner.Type, loser.ID, loser.Type)
+	fmt.Printf("reason: %s by=%s\n", reason, actor)
+}
+
+// runSupersession is the v0.8 temporal-validity primitive: close
+// the old claim's valid interval at the new claim's valid_from. The
+// old claim keeps its status (it remained true while it was true);
+// only valid_to changes. The audit trail goes via
+// claim_status_history with the provided reason so reviewers can
+// see who said "this superseded that and when".
+func runSupersession(ctx context.Context, db *sql.DB, newID, oldID, reason, actorFlag string) {
+	if newID == oldID {
+		exitWithMnemosError(false, NewUserError("new and old must be different claims"))
+		return
+	}
+	if reason == "" {
+		reason = "operator supersession via mnemos resolve"
+	}
+	claimRepo := sqlite.NewClaimRepository(db)
+	found, err := claimRepo.ListByIDs(ctx, []string{newID, oldID})
+	if err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "look up claims"))
+		return
+	}
+	byID := make(map[string]domain.Claim, len(found))
+	for _, c := range found {
+		byID[c.ID] = c
+	}
+	newClaim, newOK := byID[newID]
+	oldClaim, oldOK := byID[oldID]
+	if !newOK {
+		exitWithMnemosError(false, NewUserError("new claim %q not found", newID))
+		return
+	}
+	if !oldOK {
+		exitWithMnemosError(false, NewUserError("old claim %q not found", oldID))
+		return
+	}
+
+	actor, err := resolveActor(ctx, db, actorFlag)
+	if err != nil {
+		exitWithMnemosError(false, err)
+		return
+	}
+
+	cutoff := newClaim.ValidFrom
+	if cutoff.IsZero() {
+		cutoff = newClaim.CreatedAt
+	}
+	if cutoff.IsZero() {
+		cutoff = time.Now().UTC()
+	}
+
+	if err := claimRepo.SetValidity(ctx, oldClaim.ID, cutoff); err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "set valid_to on superseded claim"))
+		return
+	}
+	// Status history capture: append a transition row even though
+	// status itself doesn't change, so the audit trail records who
+	// performed the supersession. We re-upsert the same status with
+	// the reason to trigger the history insert in upsertWithReason.
+	if err := claimRepo.UpsertWithReasonAs(ctx, []domain.Claim{oldClaim}, reason, actor); err != nil {
+		// Non-fatal: the supersession itself succeeded. Surface as a
+		// warning so the operator knows the audit row didn't land.
+		warn := icon("⚠️", "(!)")
+		fmt.Fprintf(os.Stderr, "  %s audit row for supersession failed: %v\n", warn, err)
+	}
+
+	fmt.Printf("superseded: %s closed at %s (replaced by %s)\n",
+		oldClaim.ID, cutoff.UTC().Format("2006-01-02"), newClaim.ID)
 	fmt.Printf("reason: %s by=%s\n", reason, actor)
 }

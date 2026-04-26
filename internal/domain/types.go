@@ -90,6 +90,36 @@ type Claim struct {
 	CreatedAt  time.Time
 	CreatedBy  string  // user id of the actor that created this claim; "<system>" for unattributed
 	TrustScore float64 // derived from confidence × corroboration × freshness; computed by internal/trust
+
+	// ValidFrom is when the claim's content first became true. Defaults
+	// to the source event's timestamp at insert time; see internal/pipeline.
+	// A zero value means "valid since before the system started tracking".
+	ValidFrom time.Time
+	// ValidTo is when the claim stopped being true (a successor claim
+	// took its place). Zero value means "currently valid / still in
+	// force". Set by `mnemos resolve --supersedes` or by future
+	// auto-supersession detection.
+	ValidTo time.Time
+}
+
+// IsValidAt reports whether the claim was in force at instant t.
+// A claim is in force while ValidFrom ≤ t and (ValidTo is zero OR t < ValidTo).
+// Zero ValidFrom counts as "valid from the beginning of time" so legacy
+// rows that predate v0.8 still answer "yes" to current queries.
+func (c Claim) IsValidAt(t time.Time) bool {
+	if !c.ValidFrom.IsZero() && t.Before(c.ValidFrom) {
+		return false
+	}
+	if !c.ValidTo.IsZero() && !t.Before(c.ValidTo) {
+		return false
+	}
+	return true
+}
+
+// IsSuperseded reports whether the claim has been replaced by another
+// (i.e., ValidTo is set). Useful for filtering history-aware queries.
+func (c Claim) IsSuperseded() bool {
+	return !c.ValidTo.IsZero()
 }
 
 // ClaimEvidence links a Claim to the Event that supports it.

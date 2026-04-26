@@ -1,13 +1,24 @@
 -- name: UpsertClaim :exec
-INSERT INTO claims (id, text, type, confidence, status, created_at, created_by)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+-- ON CONFLICT preserves trust_score and valid_to (computed/managed
+-- separately via UpdateClaimTrust and SetClaimValidity), but does
+-- refresh valid_from: re-extracting a claim with newer evidence is
+-- a legitimate "this fact is observed again from <ts>" signal.
+INSERT INTO claims (id, text, type, confidence, status, created_at, created_by, valid_from)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   text = excluded.text,
   type = excluded.type,
   confidence = excluded.confidence,
   status = excluded.status,
   created_at = excluded.created_at,
-  created_by = excluded.created_by;
+  created_by = excluded.created_by,
+  valid_from = excluded.valid_from;
+
+-- name: SetClaimValidity :exec
+-- Atomic supersession primitive: mark a claim as no longer valid as
+-- of the given timestamp. Pass NULL to clear valid_to (un-supersede
+-- the claim), useful when a resolution is reverted.
+UPDATE claims SET valid_to = ? WHERE id = ?;
 
 -- name: UpsertClaimEvidence :exec
 INSERT INTO claim_evidence (claim_id, event_id)
@@ -15,7 +26,8 @@ VALUES (?, ?)
 ON CONFLICT(claim_id, event_id) DO NOTHING;
 
 -- name: ListAllClaims :many
-SELECT id, text, type, confidence, status, created_at, created_by, trust_score
+SELECT id, text, type, confidence, status, created_at, created_by, trust_score,
+       valid_from, valid_to
 FROM claims
 ORDER BY created_at ASC;
 

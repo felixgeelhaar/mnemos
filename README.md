@@ -142,6 +142,9 @@ mnemos mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over
 | `mnemos metrics` | Knowledge base statistics |
 | `mnemos audit [--include-embeddings]` | Export the full knowledge base as JSON for compliance/backup |
 | `mnemos resolve <winner> --over <loser> [--reason "..."]` | Resolve a contradiction: winner → resolved, loser → deprecated |
+| `mnemos resolve <new> --supersedes <old> [--reason "..."]` | Temporal supersession: close `old.valid_to` at `new.valid_from`. Old claim keeps its status — it remained true while it was true. |
+| `mnemos query --at YYYY-MM-DD "..."` | Point-in-time query against the temporal-validity layer |
+| `mnemos query --include-history "..."` | Include superseded claims in the answer set (off by default) |
 | `mnemos reset [--keep-events] [--yes]` | Wipe claims/relationships/embeddings (events optional) |
 | `mnemos delete-claim <id>...` | Delete specific claims and their derived state |
 | `mnemos delete-event <id>...` | Delete events and cascade to derived claims |
@@ -323,6 +326,37 @@ results before ranking. `mnemos metrics` reports `avg_trust` and
 trust-scoring policy lives in `internal/trust/trust.go` — change
 the constants there to retune for your corpus, then run
 `mnemos recompute-trust` to backfill.
+
+### Temporal validity (v0.8+)
+
+Every claim carries a validity interval — `valid_from` (when the
+fact became true) and `valid_to` (when it stopped being true; NULL
+means "still in force"). The pipeline derives `valid_from` from the
+earliest evidence event's timestamp at insert time, so backfilled
+ingest gets correct timelines without operator effort.
+
+Two new behaviors fall out:
+
+- **Default queries hide superseded claims.** `mnemos query "..."`
+  filters out claims whose `valid_to` is in the past, so "Felix is
+  a junior engineer" stops surfacing once "senior engineer" closes
+  its interval. Pass `--include-history` to see both.
+- **Point-in-time queries.** `mnemos query --at 2026-03-01 "..."`
+  returns the answer as it would have been on that date — handy for
+  audit trails and "what did we believe at the time?" questions.
+
+To close one claim's interval when a new one takes its place:
+
+```bash
+mnemos resolve cl_new --supersedes cl_old --reason "promoted 2026-04"
+```
+
+`--supersedes` is distinct from `--over` (the contradiction
+resolver). `--over` says "one of these was always wrong and the
+other right"; `--supersedes` says "this fact changed". The latter
+preserves the old claim's status — it remained true while it was
+true — and only sets `valid_to`. Auto-supersession (heuristic
+detection without operator action) is on the v0.9 roadmap.
 
 ### Upgrading
 

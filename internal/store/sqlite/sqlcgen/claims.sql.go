@@ -7,6 +7,7 @@ package sqlcgen
 
 import (
 	"context"
+	"database/sql"
 )
 
 const averageTrust = `-- name: AverageTrust :one
@@ -86,7 +87,8 @@ func (q *Queries) DeleteClaimStatusHistoryByClaimID(ctx context.Context, claimID
 }
 
 const listAllClaims = `-- name: ListAllClaims :many
-SELECT id, text, type, confidence, status, created_at, created_by, trust_score
+SELECT id, text, type, confidence, status, created_at, created_by, trust_score,
+       valid_from, valid_to
 FROM claims
 ORDER BY created_at ASC
 `
@@ -109,6 +111,8 @@ func (q *Queries) ListAllClaims(ctx context.Context) ([]Claim, error) {
 			&i.CreatedAt,
 			&i.CreatedBy,
 			&i.TrustScore,
+			&i.ValidFrom,
+			&i.ValidTo,
 		); err != nil {
 			return nil, err
 		}
@@ -174,6 +178,23 @@ func (q *Queries) ListClaimTrustInputs(ctx context.Context) ([]ListClaimTrustInp
 	return items, nil
 }
 
+const setClaimValidity = `-- name: SetClaimValidity :exec
+UPDATE claims SET valid_to = ? WHERE id = ?
+`
+
+type SetClaimValidityParams struct {
+	ValidTo sql.NullString `json:"valid_to"`
+	ID      string         `json:"id"`
+}
+
+// Atomic supersession primitive: mark a claim as no longer valid as
+// of the given timestamp. Pass NULL to clear valid_to (un-supersede
+// the claim), useful when a resolution is reverted.
+func (q *Queries) SetClaimValidity(ctx context.Context, arg SetClaimValidityParams) error {
+	_, err := q.db.ExecContext(ctx, setClaimValidity, arg.ValidTo, arg.ID)
+	return err
+}
+
 const updateClaimTrust = `-- name: UpdateClaimTrust :exec
 UPDATE claims SET trust_score = ? WHERE id = ?
 `
@@ -189,15 +210,16 @@ func (q *Queries) UpdateClaimTrust(ctx context.Context, arg UpdateClaimTrustPara
 }
 
 const upsertClaim = `-- name: UpsertClaim :exec
-INSERT INTO claims (id, text, type, confidence, status, created_at, created_by)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO claims (id, text, type, confidence, status, created_at, created_by, valid_from)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   text = excluded.text,
   type = excluded.type,
   confidence = excluded.confidence,
   status = excluded.status,
   created_at = excluded.created_at,
-  created_by = excluded.created_by
+  created_by = excluded.created_by,
+  valid_from = excluded.valid_from
 `
 
 type UpsertClaimParams struct {
@@ -208,8 +230,13 @@ type UpsertClaimParams struct {
 	Status     string  `json:"status"`
 	CreatedAt  string  `json:"created_at"`
 	CreatedBy  string  `json:"created_by"`
+	ValidFrom  string  `json:"valid_from"`
 }
 
+// ON CONFLICT preserves trust_score and valid_to (computed/managed
+// separately via UpdateClaimTrust and SetClaimValidity), but does
+// refresh valid_from: re-extracting a claim with newer evidence is
+// a legitimate "this fact is observed again from <ts>" signal.
 func (q *Queries) UpsertClaim(ctx context.Context, arg UpsertClaimParams) error {
 	_, err := q.db.ExecContext(ctx, upsertClaim,
 		arg.ID,
@@ -219,6 +246,7 @@ func (q *Queries) UpsertClaim(ctx context.Context, arg UpsertClaimParams) error 
 		arg.Status,
 		arg.CreatedAt,
 		arg.CreatedBy,
+		arg.ValidFrom,
 	)
 	return err
 }

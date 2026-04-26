@@ -75,11 +75,13 @@ CREATE TABLE IF NOT EXISTS claims (
 	status TEXT NOT NULL,
 	created_at TEXT NOT NULL,
 	created_by TEXT NOT NULL DEFAULT '<system>',
-	trust_score REAL NOT NULL DEFAULT 0
+	trust_score REAL NOT NULL DEFAULT 0,
+	valid_from TEXT NOT NULL DEFAULT '',
+	valid_to TEXT
 );
--- idx_claims_trust_score is created by migrate() after the v1→v2
--- ALTER TABLE adds trust_score on legacy DBs. Defining it here would
--- run before the column exists on those upgrades.
+-- idx_claims_trust_score and idx_claims_valid_to are created by
+-- migrate() after the v1→v2 / v2→v3 ALTER TABLEs add the columns on
+-- legacy DBs. Defining them here would run before the column exists.
 
 CREATE TABLE IF NOT EXISTS claim_evidence (
 	claim_id TEXT NOT NULL,
@@ -194,7 +196,7 @@ CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
 // currentSchemaVersion is the schema generation this binary expects.
 // Bump whenever a column or table is added; pair the bump with a step
 // in addMissingColumns so existing DBs upgrade in place.
-const currentSchemaVersion = 2
+const currentSchemaVersion = 3
 
 // addMissingColumn declares one defensive column-add. Each entry is
 // idempotent: if the column already exists in the table we skip it,
@@ -223,6 +225,14 @@ var expectedColumns = []addMissingColumn{
 	{"embeddings", "created_by", "TEXT NOT NULL DEFAULT '<system>'"},
 	// v2 — derived trust score.
 	{"claims", "trust_score", "REAL NOT NULL DEFAULT 0"},
+	// v3 — temporal validity. valid_from gets backfilled from
+	// created_at after the column is added (see migrate()), so
+	// existing claims become "valid since they were created" — the
+	// most defensible default for a binary that didn't track this
+	// before. valid_to is nullable; NULL means "no upper bound /
+	// still valid".
+	{"claims", "valid_from", "TEXT NOT NULL DEFAULT ''"},
+	{"claims", "valid_to", "TEXT"},
 }
 
 // v1Columns is the legacy alias kept for any external callers (and for
@@ -266,10 +276,25 @@ func migrate(db *sql.DB) error {
 		}
 	}
 
+	// One-shot data migrations that depend on the columns existing.
+	// Each is idempotent (filtering on the empty-string sentinel
+	// produced by ALTER TABLE ADD COLUMN ... DEFAULT '') so re-running
+	// is safe. Backfills run only when the previous user_version was
+	// below the version that introduced their target column.
+	if userVersion < 3 {
+		// valid_from defaults to the claim's created_at on legacy
+		// rows. New inserts will set valid_from explicitly via the
+		// pipeline; this only catches rows that predate v0.8.
+		if _, err := db.Exec(`UPDATE claims SET valid_from = created_at WHERE valid_from = ''`); err != nil {
+			return fmt.Errorf("backfill claims.valid_from: %w", err)
+		}
+	}
+
 	// Indexes that depend on migrated columns. Run after the column
 	// adds above so legacy DBs don't fail with "no such column".
 	const postMigrateIndexes = `
 CREATE INDEX IF NOT EXISTS idx_claims_trust_score ON claims(trust_score);
+CREATE INDEX IF NOT EXISTS idx_claims_valid_to ON claims(valid_to);
 `
 	if _, err := db.Exec(postMigrateIndexes); err != nil {
 		return fmt.Errorf("post-migrate indexes: %w", err)

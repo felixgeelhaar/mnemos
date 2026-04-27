@@ -11,7 +11,6 @@ import (
 
 	"github.com/felixgeelhaar/mnemos/internal/auth"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
 const defaultTokenTTL = 90 * 24 * time.Hour // 90 days
@@ -77,7 +76,7 @@ func handleUserCreate(args []string) {
 	// Operators who want a least-privilege user must pass explicit
 	// --scope arguments.
 
-	db, conn, err := openDB(context.Background())
+	conn, err := openConn(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
@@ -97,7 +96,7 @@ func handleUserCreate(args []string) {
 		Scopes:    scopes,
 		CreatedAt: time.Now().UTC(),
 	}
-	if err := sqlite.NewUserRepository(db).Create(context.Background(), user); err != nil {
+	if err := conn.Users.Create(context.Background(), user); err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "create user"))
 		return
 	}
@@ -115,14 +114,14 @@ func handleUserList(args []string) {
 		exitWithMnemosError(false, NewUserError("user list takes no arguments"))
 		return
 	}
-	db, conn, err := openDB(context.Background())
+	conn, err := openConn(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
 	defer closeConn(conn)
 
-	users, err := sqlite.NewUserRepository(db).List(context.Background())
+	users, err := conn.Users.List(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "list users"))
 		return
@@ -150,14 +149,14 @@ func handleUserRevoke(args []string) {
 	}
 	id := args[0]
 
-	db, conn, err := openDB(context.Background())
+	conn, err := openConn(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
 	defer closeConn(conn)
 
-	if err := sqlite.NewUserRepository(db).UpdateStatus(context.Background(), id, domain.UserStatusRevoked); err != nil {
+	if err := conn.Users.UpdateStatus(context.Background(), id, domain.UserStatusRevoked); err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "revoke user"))
 		return
 	}
@@ -222,14 +221,14 @@ func handleTokenIssue(args []string) {
 		return
 	}
 
-	db, conn, err := openDB(context.Background())
+	conn, err := openConn(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
 	defer closeConn(conn)
 
-	user, err := sqlite.NewUserRepository(db).GetByID(context.Background(), userID)
+	user, err := conn.Users.GetByID(context.Background(), userID)
 	if err != nil {
 		exitWithMnemosError(false, NewUserError("user %s not found", userID))
 		return
@@ -262,7 +261,7 @@ func handleTokenRevoke(args []string) {
 	}
 	jti := args[0]
 
-	db, conn, err := openDB(context.Background())
+	conn, err := openConn(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
@@ -279,7 +278,7 @@ func handleTokenRevoke(args []string) {
 		RevokedAt: time.Now().UTC(),
 		ExpiresAt: time.Now().UTC().Add(365 * 24 * time.Hour),
 	}
-	if err := sqlite.NewRevokedTokenRepository(db).Add(context.Background(), rt); err != nil {
+	if err := conn.RevokedTokens.Add(context.Background(), rt); err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "revoke token"))
 		return
 	}

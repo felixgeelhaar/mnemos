@@ -2,12 +2,10 @@ package main
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
 func TestResolveActor_UnsetFallsBackToSystem(t *testing.T) {
@@ -45,22 +43,18 @@ func TestResolveActor_EnvUsedWhenFlagEmpty(t *testing.T) {
 
 func TestResolveActor_ValidatesAgainstDB(t *testing.T) {
 	t.Setenv("MNEMOS_USER_ID", "")
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	_, conn := openTestStore(t)
 
 	// User exists and is active → resolves to their id.
 	userID := "usr_real"
-	err = sqlite.NewUserRepository(db).Create(context.Background(), domain.User{
+	err := conn.Users.Create(context.Background(), domain.User{
 		ID: userID, Name: "Real", Email: "real@test.local",
 		Status: domain.UserStatusActive, CreatedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	got, err := resolveActor(context.Background(), db, userID)
+	got, err := resolveActor(context.Background(), conn.Users, userID)
 	if err != nil {
 		t.Fatalf("resolve existing: %v", err)
 	}
@@ -69,48 +63,39 @@ func TestResolveActor_ValidatesAgainstDB(t *testing.T) {
 	}
 
 	// Missing user → user error.
-	if _, err := resolveActor(context.Background(), db, "usr_missing"); err == nil {
+	if _, err := resolveActor(context.Background(), conn.Users, "usr_missing"); err == nil {
 		t.Error("expected error for missing user, got nil")
 	}
 }
 
 func TestResolveActor_RevokedUserRejected(t *testing.T) {
 	t.Setenv("MNEMOS_USER_ID", "")
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	_, conn := openTestStore(t)
 
 	userID := "usr_gone"
 	ctx := context.Background()
-	repo := sqlite.NewUserRepository(db)
-	err = repo.Create(ctx, domain.User{
+	err := conn.Users.Create(ctx, domain.User{
 		ID: userID, Name: "Gone", Email: "gone@test.local",
 		Status: domain.UserStatusActive, CreatedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := repo.UpdateStatus(ctx, userID, domain.UserStatusRevoked); err != nil {
+	if err := conn.Users.UpdateStatus(ctx, userID, domain.UserStatusRevoked); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 
-	if _, err := resolveActor(ctx, db, userID); err == nil {
+	if _, err := resolveActor(ctx, conn.Users, userID); err == nil {
 		t.Error("expected error for revoked user, got nil")
 	}
 }
 
 func TestResolveActor_SystemSentinelPassesThrough(t *testing.T) {
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	_, conn := openTestStore(t)
 
 	// The sentinel is never looked up in the users table — it's allowed
 	// everywhere as the fallback attribution for unauthenticated writes.
-	got, err := resolveActor(context.Background(), db, domain.SystemUser)
+	got, err := resolveActor(context.Background(), conn.Users, domain.SystemUser)
 	if err != nil {
 		t.Fatalf("resolve system: %v", err)
 	}

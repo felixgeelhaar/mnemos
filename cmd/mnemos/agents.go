@@ -11,7 +11,6 @@ import (
 
 	"github.com/felixgeelhaar/mnemos/internal/auth"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
 // handleAgent dispatches `mnemos agent <subcommand>`. The token
@@ -85,7 +84,7 @@ func handleAgentCreate(args []string) {
 		return
 	}
 
-	db, conn, err := openDB(context.Background())
+	conn, err := openConn(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
@@ -95,7 +94,7 @@ func handleAgentCreate(args []string) {
 
 	// Resolve owner up front so the FK error message stays a friendly
 	// "user not found" rather than a raw constraint violation.
-	if _, err := sqlite.NewUserRepository(db).GetByID(ctx, owner); err != nil {
+	if _, err := conn.Users.GetByID(ctx, owner); err != nil {
 		exitWithMnemosError(false, NewUserError("owner user %q not found — create it with 'mnemos user create'", owner))
 		return
 	}
@@ -114,7 +113,7 @@ func handleAgentCreate(args []string) {
 		Status:      domain.AgentStatusActive,
 		CreatedAt:   time.Now().UTC(),
 	}
-	if err := sqlite.NewAgentRepository(db).Create(ctx, agent); err != nil {
+	if err := conn.Agents.Create(ctx, agent); err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "create agent"))
 		return
 	}
@@ -136,14 +135,14 @@ func handleAgentList(args []string) {
 		exitWithMnemosError(false, NewUserError("agent list takes no arguments"))
 		return
 	}
-	db, conn, err := openDB(context.Background())
+	conn, err := openConn(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
 	defer closeConn(conn)
 
-	agents, err := sqlite.NewAgentRepository(db).List(context.Background())
+	agents, err := conn.Agents.List(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "list agents"))
 		return
@@ -171,14 +170,14 @@ func handleAgentRevoke(args []string) {
 	}
 	id := args[0]
 
-	db, conn, err := openDB(context.Background())
+	conn, err := openConn(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
 	defer closeConn(conn)
 
-	if err := sqlite.NewAgentRepository(db).UpdateStatus(context.Background(), id, domain.AgentStatusRevoked); err != nil {
+	if err := conn.Agents.UpdateStatus(context.Background(), id, domain.AgentStatusRevoked); err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "revoke agent"))
 		return
 	}
@@ -231,14 +230,14 @@ func handleAgentToken(args []string) {
 		return
 	}
 
-	db, conn, err := openDB(context.Background())
+	conn, err := openConn(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
 	defer closeConn(conn)
 
-	agent, err := sqlite.NewAgentRepository(db).GetByID(context.Background(), agentID)
+	agent, err := conn.Agents.GetByID(context.Background(), agentID)
 	if err != nil {
 		exitWithMnemosError(false, NewUserError("agent %s not found", agentID))
 		return

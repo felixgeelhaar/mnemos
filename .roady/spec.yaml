@@ -150,5 +150,13 @@ features:
       title: Multi-Backend Storage pipeline port refactor
       description: 'Phase 2b of ADR 0001: refactor pipeline.PersistArtifacts, pipeline.MaterializeEntities, pipeline.GenerateEmbeddings, pipeline.GenerateClaimEmbeddings to take *store.Conn instead of *sql.DB. Replace the cross-table SQLite transaction inside PersistArtifacts with sequential port-typed repository calls; per-table writes are still atomic in each backend. Trust scoring becomes optional via ports.TrustScorer type assertion. Update every caller in cmd/mnemos. Status-history attribution per claim is preserved by grouping claims by CreatedBy and calling UpsertWithReasonAs once per group. After this phase memory:// can run end-to-end ingest/process/embed paths. semantic_dedupe.go remains SQLite-specific (raw SQL probes) and is out of scope.'
       requirements: []
+    - id: multi-backend-storage-call-site-cleanup
+      title: Multi-Backend Storage call site cleanup
+      description: 'Phase 2c of ADR 0001: drop the remaining sqlite.NewXxxRepository(db) constructions across cmd/mnemos in favor of conn.Xxx port-typed access. Trust scoring callers use ports.TrustScorer assertion. semantic_dedupe.go stays SQLite-specific (raw SQL probes) until a separate dedicated phase. Goal: cmd/mnemos imports internal/store/sqlite ONLY for blank-import provider registration after this phase.'
+      requirements: []
+    - id: multi-backend-storage-postgres-provider
+      title: Multi-Backend Storage Postgres provider
+      description: 'Phase 3 of ADR 0001: add internal/store/postgres/ provider implementing every port interface. Uses pgx/v5 + database/sql. Translates ?namespace= into CREATE SCHEMA IF NOT EXISTS + SET search_path. pgvector for VectorSearcher capability, tsvector for TextSearcher. Migrations live alongside the provider and run on Open. CI gains a Postgres job (docker-compose). Mirrors the contract validated by SQLite + memory in Phases 1-2.'
+      requirements: []
 constraints: []
 version: 0.1.0

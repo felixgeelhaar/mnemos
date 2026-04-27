@@ -2,14 +2,13 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 )
 
 // handleResolve implements two operator-driven primitives for the
@@ -89,7 +88,7 @@ func handleResolve(args []string, f Flags) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	db, conn, err := openDB(ctx)
+	conn, err := openConn(ctx)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
@@ -97,15 +96,15 @@ func handleResolve(args []string, f Flags) {
 	defer closeConn(conn)
 
 	if supersededID != "" {
-		runSupersession(ctx, db, primaryID, supersededID, reason, f.Actor)
+		runSupersession(ctx, conn, primaryID, supersededID, reason, f.Actor)
 		return
 	}
-	runContradictionResolution(ctx, db, primaryID, loserID, reason, f.Actor)
+	runContradictionResolution(ctx, conn, primaryID, loserID, reason, f.Actor)
 }
 
 // runContradictionResolution preserves the v0.6 `--over` behavior:
 // pick a winner, mark the other deprecated, audit the transition.
-func runContradictionResolution(ctx context.Context, db *sql.DB, winnerID, loserID, reason, actorFlag string) {
+func runContradictionResolution(ctx context.Context, conn *store.Conn, winnerID, loserID, reason, actorFlag string) {
 	if winnerID == loserID {
 		exitWithMnemosError(false, NewUserError("winner and loser must be different claims"))
 		return
@@ -113,7 +112,7 @@ func runContradictionResolution(ctx context.Context, db *sql.DB, winnerID, loser
 	if reason == "" {
 		reason = "operator resolution via mnemos resolve"
 	}
-	claimRepo := sqlite.NewClaimRepository(db)
+	claimRepo := conn.Claims
 	found, err := claimRepo.ListByIDs(ctx, []string{winnerID, loserID})
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "look up claims"))
@@ -134,7 +133,7 @@ func runContradictionResolution(ctx context.Context, db *sql.DB, winnerID, loser
 		return
 	}
 
-	actor, err := resolveActor(ctx, db, actorFlag)
+	actor, err := resolveActor(ctx, conn.Users, actorFlag)
 	if err != nil {
 		exitWithMnemosError(false, err)
 		return
@@ -159,7 +158,7 @@ func runContradictionResolution(ctx context.Context, db *sql.DB, winnerID, loser
 // only valid_to changes. The audit trail goes via
 // claim_status_history with the provided reason so reviewers can
 // see who said "this superseded that and when".
-func runSupersession(ctx context.Context, db *sql.DB, newID, oldID, reason, actorFlag string) {
+func runSupersession(ctx context.Context, conn *store.Conn, newID, oldID, reason, actorFlag string) {
 	if newID == oldID {
 		exitWithMnemosError(false, NewUserError("new and old must be different claims"))
 		return
@@ -167,7 +166,7 @@ func runSupersession(ctx context.Context, db *sql.DB, newID, oldID, reason, acto
 	if reason == "" {
 		reason = "operator supersession via mnemos resolve"
 	}
-	claimRepo := sqlite.NewClaimRepository(db)
+	claimRepo := conn.Claims
 	found, err := claimRepo.ListByIDs(ctx, []string{newID, oldID})
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "look up claims"))
@@ -188,7 +187,7 @@ func runSupersession(ctx context.Context, db *sql.DB, newID, oldID, reason, acto
 		return
 	}
 
-	actor, err := resolveActor(ctx, db, actorFlag)
+	actor, err := resolveActor(ctx, conn.Users, actorFlag)
 	if err != nil {
 		exitWithMnemosError(false, err)
 		return

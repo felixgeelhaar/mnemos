@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
+	"github.com/felixgeelhaar/mnemos/internal/ports"
 )
 
 // resolveActor returns the actor id to stamp on CLI-initiated writes,
@@ -19,11 +19,11 @@ import (
 //  2. MNEMOS_USER_ID env var
 //  3. domain.SystemUser sentinel ("<system>")
 //
-// The db argument is consulted only when an explicit actor was
+// The users argument is consulted only when an explicit actor was
 // supplied (flag or env): the user must exist and be active. Passing
-// a nil db skips validation — callers that don't have a DB handy
+// nil skips validation — callers that don't have a backend handy
 // (e.g. a dry-run path) can use it to just compute the string.
-func resolveActor(ctx context.Context, db *sql.DB, flagValue string) (string, error) {
+func resolveActor(ctx context.Context, users ports.UserRepository, flagValue string) (string, error) {
 	candidate := strings.TrimSpace(flagValue)
 	if candidate == "" {
 		candidate = strings.TrimSpace(os.Getenv("MNEMOS_USER_ID"))
@@ -34,11 +34,11 @@ func resolveActor(ctx context.Context, db *sql.DB, flagValue string) (string, er
 	if candidate == domain.SystemUser {
 		return candidate, nil
 	}
-	if db == nil {
+	if users == nil {
 		return candidate, nil
 	}
 
-	user, err := sqlite.NewUserRepository(db).GetByID(ctx, candidate)
+	user, err := users.GetByID(ctx, candidate)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "not found") {
 			return "", NewUserError("user %q not found — create it with 'mnemos user create' first", candidate)

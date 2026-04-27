@@ -19,18 +19,18 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/llm"
 	"github.com/felixgeelhaar/mnemos/internal/parser"
 	"github.com/felixgeelhaar/mnemos/internal/pipeline"
+	"github.com/felixgeelhaar/mnemos/internal/ports"
 	"github.com/felixgeelhaar/mnemos/internal/query"
 	"github.com/felixgeelhaar/mnemos/internal/relate"
 	"github.com/felixgeelhaar/mnemos/internal/store"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 	"github.com/felixgeelhaar/mnemos/internal/workflow"
 
 	// Register storage providers with the top-level store registry so
 	// resolveDSN()/openConn() and any future call-site migrations can
-	// dispatch on URL scheme. Side-effect imports only — direct API
-	// access still uses the named imports above during the migration
-	// window.
+	// dispatch on URL scheme. Side-effect imports only — main.go no
+	// longer needs the named sqlite import.
 	_ "github.com/felixgeelhaar/mnemos/internal/store/memory"
+	_ "github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
 // resolveDBPath returns the database path in the following precedence:
@@ -251,7 +251,7 @@ func handleIngest(args []string, f Flags) {
 
 		contentArg := strings.Join(args[1:], " ")
 		err := runJob("ingest", map[string]string{"source": "raw_text"}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB, conn *store.Conn) error {
-			actor, err := resolveActor(ctx, db, f.Actor)
+			actor, err := resolveActor(ctx, conn.Users, f.Actor)
 			if err != nil {
 				return err
 			}
@@ -276,7 +276,7 @@ func handleIngest(args []string, f Flags) {
 			if err := job.SetStatus("saving", ""); err != nil {
 				return err
 			}
-			repo := sqlite.NewEventRepository(db)
+			repo := conn.Events
 			for _, event := range events {
 				if err := repo.Append(ctx, event); err != nil {
 					return NewSystemError(err, "failed to persist event %s", event.ID)
@@ -298,7 +298,7 @@ func handleIngest(args []string, f Flags) {
 
 	path := args[0]
 	err := runJob("ingest", map[string]string{"path": path}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB, conn *store.Conn) error {
-		actor, err := resolveActor(ctx, db, f.Actor)
+		actor, err := resolveActor(ctx, conn.Users, f.Actor)
 		if err != nil {
 			return err
 		}
@@ -323,7 +323,7 @@ func handleIngest(args []string, f Flags) {
 		if err := job.SetStatus("saving", ""); err != nil {
 			return err
 		}
-		repo := sqlite.NewEventRepository(db)
+		repo := conn.Events
 		for _, event := range events {
 			if err := repo.Append(ctx, event); err != nil {
 				return NewSystemError(err, "failed to persist event %s", event.ID)
@@ -365,13 +365,16 @@ func handleQuery(args []string, f Flags) {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
-		eventRepo := sqlite.NewEventRepository(db)
-		claimRepo := sqlite.NewClaimRepository(db)
-		engine := query.NewEngine(
-			eventRepo,
-			claimRepo,
-			sqlite.NewRelationshipRepository(db),
-		).WithTextSearch(eventRepo, claimRepo)
+		eventRepo := conn.Events
+		claimRepo := conn.Claims
+		engine := query.NewEngine(eventRepo, claimRepo, conn.Relationships)
+		// WithTextSearch is an optional capability (FTS5 etc); engage
+		// it only when both repos satisfy the TextSearcher port.
+		if eventSearcher, ok := eventRepo.(ports.TextSearcher); ok {
+			if claimSearcher, ok := claimRepo.(ports.TextSearcher); ok {
+				engine = engine.WithTextSearch(eventSearcher, claimSearcher)
+			}
+		}
 
 		if f.Embed {
 			printProgress("semantic search: preparing query embeddings")
@@ -384,7 +387,7 @@ func handleQuery(args []string, f Flags) {
 					printProgress("warning: --embed requested but embedding client failed: %v (falling back to keyword matching)", err)
 				} else {
 					engine = engine.WithEmbeddings(
-						sqlite.NewEmbeddingRepository(db),
+						conn.Embeddings,
 						embClient,
 					)
 				}
@@ -414,7 +417,7 @@ func handleQuery(args []string, f Flags) {
 			IncludeHistory: includeHistory,
 		}
 		if entity != "" {
-			entRepo := sqlite.NewEntityRepository(db)
+			entRepo := conn.Entities
 			ent, ok, rErr := resolveEntity(ctx, entRepo, entity)
 			if rErr != nil {
 				return NewSystemError(rErr, "resolve entity %q", entity)
@@ -443,7 +446,7 @@ func handleQuery(args []string, f Flags) {
 		if f.Human {
 			// Resolve claim text for contradiction display — some
 			// contradictions may reference claims outside the answer set.
-			resolveContradictionClaimText(ctx, db, &answer)
+			resolveContradictionClaimText(ctx, conn.Claims, &answer)
 			printHumanReadableAnswer(question, answer)
 		} else {
 			response := map[string]any{
@@ -465,7 +468,7 @@ func handleQuery(args []string, f Flags) {
 
 // resolveContradictionClaimText ensures all claims referenced in contradictions
 // have their text available in the answer's claim set for display purposes.
-func resolveContradictionClaimText(ctx context.Context, db *sql.DB, answer *domain.Answer) {
+func resolveContradictionClaimText(ctx context.Context, claimRepo ports.ClaimRepository, answer *domain.Answer) {
 	if len(answer.Contradictions) == 0 {
 		return
 	}
@@ -490,7 +493,6 @@ func resolveContradictionClaimText(ctx context.Context, db *sql.DB, answer *doma
 		return
 	}
 
-	claimRepo := sqlite.NewClaimRepository(db)
 	allClaims, err := claimRepo.ListAll(ctx)
 	if err != nil {
 		return
@@ -618,14 +620,14 @@ func handleExtract(args []string, f Flags) {
 	}
 
 	err := runJob("extract", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB, conn *store.Conn) error {
-		actor, actorErr := resolveActor(ctx, db, f.Actor)
+		actor, actorErr := resolveActor(ctx, conn.Users, f.Actor)
 		if actorErr != nil {
 			return actorErr
 		}
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
-		eventRepo := sqlite.NewEventRepository(db)
+		eventRepo := conn.Events
 
 		var events []domain.Event
 		var err error
@@ -667,7 +669,7 @@ func handleExtract(args []string, f Flags) {
 			return err
 		}
 		stampClaimActor(claims, actor)
-		claimRepo := sqlite.NewClaimRepository(db)
+		claimRepo := conn.Claims
 		if err := claimRepo.Upsert(ctx, claims); err != nil {
 			return NewSystemError(err, "failed to persist claims")
 		}
@@ -693,15 +695,15 @@ func handleExtract(args []string, f Flags) {
 
 func handleRelate(args []string, f Flags) {
 	err := runJob("relate", map[string]string{"event_ids": strings.Join(args, ",")}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB, conn *store.Conn) error {
-		actor, actorErr := resolveActor(ctx, db, f.Actor)
+		actor, actorErr := resolveActor(ctx, conn.Users, f.Actor)
 		if actorErr != nil {
 			return actorErr
 		}
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
-		claimRepo := sqlite.NewClaimRepository(db)
-		relRepo := sqlite.NewRelationshipRepository(db)
+		claimRepo := conn.Claims
+		relRepo := conn.Relationships
 
 		var claims []domain.Claim
 		var err error
@@ -760,7 +762,7 @@ func handleProcess(args []string, f Flags) {
 	}
 
 	err := runJob("process", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB, conn *store.Conn) error {
-		actor, actorErr := resolveActor(ctx, db, f.Actor)
+		actor, actorErr := resolveActor(ctx, conn.Users, f.Actor)
 		if actorErr != nil {
 			return actorErr
 		}
@@ -820,7 +822,7 @@ func handleProcess(args []string, f Flags) {
 		// Failure here is non-fatal — we still persist what we have.
 		var existingClaims []domain.Claim
 		{
-			claimRepo := sqlite.NewClaimRepository(db)
+			claimRepo := conn.Claims
 			loadCtx, loadCancel := context.WithTimeout(ctx, 30*time.Second)
 			loaded, loadErr := claimRepo.ListAll(loadCtx)
 			loadCancel()
@@ -931,10 +933,13 @@ func handleMetrics(f Flags) {
 		// corroboration, or freshness. Tunable via the constant
 		// internal/trust.LowTrustThreshold if it ever wants a knob.
 		const lowTrustThreshold = 0.5
-		claimRepo := sqlite.NewClaimRepository(db)
-		avgTrust, _ := claimRepo.AverageTrust(ctx)
-		lowTrust, _ := claimRepo.CountClaimsBelowTrust(ctx, lowTrustThreshold)
-		entityCount, _ := sqlite.NewEntityRepository(db).Count(ctx)
+		var avgTrust float64
+		var lowTrust int64
+		if scorer, ok := conn.Claims.(ports.TrustScorer); ok {
+			avgTrust, _ = scorer.AverageTrust(ctx)
+			lowTrust, _ = scorer.CountClaimsBelowTrust(ctx, lowTrustThreshold)
+		}
+		entityCount, _ := conn.Entities.Count(ctx)
 
 		metrics := map[string]any{
 			"runs":                countValue(db, `SELECT COUNT(DISTINCT run_id) FROM events WHERE run_id <> ''`),

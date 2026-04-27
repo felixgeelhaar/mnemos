@@ -334,9 +334,27 @@
       "estimate": "",
       "depends_on": [],
       "feature_id": "multi-backend-storage-pipeline-port-refactor"
+    },
+    {
+      "id": "task-multi-backend-storage-call-site-cleanup",
+      "title": "Implement Multi-Backend Storage call site cleanup",
+      "description": "Implement the feature: Multi-Backend Storage call site cleanup. Phase 2c of ADR 0001: drop the remaining sqlite.NewXxxRepository(db) constructions across cmd/mnemos in favor of conn.Xxx port-typed access. Trust scoring callers use ports.TrustScorer assertion. semantic_dedupe.go stays SQLite-specific (raw SQL probes) until a separate dedicated phase. Goal: cmd/mnemos imports internal/store/sqlite ONLY for blank-import provider registration after this phase.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "multi-backend-storage-call-site-cleanup"
+    },
+    {
+      "id": "task-multi-backend-storage-postgres-provider",
+      "title": "Implement Multi-Backend Storage Postgres provider",
+      "description": "Implement the feature: Multi-Backend Storage Postgres provider. Phase 3 of ADR 0001: add internal/store/postgres/ provider implementing every port interface. Uses pgx/v5 + database/sql. Translates ?namespace= into CREATE SCHEMA IF NOT EXISTS + SET search_path. pgvector for VectorSearcher capability, tsvector for TextSearcher. Migrations live alongside the provider and run on Open. CI gains a Postgres job (docker-compose). Mirrors the contract validated by SQLite + memory in Phases 1-2.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "multi-backend-storage-postgres-provider"
     }
   ],
   "approval_status": "approved",
   "created_at": "2026-04-12T11:03:09.397775+02:00",
-  "updated_at": "2026-04-27T23:20:17.201504+02:00"
+  "updated_at": "2026-04-27T23:39:40.971586+02:00"
 }

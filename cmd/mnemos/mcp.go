@@ -24,7 +24,6 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/query"
 	"github.com/felixgeelhaar/mnemos/internal/relate"
 	"github.com/felixgeelhaar/mnemos/internal/store"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 	"github.com/felixgeelhaar/mnemos/internal/workflow"
 )
 
@@ -468,14 +467,14 @@ func resolveMCPActor() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	db, conn, err := openDB(ctx)
+	conn, err := openConn(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp: MNEMOS_USER_ID=%s but couldn't open DB to validate: %v — using <system>\n", candidate, err)
 		return domain.SystemUser
 	}
 	defer closeConn(conn)
 
-	actor, err := resolveActor(ctx, db, candidate)
+	actor, err := resolveActor(ctx, conn.Users, candidate)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp: MNEMOS_USER_ID=%s rejected: %v — using <system>\n", candidate, err)
 		return domain.SystemUser
@@ -484,17 +483,13 @@ func resolveMCPActor() string {
 }
 
 func mcpRunQuery(ctx context.Context, input mcpQueryInput) (mcpQueryOutput, error) {
-	db, conn, err := openDB(ctx)
+	conn, err := openConn(ctx)
 	if err != nil {
 		return mcpQueryOutput{}, err
 	}
 	defer closeConn(conn)
 
-	engine := query.NewEngine(
-		sqlite.NewEventRepository(db),
-		sqlite.NewClaimRepository(db),
-		sqlite.NewRelationshipRepository(db),
-	)
+	engine := query.NewEngine(conn.Events, conn.Claims, conn.Relationships)
 
 	// Enable semantic ranking when an embedding provider is configured —
 	// auto-detected via Ollama or env vars. Without this the engine falls
@@ -502,10 +497,7 @@ func mcpRunQuery(ctx context.Context, input mcpQueryInput) (mcpQueryOutput, erro
 	// when the DB has embeddings.
 	if embCfg, err := embedding.ConfigFromEnv(); err == nil {
 		if embClient, err := embedding.NewClient(embCfg); err == nil {
-			engine = engine.WithEmbeddings(
-				sqlite.NewEmbeddingRepository(db),
-				embClient,
-			)
+			engine = engine.WithEmbeddings(conn.Embeddings, embClient)
 		}
 	}
 
@@ -549,13 +541,13 @@ func mcpRunProcessText(ctx context.Context, actor string, input mcpProcessTextIn
 	normalizer := parser.NewNormalizer()
 	progress := mcp.ProgressFromContext(ctx)
 
-	db, conn, err := openDB(ctx)
+	conn, err := openConn(ctx)
 	if err != nil {
 		return mcpProcessTextOutput{}, err
 	}
 	defer closeConn(conn)
 
-	runner := workflow.NewRunner(sqlite.NewCompilationJobRepository(db))
+	runner := workflow.NewRunner(conn.Jobs)
 	runner.Timeout = 30 * time.Second
 	runner.MaxRetries = 1
 

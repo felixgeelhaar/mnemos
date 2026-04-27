@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 88,
+  "version": 90,
   "task_states": {
     "task-append-only-event-store": {
       "status": "done",
@@ -222,6 +222,13 @@
       "completed_at": "2026-04-18T01:05:35.842051+02:00",
       "elapsed_minutes": 0
     },
+    "task-multi-backend-storage-call-site-cleanup": {
+      "status": "in_progress",
+      "path": "",
+      "owner": "ai-agent",
+      "started_at": "2026-04-27T23:39:50.905461+02:00",
+      "elapsed_minutes": 0
+    },
     "task-multi-backend-storage-cmd/mnemos-call-site-migration": {
       "status": "done",
       "path": "",
@@ -276,6 +283,11 @@
       "started_at": "2026-04-27T23:11:54.461822+02:00",
       "completed_at": "2026-04-27T23:17:12.755046+02:00",
       "elapsed_minutes": 5
+    },
+    "task-multi-backend-storage-postgres-provider": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
     },
     "task-multi-format-input-service": {
       "status": "done",
@@ -410,5 +422,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-04-27T23:34:29.958114+02:00"
+  "updated_at": "2026-04-27T23:39:50.905461+02:00"
 }

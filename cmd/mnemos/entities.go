@@ -11,8 +11,8 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/extract"
 	"github.com/felixgeelhaar/mnemos/internal/pipeline"
+	"github.com/felixgeelhaar/mnemos/internal/ports"
 	"github.com/felixgeelhaar/mnemos/internal/store"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 	"github.com/felixgeelhaar/mnemos/internal/workflow"
 )
 
@@ -57,7 +57,7 @@ func handleEntitiesList(args []string, f Flags) {
 	}
 
 	err := runJob("entities-list", map[string]string{"type": typeFilter}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, conn *store.Conn) error {
-		repo := sqlite.NewEntityRepository(db)
+		repo := conn.Entities
 		var (
 			ents []domain.Entity
 			err  error
@@ -93,7 +93,7 @@ func handleEntitiesShow(args []string, f Flags) {
 	target := strings.Join(args, " ")
 
 	err := runJob("entities-show", map[string]string{"target": target}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, conn *store.Conn) error {
-		repo := sqlite.NewEntityRepository(db)
+		repo := conn.Entities
 		entity, ok, err := resolveEntity(ctx, repo, target)
 		if err != nil {
 			return NewSystemError(err, "resolve entity")
@@ -130,7 +130,7 @@ func handleEntitiesMerge(args []string, f Flags) {
 	winnerID, loserID := args[0], args[1]
 
 	err := runJob("entities-merge", map[string]string{"winner": winnerID, "loser": loserID}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, conn *store.Conn) error {
-		repo := sqlite.NewEntityRepository(db)
+		repo := conn.Entities
 		if err := repo.Merge(ctx, winnerID, loserID); err != nil {
 			return NewSystemError(err, "merge entities")
 		}
@@ -157,10 +157,10 @@ func handleExtractEntities(args []string, f Flags) {
 	}
 
 	err := runJob("extract-entities", map[string]string{"all": fmt.Sprintf("%t", all)}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, conn *store.Conn) error {
-		repo := sqlite.NewEntityRepository(db)
+		repo := conn.Entities
 		var ids []string
 		if all {
-			claims, err := sqlite.NewClaimRepository(db).ListAll(ctx)
+			claims, err := conn.Claims.ListAll(ctx)
 			if err != nil {
 				return NewSystemError(err, "list all claims")
 			}
@@ -187,7 +187,7 @@ func handleExtractEntities(args []string, f Flags) {
 		if extErr != nil {
 			return extErr
 		}
-		claimRepo := sqlite.NewClaimRepository(db)
+		claimRepo := conn.Claims
 
 		const batchSize = 16
 		linkedTotal := 0
@@ -285,7 +285,7 @@ func remapEntitiesToOriginalClaims(
 // (starts with "en_") or a name — to a stored entity. Returns
 // (entity, true, nil) on a hit, (zero, false, nil) on a miss,
 // (zero, false, err) on a transport error.
-func resolveEntity(ctx context.Context, repo sqlite.EntityRepository, target string) (domain.Entity, bool, error) {
+func resolveEntity(ctx context.Context, repo ports.EntityRepository, target string) (domain.Entity, bool, error) {
 	if strings.HasPrefix(target, "en_") {
 		ents, err := repo.List(ctx)
 		if err != nil {

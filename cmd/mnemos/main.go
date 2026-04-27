@@ -21,6 +21,7 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/pipeline"
 	"github.com/felixgeelhaar/mnemos/internal/query"
 	"github.com/felixgeelhaar/mnemos/internal/relate"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 	"github.com/felixgeelhaar/mnemos/internal/workflow"
 
@@ -249,7 +250,7 @@ func handleIngest(args []string, f Flags) {
 		}
 
 		contentArg := strings.Join(args[1:], " ")
-		err := runJob("ingest", map[string]string{"source": "raw_text"}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
+		err := runJob("ingest", map[string]string{"source": "raw_text"}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB, conn *store.Conn) error {
 			actor, err := resolveActor(ctx, db, f.Actor)
 			if err != nil {
 				return err
@@ -296,7 +297,7 @@ func handleIngest(args []string, f Flags) {
 	}
 
 	path := args[0]
-	err := runJob("ingest", map[string]string{"path": path}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
+	err := runJob("ingest", map[string]string{"path": path}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB, conn *store.Conn) error {
 		actor, err := resolveActor(ctx, db, f.Actor)
 		if err != nil {
 			return err
@@ -360,7 +361,7 @@ func handleQuery(args []string, f Flags) {
 		scope["include_history"] = "true"
 	}
 
-	err = runJob("query", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
+	err = runJob("query", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB, conn *store.Conn) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -616,7 +617,7 @@ func handleExtract(args []string, f Flags) {
 		scope["event_ids"] = strings.Join(eventIDs, ",")
 	}
 
-	err := runJob("extract", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
+	err := runJob("extract", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB, conn *store.Conn) error {
 		actor, actorErr := resolveActor(ctx, db, f.Actor)
 		if actorErr != nil {
 			return actorErr
@@ -677,7 +678,7 @@ func handleExtract(args []string, f Flags) {
 		// Materialise entities from the LLM tags. Same non-fatal
 		// treatment as the process command — claims are persisted;
 		// entities are an enrichment.
-		if n, entErr := pipeline.MaterializeEntities(ctx, db, entities, actor); entErr != nil {
+		if n, entErr := pipeline.MaterializeEntities(ctx, conn, entities, actor); entErr != nil {
 			warn := icon("⚠️", "(!)")
 			fmt.Fprintf(os.Stderr, "  %s entity materialisation failed at link %d: %v\n", warn, n, entErr)
 		} else if n > 0 {
@@ -691,7 +692,7 @@ func handleExtract(args []string, f Flags) {
 }
 
 func handleRelate(args []string, f Flags) {
-	err := runJob("relate", map[string]string{"event_ids": strings.Join(args, ",")}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
+	err := runJob("relate", map[string]string{"event_ids": strings.Join(args, ",")}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB, conn *store.Conn) error {
 		actor, actorErr := resolveActor(ctx, db, f.Actor)
 		if actorErr != nil {
 			return actorErr
@@ -758,7 +759,7 @@ func handleProcess(args []string, f Flags) {
 		scope = map[string]string{"source": "raw_text"}
 	}
 
-	err := runJob("process", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
+	err := runJob("process", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB, conn *store.Conn) error {
 		actor, actorErr := resolveActor(ctx, db, f.Actor)
 		if actorErr != nil {
 			return actorErr
@@ -868,7 +869,7 @@ func handleProcess(args []string, f Flags) {
 		stampEventActor(events, actor)
 		stampClaimActor(claims, actor)
 		stampRelationshipActor(rels, actor)
-		if err := pipeline.PersistArtifacts(ctx, db, events, claims, links, rels); err != nil {
+		if err := pipeline.PersistArtifacts(ctx, conn, events, claims, links, rels); err != nil {
 			return err
 		}
 
@@ -876,7 +877,7 @@ func handleProcess(args []string, f Flags) {
 		// here is non-fatal — claims persist; a future
 		// `mnemos extract-entities` can backfill any that didn't
 		// land. Surfaced as a warning so the operator knows.
-		if n, entErr := pipeline.MaterializeEntities(ctx, db, entities, actor); entErr != nil {
+		if n, entErr := pipeline.MaterializeEntities(ctx, conn, entities, actor); entErr != nil {
 			warn := icon("⚠️", "(!)")
 			fmt.Fprintf(os.Stderr, "\n  %s Entity materialisation failed at link %d: %v\n", warn, n, entErr)
 		} else if n > 0 {
@@ -888,7 +889,7 @@ func handleProcess(args []string, f Flags) {
 				return err
 			}
 			printProgress("embedding: generating vectors with %s", os.Getenv("MNEMOS_EMBED_PROVIDER"))
-			if n, err := pipeline.GenerateEmbeddings(ctx, db, events); err != nil {
+			if n, err := pipeline.GenerateEmbeddings(ctx, conn, events); err != nil {
 				// Embedding failure is non-fatal but should be prominent since --embed was explicit.
 				warn := icon("⚠️", "(!)")
 				fmt.Fprintf(os.Stderr, "\n  %s Event embedding failed: %v\n", warn, err)
@@ -898,7 +899,7 @@ func handleProcess(args []string, f Flags) {
 				printProgress("embedding: generated %d event vectors", n)
 			}
 
-			if nc, err := pipeline.GenerateClaimEmbeddings(ctx, db, claims); err != nil {
+			if nc, err := pipeline.GenerateClaimEmbeddings(ctx, conn, claims); err != nil {
 				warn := icon("⚠️", "(!)")
 				fmt.Fprintf(os.Stderr, "\n  %s Claim embedding failed: %v\n", warn, err)
 			} else {
@@ -920,7 +921,7 @@ func handleProcess(args []string, f Flags) {
 }
 
 func handleMetrics(f Flags) {
-	err := runJob("metrics", map[string]string{}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB) error {
+	err := runJob("metrics", map[string]string{}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB, conn *store.Conn) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -1273,7 +1274,7 @@ func jobTimeout() time.Duration {
 	return d
 }
 
-func runJob(kind string, scope map[string]string, verbose bool, fn func(context.Context, *workflow.Job, *sql.DB) error) error {
+func runJob(kind string, scope map[string]string, verbose bool, fn func(context.Context, *workflow.Job, *sql.DB, *store.Conn) error) error {
 	// First-run detection still uses the resolved file path (it's a
 	// SQLite-only concept — checking whether the DB file is newly
 	// created). When MNEMOS_DB_URL points at a non-SQLite backend
@@ -1291,13 +1292,13 @@ func runJob(kind string, scope map[string]string, verbose bool, fn func(context.
 	}
 	defer closeConn(conn)
 
-	runner := workflow.NewRunner(sqlite.NewCompilationJobRepository(db))
+	runner := workflow.NewRunner(conn.Jobs)
 	runner.Timeout = jobTimeout()
 	runner.MaxRetries = 1
 	runner.Verbose = verbose
 
 	jobErr := runner.Run(kind, scope, func(ctx context.Context, job *workflow.Job) error {
-		return fn(ctx, job, db)
+		return fn(ctx, job, db, conn)
 	})
 	return jobErr
 }

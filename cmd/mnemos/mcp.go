@@ -182,13 +182,13 @@ func handleMCP() {
 			// per process and the long-lived Conn lifecycle is governed
 			// by the deferred closeConn below, not by request-scoped
 			// cancellation.
-			db, conn, err := openDB(context.Background())
+			conn, err := openConn(context.Background())
 			if err != nil {
 				watcherErr = err
 				return
 			}
 			watcherConn = conn
-			watcher = NewWatcher(db, mcpActor)
+			watcher = NewWatcher(conn, mcpActor)
 		})
 		return watcher, watcherErr
 	}
@@ -344,14 +344,14 @@ func runGitContextIngest(projectRoot, actor string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	db, conn, err := openDB(ctx)
+	conn, err := openConn(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "git: failed to open DB: %v\n", err)
 		return
 	}
 	defer closeConn(conn)
 
-	ingested, skipped, err := ingestGitLog(ctx, db, projectRoot, defaultGitLogLimit, "", actor)
+	ingested, skipped, err := ingestGitLog(ctx, conn, projectRoot, defaultGitLogLimit, "", actor)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "git: %v\n", err)
 		return
@@ -371,14 +371,14 @@ func runPRContextIngest(projectRoot, actor string) {
 		return
 	}
 
-	db, conn, err := openDB(ctx)
+	conn, err := openConn(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "git-prs: failed to open DB: %v\n", err)
 		return
 	}
 	defer closeConn(conn)
 
-	ingested, skipped, err := ingestGhPRs(ctx, db, projectRoot, defaultGitPRLimit, actor)
+	ingested, skipped, err := ingestGhPRs(ctx, conn, projectRoot, defaultGitPRLimit, actor)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "git-prs: %v\n", err)
 		return
@@ -396,13 +396,13 @@ func mcpRunIngestGitPRs(ctx context.Context, actor string, input mcpIngestGitPRs
 	if !ghAvailable(ctx) {
 		return mcpIngestGitPRsOutput{}, fmt.Errorf("gh CLI not installed or not authenticated for github.com")
 	}
-	db, conn, err := openDB(ctx)
+	conn, err := openConn(ctx)
 	if err != nil {
 		return mcpIngestGitPRsOutput{}, err
 	}
 	defer closeConn(conn)
 
-	ingested, skipped, err := ingestGhPRs(ctx, db, projectRoot, input.Limit, actor)
+	ingested, skipped, err := ingestGhPRs(ctx, conn, projectRoot, input.Limit, actor)
 	if err != nil {
 		return mcpIngestGitPRsOutput{}, err
 	}
@@ -417,13 +417,13 @@ func mcpRunIngestGitLog(ctx context.Context, actor string, input mcpIngestGitLog
 	if !repoIsGit(projectRoot) {
 		return mcpIngestGitLogOutput{}, fmt.Errorf("project root %s is not a git repository", projectRoot)
 	}
-	db, conn, err := openDB(ctx)
+	conn, err := openConn(ctx)
 	if err != nil {
 		return mcpIngestGitLogOutput{}, err
 	}
 	defer closeConn(conn)
 
-	ingested, skipped, err := ingestGitLog(ctx, db, projectRoot, input.Limit, input.Since, actor)
+	ingested, skipped, err := ingestGitLog(ctx, conn, projectRoot, input.Limit, input.Since, actor)
 	if err != nil {
 		return mcpIngestGitLogOutput{}, err
 	}
@@ -434,14 +434,14 @@ func runAutoIngest(projectRoot, actor string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	db, conn, err := openDB(ctx)
+	conn, err := openConn(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "auto-ingest: failed to open DB: %v\n", err)
 		return
 	}
 	defer closeConn(conn)
 
-	report := autoIngestProjectDocs(ctx, db, projectRoot, actor)
+	report := autoIngestProjectDocs(ctx, conn, projectRoot, actor)
 	if report.Ingested > 0 || report.Skipped > 0 || report.HasFailures() {
 		fmt.Fprintf(os.Stderr, "auto-ingest: ingested=%d skipped=%d failed=%d root=%s\n",
 			report.Ingested, report.Skipped, len(report.PerFileErrors), projectRoot)
@@ -608,8 +608,7 @@ func mcpRunProcessText(ctx context.Context, actor string, input mcpProcessTextIn
 			return err
 		}
 
-		claimRepo := sqlite.NewClaimRepository(db)
-		existingClaims, err := claimRepo.ListAll(ctx)
+		existingClaims, err := conn.Claims.ListAll(ctx)
 		if err != nil {
 			return err
 		}
@@ -628,14 +627,14 @@ func mcpRunProcessText(ctx context.Context, actor string, input mcpProcessTextIn
 		stampEventActor(events, actor)
 		stampClaimActor(claims, actor)
 		stampRelationshipActor(rels, actor)
-		if err := pipeline.PersistArtifacts(ctx, db, events, claims, links, rels); err != nil {
+		if err := pipeline.PersistArtifacts(ctx, conn, events, claims, links, rels); err != nil {
 			return err
 		}
 		// Best-effort entity materialisation; failures are logged
 		// but don't abort the MCP response. The agent caller cares
 		// about the answer; entity tagging is enrichment that can
 		// be backfilled via `mnemos extract-entities`.
-		if _, entErr := pipeline.MaterializeEntities(ctx, db, mcpEntities, actor); entErr != nil {
+		if _, entErr := pipeline.MaterializeEntities(ctx, conn, mcpEntities, actor); entErr != nil {
 			fmt.Fprintf(os.Stderr, "  entity materialisation (mcp) failed: %v\n", entErr)
 		}
 
@@ -644,11 +643,11 @@ func mcpRunProcessText(ctx context.Context, actor string, input mcpProcessTextIn
 			if err := job.SetStatus("embedding", ""); err != nil {
 				return err
 			}
-			embeddingCount, err = pipeline.GenerateEmbeddings(ctx, db, events)
+			embeddingCount, err = pipeline.GenerateEmbeddings(ctx, conn, events)
 			if err != nil {
 				return err
 			}
-			claimEmbCount, claimErr := pipeline.GenerateClaimEmbeddings(ctx, db, claims)
+			claimEmbCount, claimErr := pipeline.GenerateClaimEmbeddings(ctx, conn, claims)
 			if claimErr != nil {
 				return claimErr
 			}

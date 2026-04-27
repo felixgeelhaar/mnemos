@@ -13,6 +13,7 @@ import (
 
 	"github.com/felixgeelhaar/mnemos/internal/embedding"
 	"github.com/felixgeelhaar/mnemos/internal/pipeline"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
 	"github.com/felixgeelhaar/mnemos/internal/trust"
@@ -54,7 +55,7 @@ func handleReset(args []string, f Flags) {
 		}
 	}
 
-	err := runJob("reset", map[string]string{"keep_events": fmt.Sprintf("%t", keepEvents)}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB) error {
+	err := runJob("reset", map[string]string{"keep_events": fmt.Sprintf("%t", keepEvents)}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, _ *store.Conn) error {
 		counts, err := resetDB(ctx, db, keepEvents)
 		if err != nil {
 			return NewSystemError(err, "reset failed")
@@ -72,7 +73,7 @@ func handleDeleteClaim(args []string, f Flags) {
 		os.Exit(int(ExitUsage))
 	}
 
-	err := runJob("delete-claim", map[string]string{"ids": strings.Join(args, ",")}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB) error {
+	err := runJob("delete-claim", map[string]string{"ids": strings.Join(args, ",")}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, _ *store.Conn) error {
 		var deletedClaims, deletedRels, deletedEvidence int64
 		err := withTx(ctx, db, func(q *sqlcgen.Queries) error {
 			for _, id := range args {
@@ -117,7 +118,7 @@ func handleDeleteEvent(args []string, f Flags) {
 		os.Exit(int(ExitUsage))
 	}
 
-	err := runJob("delete-event", map[string]string{"ids": strings.Join(args, ",")}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB) error {
+	err := runJob("delete-event", map[string]string{"ids": strings.Join(args, ",")}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, _ *store.Conn) error {
 		var deletedEvents int64
 		var cascadedClaims int64
 		err := withTx(ctx, db, func(q *sqlcgen.Queries) error {
@@ -211,7 +212,7 @@ func handleDedupe(args []string, f Flags) {
 	err := runJob("dedup", map[string]string{
 		"threshold": strconv.FormatFloat(threshold, 'f', 2, 64),
 		"apply":     fmt.Sprintf("%t", apply),
-	}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB) error {
+	}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, _ *store.Conn) error {
 		plan, err := pipeline.PlanSemanticDedupe(ctx, db, threshold)
 		if err != nil {
 			return NewSystemError(err, "plan semantic dedupe")
@@ -271,7 +272,7 @@ func handleRecomputeTrust(args []string, f Flags) {
 		}
 	}
 
-	err := runJob("recompute-trust", map[string]string{}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB) error {
+	err := runJob("recompute-trust", map[string]string{}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, _ *store.Conn) error {
 		repo := sqlite.NewClaimRepository(db)
 		now := time.Now().UTC()
 		n, err := repo.RecomputeTrust(ctx, func(confidence float64, evidenceCount int, latestEvidence time.Time) float64 {
@@ -296,7 +297,7 @@ func handleReembed(args []string, f Flags) {
 		}
 	}
 
-	err := runJob("reembed", map[string]string{"force": fmt.Sprintf("%t", f.Force), "dry_run": fmt.Sprintf("%t", f.DryRun)}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB) error {
+	err := runJob("reembed", map[string]string{"force": fmt.Sprintf("%t", f.Force), "dry_run": fmt.Sprintf("%t", f.DryRun)}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, _ *store.Conn) error {
 		q := sqlcgen.New(db)
 
 		// Determine which claim ids need (re-)embedding.

@@ -16,7 +16,7 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/parser"
 	"github.com/felixgeelhaar/mnemos/internal/pipeline"
 	"github.com/felixgeelhaar/mnemos/internal/relate"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 )
 
 // generateEmbeddingsBestEffort creates event and claim embeddings when an
@@ -31,17 +31,17 @@ import (
 // stop us from trying claims, since the underlying provider call may
 // succeed for one shape and not the other (e.g., long-content
 // truncation rules differ).
-func generateEmbeddingsBestEffort(ctx context.Context, db *sql.DB, events []domain.Event, claims []domain.Claim) {
+func generateEmbeddingsBestEffort(ctx context.Context, conn *store.Conn, events []domain.Event, claims []domain.Claim) {
 	if _, err := embedding.ConfigFromEnv(); err != nil {
 		return
 	}
 	if len(events) > 0 {
-		if _, err := pipeline.GenerateEmbeddings(ctx, db, events); err != nil {
+		if _, err := pipeline.GenerateEmbeddings(ctx, conn, events); err != nil {
 			fmt.Fprintf(os.Stderr, "embeddings: event batch failed: %v\n", err)
 		}
 	}
 	if len(claims) > 0 {
-		if _, err := pipeline.GenerateClaimEmbeddings(ctx, db, claims); err != nil {
+		if _, err := pipeline.GenerateClaimEmbeddings(ctx, conn, claims); err != nil {
 			fmt.Fprintf(os.Stderr, "embeddings: claim batch failed: %v\n", err)
 		}
 	}
@@ -191,7 +191,7 @@ func (r AutoIngestReport) HasFailures() bool {
 // (one bad file shouldn't block the rest of the project), but
 // preflight errors that affect all docs (extractor build failure,
 // dedupe lookup failure) are surfaced rather than silently skipped.
-func autoIngestProjectDocs(ctx context.Context, db *sql.DB, root, actor string) AutoIngestReport {
+func autoIngestProjectDocs(ctx context.Context, conn *store.Conn, root, actor string) AutoIngestReport {
 	report := AutoIngestReport{PerFileErrors: map[string]error{}}
 
 	docs := discoverProjectDocs(root)
@@ -199,7 +199,11 @@ func autoIngestProjectDocs(ctx context.Context, db *sql.DB, root, actor string) 
 		return report
 	}
 
-	existing, err := existingSourcePaths(ctx, db)
+	// existingSourcePaths uses SQLite's json_extract — non-SQLite
+	// backends would need their own equivalent. For now we extract
+	// *sql.DB from the Conn; backends that don't expose one make this
+	// a no-op (memory:// has no persisted history yet).
+	existing, err := existingSourcePathsFromConn(ctx, conn)
 	if err != nil {
 		// Treating this as recoverable would silently re-ingest every
 		// doc on every restart, creating duplicate runs. Surface it.
@@ -225,7 +229,7 @@ func autoIngestProjectDocs(ctx context.Context, db *sql.DB, root, actor string) 
 			report.Skipped++
 			continue
 		}
-		if err := ingestSingleDoc(ctx, db, service, normalizer, extractor, relEngine, runID, path, actor); err != nil {
+		if err := ingestSingleDoc(ctx, conn, service, normalizer, extractor, relEngine, runID, path, actor); err != nil {
 			fmt.Fprintf(os.Stderr, "auto-ingest: %s: %v\n", path, err)
 			report.PerFileErrors[path] = err
 			continue
@@ -236,9 +240,22 @@ func autoIngestProjectDocs(ctx context.Context, db *sql.DB, root, actor string) 
 	return report
 }
 
+// existingSourcePathsFromConn extracts the *sql.DB from conn and
+// runs the json_extract query. Backends that don't expose *sql.DB
+// (memory://) return an empty set so re-ingest is allowed; the
+// dedup-by-source-path optimisation is a SQLite-only feature for
+// now.
+func existingSourcePathsFromConn(ctx context.Context, conn *store.Conn) (map[string]struct{}, error) {
+	db, ok := conn.Raw.(*sql.DB)
+	if !ok || db == nil {
+		return map[string]struct{}{}, nil
+	}
+	return existingSourcePaths(ctx, db)
+}
+
 func ingestSingleDoc(
 	ctx context.Context,
-	db *sql.DB,
+	conn *store.Conn,
 	service ingest.Service,
 	normalizer parser.Normalizer,
 	extractor *pipeline.Extractor,
@@ -267,8 +284,7 @@ func ingestSingleDoc(
 		return fmt.Errorf("relate: %w", err)
 	}
 
-	claimRepo := sqlite.NewClaimRepository(db)
-	existingClaims, err := claimRepo.ListAll(ctx)
+	existingClaims, err := conn.Claims.ListAll(ctx)
 	if err != nil {
 		return fmt.Errorf("list existing claims: %w", err)
 	}
@@ -283,16 +299,16 @@ func ingestSingleDoc(
 	stampEventActor(events, actor)
 	stampClaimActor(claims, actor)
 	stampRelationshipActor(rels, actor)
-	if err := pipeline.PersistArtifacts(ctx, db, events, claims, links, rels); err != nil {
+	if err := pipeline.PersistArtifacts(ctx, conn, events, claims, links, rels); err != nil {
 		return fmt.Errorf("persist: %w", err)
 	}
 	// Best-effort entity materialisation. Auto-ingest runs in a
 	// watcher loop; a transient failure here shouldn't pause file
 	// re-ingestion. The next manual `mnemos extract-entities` will
 	// catch up anything that didn't land.
-	if _, entErr := pipeline.MaterializeEntities(ctx, db, autoEntities, actor); entErr != nil {
+	if _, entErr := pipeline.MaterializeEntities(ctx, conn, autoEntities, actor); entErr != nil {
 		fmt.Fprintf(os.Stderr, "auto-ingest: entity materialisation failed: %v\n", entErr)
 	}
-	generateEmbeddingsBestEffort(ctx, db, events, claims)
+	generateEmbeddingsBestEffort(ctx, conn, events, claims)
 	return nil
 }

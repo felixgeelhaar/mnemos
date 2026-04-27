@@ -146,5 +146,9 @@ features:
       title: Multi-Backend Storage port lift Entity Job
       description: 'Phase 2a of ADR 0001: lift EntityRepository and CompilationJobRepository from concrete SQLite types into ports interfaces, populate them on the Conn struct, and add memory provider implementations of both. After this phase, callers can use conn.Entities and conn.Jobs without reaching into the SQLite package, and memory:// can persist canonicalised entities and compilation_jobs the same way SQLite does. Pipeline refactor (PersistArtifacts / MaterializeEntities switching from *sql.DB to *store.Conn) and Postgres provider remain separate later phases.'
       requirements: []
+    - id: multi-backend-storage-pipeline-port-refactor
+      title: Multi-Backend Storage pipeline port refactor
+      description: 'Phase 2b of ADR 0001: refactor pipeline.PersistArtifacts, pipeline.MaterializeEntities, pipeline.GenerateEmbeddings, pipeline.GenerateClaimEmbeddings to take *store.Conn instead of *sql.DB. Replace the cross-table SQLite transaction inside PersistArtifacts with sequential port-typed repository calls; per-table writes are still atomic in each backend. Trust scoring becomes optional via ports.TrustScorer type assertion. Update every caller in cmd/mnemos. Status-history attribution per claim is preserved by grouping claims by CreatedBy and calling UpsertWithReasonAs once per group. After this phase memory:// can run end-to-end ingest/process/embed paths. semantic_dedupe.go remains SQLite-specific (raw SQL probes) and is out of scope.'
+      requirements: []
 constraints: []
 version: 0.1.0

@@ -4,9 +4,6 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -17,8 +14,8 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/embedding"
 	"github.com/felixgeelhaar/mnemos/internal/extract"
 	"github.com/felixgeelhaar/mnemos/internal/llm"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
+	"github.com/felixgeelhaar/mnemos/internal/ports"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 	"github.com/felixgeelhaar/mnemos/internal/trust"
 )
 
@@ -68,48 +65,41 @@ func NewExtractor(useLLM bool) (*Extractor, error) {
 	return &Extractor{ExtractFn: engine.ExtractWithEntities}, nil
 }
 
-// PersistArtifacts writes events, claims, evidence links, and relationships
-// to the database in a single transaction.
-func PersistArtifacts(ctx context.Context, db *sql.DB, events []domain.Event, claims []domain.Claim, links []domain.ClaimEvidence, relationships []domain.Relationship) error {
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
+// PersistArtifacts writes events, claims, evidence links, and
+// relationships through the port-typed repositories on conn.
+//
+// Backend-agnostic. The previous SQLite-specific implementation
+// wrapped every write in a single cross-table transaction; that
+// guarantee is replaced by per-repository idempotent upserts so
+// memory:// and future Postgres backends share the same code path.
+// A retry of a partially-applied batch converges because every
+// underlying write is idempotent on its identity key (events are
+// INSERT … ON CONFLICT DO NOTHING; claims, evidence, relationships
+// are UPSERTs).
+//
+// claim status_history attribution is preserved by grouping claims
+// by CreatedBy so each transition row carries the right changed_by.
+//
+// Trust scoring runs only when the backend's ClaimRepository also
+// implements ports.TrustScorer (SQLite does; in-memory test fakes
+// and minimal embeds may not). Failure here remains non-fatal in
+// spirit but is surfaced to the caller for visibility.
+func PersistArtifacts(ctx context.Context, conn *store.Conn, events []domain.Event, claims []domain.Claim, links []domain.ClaimEvidence, relationships []domain.Relationship) error {
+	if conn == nil {
+		return fmt.Errorf("persist artifacts: nil conn")
 	}
-	defer func() { _ = tx.Rollback() }()
-
-	q := sqlcgen.New(tx)
 
 	for _, event := range events {
-		metadata, err := json.Marshal(event.Metadata)
-		if err != nil {
-			return fmt.Errorf("marshal event metadata: %w", err)
-		}
-		createdBy := event.CreatedBy
-		if createdBy == "" {
-			createdBy = domain.SystemUser
-		}
-		err = q.CreateEvent(ctx, sqlcgen.CreateEventParams{
-			ID:            event.ID,
-			RunID:         event.RunID,
-			SchemaVersion: event.SchemaVersion,
-			Content:       event.Content,
-			SourceInputID: event.SourceInputID,
-			Timestamp:     event.Timestamp.UTC().Format(time.RFC3339Nano),
-			MetadataJson:  string(metadata),
-			IngestedAt:    event.IngestedAt.UTC().Format(time.RFC3339Nano),
-			CreatedBy:     createdBy,
-		})
-		if err != nil {
-			return fmt.Errorf("insert event %s: %w", event.ID, err)
+		if err := conn.Events.Append(ctx, event); err != nil {
+			return fmt.Errorf("append event %s: %w", event.ID, err)
 		}
 	}
 
-	// Index events by id and pre-compute earliest evidence-event
-	// timestamp per claim from `links`. The claim's valid_from
-	// reflects when the *fact was first observed in the source* —
-	// the earliest evidence event — not when we happened to extract
-	// it. For backfill / out-of-order ingest this is the only
-	// defensible default.
+	// Pre-compute earliest evidence-event timestamp per claim. The
+	// claim's valid_from reflects when the *fact was first observed*
+	// in the source — the earliest evidence event — not when we
+	// happened to extract it. For backfill / out-of-order ingest this
+	// is the only defensible default.
 	eventTS := make(map[string]time.Time, len(events))
 	for _, ev := range events {
 		eventTS[ev.ID] = ev.Timestamp
@@ -126,50 +116,28 @@ func PersistArtifacts(ctx context.Context, db *sql.DB, events []domain.Event, cl
 		}
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	for _, claim := range claims {
-		if err := claim.Validate(); err != nil {
-			return fmt.Errorf("invalid claim %s: %w", claim.ID, err)
-		}
-
-		var priorStatus string
-		if err := tx.QueryRowContext(ctx, `SELECT status FROM claims WHERE id = ?`, claim.ID).Scan(&priorStatus); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("look up prior status for %s: %w", claim.ID, err)
-		}
-
-		createdBy := claim.CreatedBy
-		if createdBy == "" {
-			createdBy = domain.SystemUser
-		}
-		validFrom := claim.ValidFrom
-		if validFrom.IsZero() {
-			if ts, ok := earliestEvidence[claim.ID]; ok {
-				validFrom = ts
+	// Apply ValidFrom inference to claim copies so we don't mutate
+	// caller-owned slice elements.
+	enriched := make([]domain.Claim, len(claims))
+	for i, c := range claims {
+		if c.ValidFrom.IsZero() {
+			if ts, ok := earliestEvidence[c.ID]; ok {
+				c.ValidFrom = ts
 			} else {
-				validFrom = claim.CreatedAt
+				c.ValidFrom = c.CreatedAt
 			}
 		}
-		err = q.UpsertClaim(ctx, sqlcgen.UpsertClaimParams{
-			ID:         claim.ID,
-			Text:       claim.Text,
-			Type:       string(claim.Type),
-			Confidence: claim.Confidence,
-			Status:     string(claim.Status),
-			CreatedAt:  claim.CreatedAt.UTC().Format(time.RFC3339Nano),
-			CreatedBy:  createdBy,
-			ValidFrom:  validFrom.UTC().Format(time.RFC3339Nano),
-		})
-		if err != nil {
-			return fmt.Errorf("upsert claim %s: %w", claim.ID, err)
-		}
+		enriched[i] = c
+	}
 
-		if priorStatus != string(claim.Status) {
-			if _, err := tx.ExecContext(ctx,
-				`INSERT INTO claim_status_history (claim_id, from_status, to_status, changed_at, reason, changed_by) VALUES (?, ?, ?, ?, ?, ?)`,
-				claim.ID, priorStatus, string(claim.Status), now, "pipeline", createdBy,
-			); err != nil {
-				return fmt.Errorf("record status transition for %s: %w", claim.ID, err)
-			}
+	// Group by CreatedBy so each batch's status_history rows carry
+	// the right changed_by — the original implementation attributed
+	// per-claim, and most pipelines do produce homogeneous batches
+	// (one user, one agent), so this is usually a single group.
+	groups := groupClaimsByCreatedBy(enriched)
+	for actor, group := range groups {
+		if err := conn.Claims.UpsertWithReasonAs(ctx, group, "pipeline", actor); err != nil {
+			return fmt.Errorf("upsert claims (created_by=%s): %w", actor, err)
 		}
 	}
 
@@ -177,49 +145,40 @@ func PersistArtifacts(ctx context.Context, db *sql.DB, events []domain.Event, cl
 		if err := link.Validate(); err != nil {
 			return fmt.Errorf("invalid claim evidence: %w", err)
 		}
-		err = q.UpsertClaimEvidence(ctx, sqlcgen.UpsertClaimEvidenceParams{ClaimID: link.ClaimID, EventID: link.EventID})
-		if err != nil {
-			return fmt.Errorf("upsert claim evidence (%s,%s): %w", link.ClaimID, link.EventID, err)
-		}
+	}
+	if err := conn.Claims.UpsertEvidence(ctx, links); err != nil {
+		return fmt.Errorf("upsert claim evidence: %w", err)
 	}
 
-	for _, rel := range relationships {
-		createdBy := rel.CreatedBy
-		if createdBy == "" {
-			createdBy = domain.SystemUser
-		}
-		err = q.UpsertRelationship(ctx, sqlcgen.UpsertRelationshipParams{
-			ID:          rel.ID,
-			Type:        string(rel.Type),
-			FromClaimID: rel.FromClaimID,
-			ToClaimID:   rel.ToClaimID,
-			CreatedAt:   rel.CreatedAt.UTC().Format(time.RFC3339Nano),
-			CreatedBy:   createdBy,
-		})
-		if err != nil {
-			return fmt.Errorf("upsert relationship %s: %w", rel.ID, err)
-		}
+	if err := conn.Relationships.Upsert(ctx, relationships); err != nil {
+		return fmt.Errorf("upsert relationships: %w", err)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-
-	// Trust scoring runs after the artifact transaction commits so the
-	// trust query can see the just-inserted evidence rows. Doing it
-	// inside the same tx would race against itself: the LEFT JOIN we
-	// use to count evidence sees uncommitted rows on the same conn,
-	// but the recompute path uses a fresh tx for safety. We accept the
-	// "trust briefly stale between commit and recompute" window —
-	// callers querying this DB right at that instant just see the
-	// previous trust_score. Failure of the trust pass is non-fatal:
-	// the artifacts are already persisted and a future
-	// `mnemos recompute-trust` will fix any drift.
-	repo := sqlite.NewClaimRepository(db)
-	if _, err := repo.RecomputeTrust(ctx, defaultTrustScorer()); err != nil {
-		return fmt.Errorf("recompute trust: %w", err)
+	// Trust scoring is optional on a ClaimRepository — backends that
+	// don't track trust skip silently. SQLite implements TrustScorer;
+	// memory:// also does (added in Phase 2a) so this engages there too.
+	if scorer, ok := conn.Claims.(ports.TrustScorer); ok {
+		if _, err := scorer.RecomputeTrust(ctx, defaultTrustScorer()); err != nil {
+			return fmt.Errorf("recompute trust: %w", err)
+		}
 	}
 	return nil
+}
+
+// groupClaimsByCreatedBy buckets claims by their CreatedBy actor so
+// UpsertWithReasonAs can stamp each transition row with the correct
+// changed_by. Empty CreatedBy folds into domain.SystemUser to match
+// the actorOr fallback used at the storage layer.
+func groupClaimsByCreatedBy(claims []domain.Claim) map[string][]domain.Claim {
+	groups := map[string][]domain.Claim{}
+	for _, c := range claims {
+		actor := c.CreatedBy
+		if actor == "" {
+			actor = domain.SystemUser
+		}
+		groups[actor] = append(groups[actor], c)
+	}
+	return groups
 }
 
 // defaultTrustScorer wraps internal/trust.Score with a real wall
@@ -233,29 +192,32 @@ func defaultTrustScorer() func(confidence float64, evidenceCount int, latestEvid
 }
 
 // MaterializeEntities walks the per-claim entity tags produced by the
-// extractor and writes them to the entities + claim_entities tables.
-// Idempotent: re-running over the same input is a no-op courtesy of
-// FindOrCreate (entities) and INSERT OR IGNORE (claim_entities).
+// extractor and writes them through the port-typed EntityRepository.
+// Idempotent: re-running over the same input is a no-op via
+// FindOrCreate (entities) and the (claim, entity, role) dedup
+// contract on LinkClaim.
 //
 // Runs after PersistArtifacts so the linked claim_id rows already
 // exist. Failure here is reported to the caller; current cmd/mnemos
 // callers treat it as a warning rather than aborting the whole job
 // — the claims are persisted and a future `mnemos extract-entities`
 // can backfill what didn't land.
-func MaterializeEntities(ctx context.Context, db *sql.DB, entities map[string][]extract.ExtractedEntity, createdBy string) (int, error) {
+func MaterializeEntities(ctx context.Context, conn *store.Conn, entities map[string][]extract.ExtractedEntity, createdBy string) (int, error) {
 	if len(entities) == 0 {
 		return 0, nil
 	}
-	repo := sqlite.NewEntityRepository(db)
+	if conn == nil || conn.Entities == nil {
+		return 0, fmt.Errorf("materialize entities: conn missing Entities repository")
+	}
 	linked := 0
 	for claimID, ents := range entities {
 		for _, ent := range ents {
 			etype := domain.EntityType(ent.Type)
-			e, err := repo.FindOrCreate(ctx, ent.Name, etype, createdBy)
+			e, err := conn.Entities.FindOrCreate(ctx, ent.Name, etype, createdBy)
 			if err != nil {
 				return linked, fmt.Errorf("find-or-create entity %q: %w", ent.Name, err)
 			}
-			if err := repo.LinkClaim(ctx, claimID, e.ID, ent.Role); err != nil {
+			if err := conn.Entities.LinkClaim(ctx, claimID, e.ID, ent.Role); err != nil {
 				return linked, fmt.Errorf("link claim %s -> entity %s: %w", claimID, e.ID, err)
 			}
 			linked++
@@ -264,9 +226,15 @@ func MaterializeEntities(ctx context.Context, db *sql.DB, entities map[string][]
 	return linked, nil
 }
 
-// GenerateEmbeddings creates vector embeddings for the given events and stores
-// them in the database. Returns the number of embeddings created.
-func GenerateEmbeddings(ctx context.Context, db *sql.DB, events []domain.Event) (int, error) {
+// GenerateEmbeddings creates vector embeddings for the given events
+// and stores them through conn.Embeddings. Returns the number of
+// embeddings created. Failure of the embedding provider is fatal to
+// the call; storage failures abort partway through (so callers see
+// the count of successfully written rows on a partial-failure path).
+func GenerateEmbeddings(ctx context.Context, conn *store.Conn, events []domain.Event) (int, error) {
+	if conn == nil || conn.Embeddings == nil {
+		return 0, fmt.Errorf("generate embeddings: conn missing Embeddings repository")
+	}
 	cfg, err := embedding.ConfigFromEnv()
 	if err != nil {
 		return 0, fmt.Errorf("embedding config: %w", err)
@@ -298,13 +266,12 @@ func GenerateEmbeddings(ctx context.Context, db *sql.DB, events []domain.Event) 
 		return 0, fmt.Errorf("embed events: %w", err)
 	}
 
-	repo := sqlite.NewEmbeddingRepository(db)
 	model := cfg.Model
 	for i, ev := range events {
 		if i >= len(vectors) {
 			break
 		}
-		if err := repo.Upsert(ctx, ev.ID, "event", vectors[i], model); err != nil {
+		if err := conn.Embeddings.Upsert(ctx, ev.ID, "event", vectors[i], model); err != nil {
 			return 0, fmt.Errorf("store embedding for event %s: %w", ev.ID, err)
 		}
 	}
@@ -312,12 +279,15 @@ func GenerateEmbeddings(ctx context.Context, db *sql.DB, events []domain.Event) 
 	return len(vectors), nil
 }
 
-// GenerateClaimEmbeddings creates vector embeddings for the given claims and
-// stores them in the database with entity_type="claim". Returns the number of
-// embeddings created.
-func GenerateClaimEmbeddings(ctx context.Context, db *sql.DB, claims []domain.Claim) (int, error) {
+// GenerateClaimEmbeddings creates vector embeddings for the given
+// claims and stores them through conn.Embeddings with
+// entity_type="claim". Returns the number of embeddings created.
+func GenerateClaimEmbeddings(ctx context.Context, conn *store.Conn, claims []domain.Claim) (int, error) {
 	if len(claims) == 0 {
 		return 0, nil
+	}
+	if conn == nil || conn.Embeddings == nil {
+		return 0, fmt.Errorf("generate claim embeddings: conn missing Embeddings repository")
 	}
 
 	cfg, err := embedding.ConfigFromEnv()
@@ -351,13 +321,12 @@ func GenerateClaimEmbeddings(ctx context.Context, db *sql.DB, claims []domain.Cl
 		return 0, fmt.Errorf("embed claims: %w", err)
 	}
 
-	repo := sqlite.NewEmbeddingRepository(db)
 	model := cfg.Model
 	for i, cl := range claims {
 		if i >= len(vectors) {
 			break
 		}
-		if err := repo.Upsert(ctx, cl.ID, "claim", vectors[i], model); err != nil {
+		if err := conn.Embeddings.Upsert(ctx, cl.ID, "claim", vectors[i], model); err != nil {
 			return 0, fmt.Errorf("store embedding for claim %s: %w", cl.ID, err)
 		}
 	}

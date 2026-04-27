@@ -11,6 +11,7 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/extract"
 	"github.com/felixgeelhaar/mnemos/internal/pipeline"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 	"github.com/felixgeelhaar/mnemos/internal/workflow"
 )
@@ -55,7 +56,7 @@ func handleEntitiesList(args []string, f Flags) {
 		}
 	}
 
-	err := runJob("entities-list", map[string]string{"type": typeFilter}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB) error {
+	err := runJob("entities-list", map[string]string{"type": typeFilter}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, conn *store.Conn) error {
 		repo := sqlite.NewEntityRepository(db)
 		var (
 			ents []domain.Entity
@@ -91,7 +92,7 @@ func handleEntitiesShow(args []string, f Flags) {
 	}
 	target := strings.Join(args, " ")
 
-	err := runJob("entities-show", map[string]string{"target": target}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB) error {
+	err := runJob("entities-show", map[string]string{"target": target}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, conn *store.Conn) error {
 		repo := sqlite.NewEntityRepository(db)
 		entity, ok, err := resolveEntity(ctx, repo, target)
 		if err != nil {
@@ -128,7 +129,7 @@ func handleEntitiesMerge(args []string, f Flags) {
 	}
 	winnerID, loserID := args[0], args[1]
 
-	err := runJob("entities-merge", map[string]string{"winner": winnerID, "loser": loserID}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB) error {
+	err := runJob("entities-merge", map[string]string{"winner": winnerID, "loser": loserID}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, conn *store.Conn) error {
 		repo := sqlite.NewEntityRepository(db)
 		if err := repo.Merge(ctx, winnerID, loserID); err != nil {
 			return NewSystemError(err, "merge entities")
@@ -155,7 +156,7 @@ func handleExtractEntities(args []string, f Flags) {
 		}
 	}
 
-	err := runJob("extract-entities", map[string]string{"all": fmt.Sprintf("%t", all)}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB) error {
+	err := runJob("extract-entities", map[string]string{"all": fmt.Sprintf("%t", all)}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, conn *store.Conn) error {
 		repo := sqlite.NewEntityRepository(db)
 		var ids []string
 		if all {
@@ -223,7 +224,7 @@ func handleExtractEntities(args []string, f Flags) {
 			// extractor. Remap by matching synthetic event id back
 			// to the source claim id we stamped above.
 			remapped := remapEntitiesToOriginalClaims(entities, synthetic, claims)
-			n, mErr := pipeline.MaterializeEntities(ctx, db, remapped, "")
+			n, mErr := pipeline.MaterializeEntities(ctx, conn, remapped, "")
 			if mErr != nil {
 				fmt.Fprintf(os.Stderr, "  materialise batch %d-%d: %v (continuing)\n", start, end, mErr)
 				continue

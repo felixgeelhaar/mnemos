@@ -15,7 +15,7 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/extract"
 	"github.com/felixgeelhaar/mnemos/internal/pipeline"
 	"github.com/felixgeelhaar/mnemos/internal/relate"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 )
 
 const (
@@ -118,7 +118,7 @@ func existingGitPRNumbers(ctx context.Context, db *sql.DB) (map[string]struct{},
 // ingestGhPRs persists each merged PR as an event (deduped by PR number)
 // and runs extract+relate so PR bodies become queryable claims. Returns
 // counts and never fails fatally — per-PR errors are logged and skipped.
-func ingestGhPRs(ctx context.Context, db *sql.DB, repoRoot string, limit int, actor string) (ingested, skipped int, err error) {
+func ingestGhPRs(ctx context.Context, conn *store.Conn, repoRoot string, limit int, actor string) (ingested, skipped int, err error) {
 	prs, err := runGhPRs(ctx, repoRoot, limit)
 	if err != nil {
 		return 0, 0, err
@@ -127,10 +127,14 @@ func ingestGhPRs(ctx context.Context, db *sql.DB, repoRoot string, limit int, ac
 		return 0, 0, nil
 	}
 
-	existing, err := existingGitPRNumbers(ctx, db)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "git-prs: failed to query existing PR numbers: %v\n", err)
-		existing = map[string]struct{}{}
+	existing := map[string]struct{}{}
+	if db, ok := conn.Raw.(*sql.DB); ok && db != nil {
+		seen, sqlErr := existingGitPRNumbers(ctx, db)
+		if sqlErr != nil {
+			fmt.Fprintf(os.Stderr, "git-prs: failed to query existing PR numbers: %v\n", sqlErr)
+		} else {
+			existing = seen
+		}
 	}
 
 	extractor := extract.NewEngine()
@@ -172,8 +176,7 @@ func ingestGhPRs(ctx context.Context, db *sql.DB, repoRoot string, limit int, ac
 		rels = nil
 	}
 
-	claimRepo := sqlite.NewClaimRepository(db)
-	if existingClaims, listErr := claimRepo.ListAll(ctx); listErr == nil && len(existingClaims) > 0 {
+	if existingClaims, listErr := conn.Claims.ListAll(ctx); listErr == nil && len(existingClaims) > 0 {
 		if incremental, incErr := relEngine.DetectIncremental(newClaims, existingClaims); incErr == nil {
 			rels = append(rels, incremental...)
 		}
@@ -182,10 +185,10 @@ func ingestGhPRs(ctx context.Context, db *sql.DB, repoRoot string, limit int, ac
 	stampEventActor(newEvents, actor)
 	stampClaimActor(newClaims, actor)
 	stampRelationshipActor(rels, actor)
-	if persistErr := pipeline.PersistArtifacts(ctx, db, newEvents, newClaims, newLinks, rels); persistErr != nil {
+	if persistErr := pipeline.PersistArtifacts(ctx, conn, newEvents, newClaims, newLinks, rels); persistErr != nil {
 		return 0, skipped, fmt.Errorf("persist PRs: %w", persistErr)
 	}
-	generateEmbeddingsBestEffort(ctx, db, newEvents, newClaims)
+	generateEmbeddingsBestEffort(ctx, conn, newEvents, newClaims)
 
 	return ingested, skipped, nil
 }

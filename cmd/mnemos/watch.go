@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -16,6 +15,7 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/parser"
 	"github.com/felixgeelhaar/mnemos/internal/pipeline"
 	"github.com/felixgeelhaar/mnemos/internal/relate"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 )
 
 // defaultWatchInterval is how often the watcher polls each registered file.
@@ -30,7 +30,7 @@ const defaultWatchInterval = 5 * time.Second
 type Watcher struct {
 	mu       sync.Mutex
 	hashes   map[string]string // absolute path → sha256 hex of last-seen content
-	db       *sql.DB
+	conn     *store.Conn
 	interval time.Duration
 	actor    string // user id to stamp as created_by on re-ingested events/claims
 
@@ -38,14 +38,15 @@ type Watcher struct {
 	stopCh    chan struct{}
 }
 
-// NewWatcher returns a watcher that re-ingests changed files into db.
-// The background goroutine is not started until the first Add call.
-// actor is the user id stamped on everything the watcher persists; pass
-// domain.SystemUser (or empty) to attribute writes to the system.
-func NewWatcher(db *sql.DB, actor string) *Watcher {
+// NewWatcher returns a watcher that re-ingests changed files into the
+// store conn. The background goroutine is not started until the first
+// Add call. actor is the user id stamped on everything the watcher
+// persists; pass domain.SystemUser (or empty) to attribute writes to
+// the system.
+func NewWatcher(conn *store.Conn, actor string) *Watcher {
 	return &Watcher{
 		hashes:   make(map[string]string),
-		db:       db,
+		conn:     conn,
 		interval: defaultWatchInterval,
 		actor:    actor,
 		stopCh:   make(chan struct{}),
@@ -159,7 +160,7 @@ func (w *Watcher) tick(ctx context.Context) (changed, removed int) {
 		}
 
 		runID := fmt.Sprintf("watch-%s", time.Now().UTC().Format("20060102T150405"))
-		if err := ingestSingleDoc(ctx, w.db, service, normalizer, extractor, relEngine, runID, path, w.actor); err != nil {
+		if err := ingestSingleDoc(ctx, w.conn, service, normalizer, extractor, relEngine, runID, path, w.actor); err != nil {
 			fmt.Fprintf(os.Stderr, "watch: re-ingest %s: %v\n", path, err)
 			continue
 		}

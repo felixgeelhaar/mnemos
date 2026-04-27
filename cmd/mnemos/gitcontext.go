@@ -17,7 +17,7 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/extract"
 	"github.com/felixgeelhaar/mnemos/internal/pipeline"
 	"github.com/felixgeelhaar/mnemos/internal/relate"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 )
 
 const (
@@ -166,7 +166,7 @@ func existingGitCommitSHAs(ctx context.Context, db *sql.DB) (map[string]struct{}
 // extract+relate so commit subjects/bodies become queryable claims. Returns
 // counts and never fails fatally — per-commit errors are logged and
 // skipped.
-func ingestGitLog(ctx context.Context, db *sql.DB, repoRoot string, limit int, since, actor string) (ingested, skipped int, err error) {
+func ingestGitLog(ctx context.Context, conn *store.Conn, repoRoot string, limit int, since, actor string) (ingested, skipped int, err error) {
 	commits, err := runGitLog(ctx, repoRoot, limit, since)
 	if err != nil {
 		return 0, 0, err
@@ -175,10 +175,14 @@ func ingestGitLog(ctx context.Context, db *sql.DB, repoRoot string, limit int, s
 		return 0, 0, nil
 	}
 
-	existing, err := existingGitCommitSHAs(ctx, db)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "git: failed to query existing SHAs: %v\n", err)
-		existing = map[string]struct{}{}
+	existing := map[string]struct{}{}
+	if db, ok := conn.Raw.(*sql.DB); ok && db != nil {
+		seen, sqlErr := existingGitCommitSHAs(ctx, db)
+		if sqlErr != nil {
+			fmt.Fprintf(os.Stderr, "git: failed to query existing SHAs: %v\n", sqlErr)
+		} else {
+			existing = seen
+		}
 	}
 
 	extractor := extract.NewEngine()
@@ -219,8 +223,7 @@ func ingestGitLog(ctx context.Context, db *sql.DB, repoRoot string, limit int, s
 		rels = nil
 	}
 
-	claimRepo := sqlite.NewClaimRepository(db)
-	if existingClaims, listErr := claimRepo.ListAll(ctx); listErr == nil && len(existingClaims) > 0 {
+	if existingClaims, listErr := conn.Claims.ListAll(ctx); listErr == nil && len(existingClaims) > 0 {
 		if incremental, incErr := relEngine.DetectIncremental(newClaims, existingClaims); incErr == nil {
 			rels = append(rels, incremental...)
 		}
@@ -229,10 +232,10 @@ func ingestGitLog(ctx context.Context, db *sql.DB, repoRoot string, limit int, s
 	stampEventActor(newEvents, actor)
 	stampClaimActor(newClaims, actor)
 	stampRelationshipActor(rels, actor)
-	if persistErr := pipeline.PersistArtifacts(ctx, db, newEvents, newClaims, newLinks, rels); persistErr != nil {
+	if persistErr := pipeline.PersistArtifacts(ctx, conn, newEvents, newClaims, newLinks, rels); persistErr != nil {
 		return 0, skipped, fmt.Errorf("persist commits: %w", persistErr)
 	}
-	generateEmbeddingsBestEffort(ctx, db, newEvents, newClaims)
+	generateEmbeddingsBestEffort(ctx, conn, newEvents, newClaims)
 
 	return ingested, skipped, nil
 }

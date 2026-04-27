@@ -2,25 +2,38 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
+	"github.com/felixgeelhaar/mnemos/internal/store"
+	_ "github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
 func newTestWatcher(t *testing.T) *Watcher {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "mnemos.db")
-	db, err := sqlite.Open(dbPath)
+	conn, err := store.Open(context.Background(), "sqlite://"+dbPath)
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 
-	w := NewWatcher(db, "")
+	w := NewWatcher(conn, "")
 	t.Cleanup(w.Stop)
 	return w
+}
+
+// rawDB returns the *sql.DB underlying the watcher's conn so tests
+// can issue raw SQL probes against the persisted state.
+func rawDB(t *testing.T, w *Watcher) *sql.DB {
+	t.Helper()
+	db, ok := w.conn.Raw.(*sql.DB)
+	if !ok || db == nil {
+		t.Fatal("watcher conn has no *sql.DB raw handle")
+	}
+	return db
 }
 
 func TestWatcher_AddRecordsHashAndCount(t *testing.T) {
@@ -62,7 +75,7 @@ func TestWatcher_TickSkipsWhenContentUnchanged(t *testing.T) {
 	}
 
 	var eventCount int
-	if err := w.db.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&eventCount); err != nil {
+	if err := rawDB(t, w).QueryRow(`SELECT COUNT(*) FROM events`).Scan(&eventCount); err != nil {
 		t.Fatalf("count events: %v", err)
 	}
 	if eventCount != 0 {
@@ -86,7 +99,7 @@ func TestWatcher_TickReingestsOnContentChange(t *testing.T) {
 	}
 
 	var eventCount int
-	if err := w.db.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&eventCount); err != nil {
+	if err := rawDB(t, w).QueryRow(`SELECT COUNT(*) FROM events`).Scan(&eventCount); err != nil {
 		t.Fatalf("count events: %v", err)
 	}
 	if eventCount == 0 {

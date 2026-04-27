@@ -139,16 +139,11 @@ func TestAutoIngestProjectDocs_IngestsThenDedupesOnSecondRun(t *testing.T) {
 	writeFile(t, filepath.Join(root, "README.md"), "We use SQLite for storage. The pipeline runs ingest, extract, and relate.")
 	writeFile(t, filepath.Join(root, "PRD.md"), "The product targets AI engineers. The system must be local-first.")
 
-	dbPath := filepath.Join(t.TempDir(), "mnemos.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db, conn := openTestStore(t)
 
 	ctx := context.Background()
 
-	first := autoIngestProjectDocs(ctx, db, root, "")
+	first := autoIngestProjectDocs(ctx, conn, root, "")
 	if first.Ingested != 2 || first.Skipped != 0 || first.HasFailures() {
 		t.Fatalf("first run: %+v, want ingested=2 skipped=0 no failures", first)
 	}
@@ -161,7 +156,7 @@ func TestAutoIngestProjectDocs_IngestsThenDedupesOnSecondRun(t *testing.T) {
 		t.Fatal("expected events persisted, got 0")
 	}
 
-	second := autoIngestProjectDocs(ctx, db, root, "")
+	second := autoIngestProjectDocs(ctx, conn, root, "")
 	if second.Ingested != 0 || second.Skipped != 2 || second.HasFailures() {
 		t.Fatalf("second run: %+v, want ingested=0 skipped=2 no failures", second)
 	}
@@ -177,14 +172,9 @@ func TestAutoIngestProjectDocs_IngestsThenDedupesOnSecondRun(t *testing.T) {
 
 func TestAutoIngestProjectDocs_NoDocsReturnsZero(t *testing.T) {
 	root := t.TempDir() // empty
-	dbPath := filepath.Join(t.TempDir(), "mnemos.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	_, conn := openTestStore(t)
 
-	r := autoIngestProjectDocs(context.Background(), db, root, "")
+	r := autoIngestProjectDocs(context.Background(), conn, root, "")
 	if r.Ingested != 0 || r.Skipped != 0 || r.HasFailures() {
 		t.Fatalf("empty-root report = %+v, want ingested=0 skipped=0 no failures", r)
 	}
@@ -201,19 +191,14 @@ func TestAutoIngestProjectDocs_DedupeFailureDoesNotSilentlyDuplicate(t *testing.
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "README.md"), "We use SQLite for storage.")
 
-	dbPath := filepath.Join(t.TempDir(), "mnemos.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
+	db, conn := openTestStore(t)
 
 	// Drop the events table so existingSourcePaths can't query it.
 	if _, err := db.Exec(`DROP TABLE events`); err != nil {
 		t.Fatalf("drop events: %v", err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
 
-	r := autoIngestProjectDocs(context.Background(), db, root, "")
+	r := autoIngestProjectDocs(context.Background(), conn, root, "")
 	if !r.DedupeFailed {
 		t.Errorf("expected DedupeFailed=true when events table missing, got %+v", r)
 	}
@@ -232,14 +217,9 @@ func TestAutoIngestProjectDocs_StampsActorOnEventsAndClaims(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "README.md"), "We chose Postgres over MySQL. Postgres is our primary database.")
 
-	dbPath := filepath.Join(t.TempDir(), "mnemos.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db, conn := openTestStore(t)
 
-	r := autoIngestProjectDocs(context.Background(), db, root, "usr_auditor")
+	r := autoIngestProjectDocs(context.Background(), conn, root, "usr_auditor")
 	if r.Ingested == 0 {
 		t.Fatal("expected ingested > 0")
 	}

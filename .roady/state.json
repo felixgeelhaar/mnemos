@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 87,
+  "version": 88,
   "task_states": {
     "task-append-only-event-store": {
       "status": "done",
@@ -256,11 +256,15 @@
       "elapsed_minutes": 4
     },
     "task-multi-backend-storage-pipeline-port-refactor": {
-      "status": "in_progress",
+      "status": "done",
       "path": "",
       "owner": "ai-agent",
+      "evidence": [
+        "09640bc"
+      ],
       "started_at": "2026-04-27T23:20:24.879036+02:00",
-      "elapsed_minutes": 0
+      "completed_at": "2026-04-27T23:34:29.958113+02:00",
+      "elapsed_minutes": 14
     },
     "task-multi-backend-storage-port-lift-entity-job": {
       "status": "done",
@@ -406,5 +410,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-04-27T23:20:24.879036+02:00"
+  "updated_at": "2026-04-27T23:34:29.958114+02:00"
 }

@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 75,
+  "version": 76,
   "task_states": {
     "task-append-only-event-store": {
       "status": "done",
@@ -223,11 +223,15 @@
       "elapsed_minutes": 0
     },
     "task-multi-backend-storage-foundation": {
-      "status": "in_progress",
+      "status": "done",
       "path": "",
       "owner": "ai-agent",
+      "evidence": [
+        "925b7f8"
+      ],
       "started_at": "2026-04-27T22:36:49.236202+02:00",
-      "elapsed_minutes": 0
+      "completed_at": "2026-04-27T22:49:36.643405+02:00",
+      "elapsed_minutes": 12
     },
     "task-multi-format-input-service": {
       "status": "done",
@@ -362,5 +366,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-04-27T22:36:49.236202+02:00"
+  "updated_at": "2026-04-27T22:49:36.643405+02:00"
 }

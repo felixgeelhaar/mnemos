@@ -178,3 +178,9 @@ Adapters that ingest content from common team knowledge surfaces: Slack threads,
 Build a web UI that sits on top of the Phase 2B registry HTTP API — not a standalone app. Surfaces query, browsing, contradictions, and timeline views. Deferred until the registry API is proven with the CLI and MCP surfaces, per the "API before UI" principle established in the Phase 2A rewrite.
 
 ---
+
+## Multi-Backend Storage Foundation
+
+Replace the hard-wired SQLite construction with a pluggable storage layer per ADR 0001. Phase 1a: add `internal/store` driver registry with URL-scheme dispatch (`store.Open(ctx, dsn)`), repackage the existing SQLite implementation behind the registry as a `sqlite://` provider, ship a `memory://` in-process provider implementing the same `ports.*` interfaces (forces port purity, unblocks fast tests + Nous embedding), and widen `ports.EventRepository`/`ports.ClaimRepository` to the union of methods callers actually reach for. Subsequent phases (separate features): migrate cmd/mnemos and internal/pipeline call sites onto `store.Open`, add `MNEMOS_DB_URL`, add the Postgres provider with `pgvector`/`tsvector` and namespace isolation. Source: docs/adr/0001-multi-backend-storage.md.
+
+---

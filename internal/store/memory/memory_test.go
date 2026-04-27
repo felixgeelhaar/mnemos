@@ -1,0 +1,508 @@
+package memory_test
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/ports"
+	"github.com/felixgeelhaar/mnemos/internal/store"
+
+	// Register the memory provider for the smoke test.
+	_ "github.com/felixgeelhaar/mnemos/internal/store/memory"
+)
+
+// openMemory is a tiny helper that runs every behaviour test through
+// the same store.Open path the rest of the codebase uses, so the
+// tests double as registry smoke coverage.
+func openMemory(t *testing.T) *store.Conn {
+	t.Helper()
+	conn, err := store.Open(context.Background(), "memory://")
+	if err != nil {
+		t.Fatalf("store.Open(memory://): %v", err)
+	}
+	t.Cleanup(func() {
+		if err := conn.Close(); err != nil {
+			t.Errorf("conn.Close: %v", err)
+		}
+	})
+	return conn
+}
+
+func TestOpen_PopulatesAllRepositories(t *testing.T) {
+	t.Parallel()
+	conn := openMemory(t)
+
+	if conn.Events == nil {
+		t.Error("Conn.Events is nil")
+	}
+	if conn.Claims == nil {
+		t.Error("Conn.Claims is nil")
+	}
+	if conn.Relationships == nil {
+		t.Error("Conn.Relationships is nil")
+	}
+	if conn.Embeddings == nil {
+		t.Error("Conn.Embeddings is nil")
+	}
+	if conn.Users == nil {
+		t.Error("Conn.Users is nil")
+	}
+	if conn.RevokedTokens == nil {
+		t.Error("Conn.RevokedTokens is nil")
+	}
+	if conn.Agents == nil {
+		t.Error("Conn.Agents is nil")
+	}
+}
+
+func TestOpen_InstancesAreIsolated(t *testing.T) {
+	t.Parallel()
+	a := openMemory(t)
+	b := openMemory(t)
+
+	ctx := context.Background()
+	ev := newEvent("ev-iso", "run-iso", "isolated content")
+	if err := a.Events.Append(ctx, ev); err != nil {
+		t.Fatalf("a.Events.Append: %v", err)
+	}
+
+	got, err := b.Events.ListAll(ctx)
+	if err != nil {
+		t.Fatalf("b.Events.ListAll: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected fresh memory Conn to be empty, got %d events", len(got))
+	}
+}
+
+func TestEventRepository_AppendListGetByRun(t *testing.T) {
+	t.Parallel()
+	conn := openMemory(t)
+	ctx := context.Background()
+
+	a := newEvent("ev-1", "run-A", "alpha")
+	b := newEvent("ev-2", "run-B", "beta")
+	c := newEvent("ev-3", "run-A", "gamma")
+	for _, ev := range []domain.Event{a, b, c} {
+		if err := conn.Events.Append(ctx, ev); err != nil {
+			t.Fatalf("Append %s: %v", ev.ID, err)
+		}
+	}
+
+	// Re-appending the same event id is idempotent.
+	if err := conn.Events.Append(ctx, a); err != nil {
+		t.Fatalf("Append idempotency: %v", err)
+	}
+
+	got, err := conn.Events.GetByID(ctx, "ev-2")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Content != "beta" {
+		t.Errorf("GetByID content = %q, want %q", got.Content, "beta")
+	}
+
+	all, err := conn.Events.ListAll(ctx)
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if len(all) != 3 {
+		t.Errorf("ListAll len = %d, want 3", len(all))
+	}
+
+	runA, err := conn.Events.ListByRunID(ctx, "run-A")
+	if err != nil {
+		t.Fatalf("ListByRunID: %v", err)
+	}
+	if len(runA) != 2 {
+		t.Errorf("ListByRunID len = %d, want 2", len(runA))
+	}
+
+	byIDs, err := conn.Events.ListByIDs(ctx, []string{"ev-3", "missing", "ev-1"})
+	if err != nil {
+		t.Fatalf("ListByIDs: %v", err)
+	}
+	if len(byIDs) != 2 || byIDs[0].ID != "ev-3" || byIDs[1].ID != "ev-1" {
+		t.Errorf("ListByIDs = %+v, want [ev-3, ev-1] in order", byIDs)
+	}
+}
+
+func TestEventRepository_ValidateRejectsBadRows(t *testing.T) {
+	t.Parallel()
+	conn := openMemory(t)
+	ctx := context.Background()
+	if err := conn.Events.Append(ctx, domain.Event{}); err == nil {
+		t.Error("Append accepted empty event; expected validation error")
+	}
+}
+
+func TestClaimRepository_UpsertEvidenceAndStatusHistory(t *testing.T) {
+	t.Parallel()
+	conn := openMemory(t)
+	ctx := context.Background()
+
+	if err := conn.Events.Append(ctx, newEvent("ev-1", "run-A", "source")); err != nil {
+		t.Fatalf("Append event: %v", err)
+	}
+
+	created := time.Now().UTC().Add(-time.Hour)
+	cl := domain.Claim{
+		ID:         "cl-1",
+		Text:       "the sky is blue",
+		Type:       domain.ClaimTypeFact,
+		Confidence: 0.9,
+		Status:     domain.ClaimStatusActive,
+		CreatedAt:  created,
+		CreatedBy:  "u-test",
+	}
+	if err := conn.Claims.Upsert(ctx, []domain.Claim{cl}); err != nil {
+		t.Fatalf("Upsert active: %v", err)
+	}
+	if err := conn.Claims.UpsertEvidence(ctx, []domain.ClaimEvidence{{ClaimID: "cl-1", EventID: "ev-1"}}); err != nil {
+		t.Fatalf("UpsertEvidence: %v", err)
+	}
+
+	// Same status -> no new transition row.
+	if err := conn.Claims.Upsert(ctx, []domain.Claim{cl}); err != nil {
+		t.Fatalf("Upsert same status: %v", err)
+	}
+
+	// Status change -> transition recorded.
+	cl.Status = domain.ClaimStatusContested
+	if err := conn.Claims.UpsertWithReasonAs(ctx, []domain.Claim{cl}, "auto: contradiction", "u-actor"); err != nil {
+		t.Fatalf("Upsert contested: %v", err)
+	}
+
+	hist, err := conn.Claims.ListStatusHistoryByClaimID(ctx, "cl-1")
+	if err != nil {
+		t.Fatalf("ListStatusHistoryByClaimID: %v", err)
+	}
+	if len(hist) != 2 {
+		t.Fatalf("history len = %d, want 2 (initial + contested)", len(hist))
+	}
+	if hist[0].FromStatus != "" || hist[0].ToStatus != domain.ClaimStatusActive {
+		t.Errorf("first transition = %+v, want '' -> active", hist[0])
+	}
+	if hist[1].FromStatus != domain.ClaimStatusActive || hist[1].ToStatus != domain.ClaimStatusContested {
+		t.Errorf("second transition = %+v, want active -> contested", hist[1])
+	}
+	if hist[1].Reason != "auto: contradiction" {
+		t.Errorf("reason = %q, want %q", hist[1].Reason, "auto: contradiction")
+	}
+	if hist[1].ChangedBy != "u-actor" {
+		t.Errorf("changedBy = %q, want u-actor", hist[1].ChangedBy)
+	}
+
+	byEvents, err := conn.Claims.ListByEventIDs(ctx, []string{"ev-1"})
+	if err != nil {
+		t.Fatalf("ListByEventIDs: %v", err)
+	}
+	if len(byEvents) != 1 || byEvents[0].ID != "cl-1" {
+		t.Errorf("ListByEventIDs = %+v, want [cl-1]", byEvents)
+	}
+
+	evLinks, err := conn.Claims.ListEvidenceByClaimIDs(ctx, []string{"cl-1"})
+	if err != nil {
+		t.Fatalf("ListEvidenceByClaimIDs: %v", err)
+	}
+	if len(evLinks) != 1 || evLinks[0].EventID != "ev-1" {
+		t.Errorf("evidence = %+v, want [{cl-1, ev-1}]", evLinks)
+	}
+}
+
+func TestClaimRepository_TrustScorerCapability(t *testing.T) {
+	t.Parallel()
+	conn := openMemory(t)
+	ctx := context.Background()
+
+	scorer, ok := conn.Claims.(ports.TrustScorer)
+	if !ok {
+		t.Fatal("memory ClaimRepository does not satisfy ports.TrustScorer")
+	}
+
+	if err := conn.Events.Append(ctx, newEvent("ev-T", "run", "anything")); err != nil {
+		t.Fatalf("Append event: %v", err)
+	}
+	cl := domain.Claim{
+		ID: "cl-T", Text: "trust me", Type: domain.ClaimTypeFact,
+		Confidence: 0.6, Status: domain.ClaimStatusActive,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := conn.Claims.Upsert(ctx, []domain.Claim{cl}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if err := conn.Claims.UpsertEvidence(ctx, []domain.ClaimEvidence{{ClaimID: "cl-T", EventID: "ev-T"}}); err != nil {
+		t.Fatalf("UpsertEvidence: %v", err)
+	}
+
+	n, err := scorer.RecomputeTrust(ctx, func(confidence float64, evidenceCount int, _ time.Time) float64 {
+		return confidence * float64(evidenceCount)
+	})
+	if err != nil {
+		t.Fatalf("RecomputeTrust: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("RecomputeTrust touched %d claims, want 1", n)
+	}
+
+	avg, err := scorer.AverageTrust(ctx)
+	if err != nil {
+		t.Fatalf("AverageTrust: %v", err)
+	}
+	if avg <= 0 {
+		t.Errorf("AverageTrust = %v, want >0", avg)
+	}
+
+	low, err := scorer.CountClaimsBelowTrust(ctx, 999)
+	if err != nil {
+		t.Fatalf("CountClaimsBelowTrust: %v", err)
+	}
+	if low != 1 {
+		t.Errorf("CountClaimsBelowTrust(999) = %d, want 1", low)
+	}
+}
+
+func TestClaimRepository_SetValidity(t *testing.T) {
+	t.Parallel()
+	conn := openMemory(t)
+	ctx := context.Background()
+
+	cl := domain.Claim{
+		ID: "cl-V", Text: "valid", Type: domain.ClaimTypeFact,
+		Confidence: 0.5, Status: domain.ClaimStatusActive,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := conn.Claims.Upsert(ctx, []domain.Claim{cl}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	cutoff := time.Now().UTC()
+	if err := conn.Claims.SetValidity(ctx, "cl-V", cutoff); err != nil {
+		t.Fatalf("SetValidity: %v", err)
+	}
+	got, err := conn.Claims.ListByIDs(ctx, []string{"cl-V"})
+	if err != nil {
+		t.Fatalf("ListByIDs: %v", err)
+	}
+	if len(got) != 1 || got[0].ValidTo.IsZero() {
+		t.Fatalf("after SetValidity, ValidTo not set: %+v", got)
+	}
+	if err := conn.Claims.SetValidity(ctx, "cl-V", time.Time{}); err != nil {
+		t.Fatalf("SetValidity zero: %v", err)
+	}
+	got, _ = conn.Claims.ListByIDs(ctx, []string{"cl-V"})
+	if !got[0].ValidTo.IsZero() {
+		t.Errorf("after SetValidity(zero), ValidTo = %v, want zero", got[0].ValidTo)
+	}
+
+	if err := conn.Claims.SetValidity(ctx, "missing", cutoff); err == nil {
+		t.Error("SetValidity on missing claim accepted; expected error")
+	}
+}
+
+func TestRelationshipRepository_ListByClaim(t *testing.T) {
+	t.Parallel()
+	conn := openMemory(t)
+	ctx := context.Background()
+
+	rels := []domain.Relationship{
+		{ID: "r1", Type: domain.RelationshipTypeSupports, FromClaimID: "a", ToClaimID: "b", CreatedAt: time.Now().UTC()},
+		{ID: "r2", Type: domain.RelationshipTypeContradicts, FromClaimID: "b", ToClaimID: "c", CreatedAt: time.Now().UTC()},
+		{ID: "r3", Type: domain.RelationshipTypeSupports, FromClaimID: "d", ToClaimID: "a", CreatedAt: time.Now().UTC()},
+	}
+	if err := conn.Relationships.Upsert(ctx, rels); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	byA, err := conn.Relationships.ListByClaim(ctx, "a")
+	if err != nil {
+		t.Fatalf("ListByClaim: %v", err)
+	}
+	if len(byA) != 2 {
+		t.Errorf("ListByClaim(a) len = %d, want 2 (r1, r3)", len(byA))
+	}
+
+	byBC, err := conn.Relationships.ListByClaimIDs(ctx, []string{"b", "c"})
+	if err != nil {
+		t.Fatalf("ListByClaimIDs: %v", err)
+	}
+	if len(byBC) != 2 {
+		t.Errorf("ListByClaimIDs(b,c) len = %d, want 2 (r1, r2)", len(byBC))
+	}
+}
+
+func TestEmbeddingRepository_RoundTrip(t *testing.T) {
+	t.Parallel()
+	conn := openMemory(t)
+	ctx := context.Background()
+
+	vec := []float32{0.1, 0.2, 0.3}
+	if err := conn.Embeddings.Upsert(ctx, "ev-E", "event", vec, "model-X"); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	// Mutating the input slice must not corrupt the stored copy.
+	vec[0] = 99.0
+
+	rows, err := conn.Embeddings.ListByEntityType(ctx, "event")
+	if err != nil {
+		t.Fatalf("ListByEntityType: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("ListByEntityType len = %d, want 1", len(rows))
+	}
+	if rows[0].Vector[0] != 0.1 {
+		t.Errorf("stored vector mutated through caller alias: got %v", rows[0].Vector)
+	}
+	if rows[0].Dimensions != 3 || rows[0].Model != "model-X" {
+		t.Errorf("metadata = %+v, want dims=3 model=model-X", rows[0])
+	}
+}
+
+func TestUserRepository_CreateAndLookup(t *testing.T) {
+	t.Parallel()
+	conn := openMemory(t)
+	ctx := context.Background()
+
+	u := domain.User{ID: "u-1", Name: "Alice", Email: "a@x", Status: domain.UserStatusActive, CreatedAt: time.Now().UTC()}
+	if err := conn.Users.Create(ctx, u); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := conn.Users.Create(ctx, u); err == nil {
+		t.Error("duplicate Create accepted; expected error")
+	}
+	dup := u
+	dup.ID = "u-2"
+	if err := conn.Users.Create(ctx, dup); err == nil {
+		t.Error("Create with duplicate email accepted; expected error")
+	}
+
+	gotByID, err := conn.Users.GetByID(ctx, "u-1")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if gotByID.Name != "Alice" {
+		t.Errorf("GetByID Name = %q", gotByID.Name)
+	}
+	gotByEmail, err := conn.Users.GetByEmail(ctx, "a@x")
+	if err != nil {
+		t.Fatalf("GetByEmail: %v", err)
+	}
+	if gotByEmail.ID != "u-1" {
+		t.Errorf("GetByEmail ID = %q", gotByEmail.ID)
+	}
+
+	if _, err := conn.Users.GetByID(ctx, "missing"); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("GetByID(missing) error = %v, want wrapping sql.ErrNoRows", err)
+	}
+	if err := conn.Users.UpdateStatus(ctx, "u-1", domain.UserStatusRevoked); err != nil {
+		t.Fatalf("UpdateStatus: %v", err)
+	}
+	if err := conn.Users.UpdateScopes(ctx, "u-1", []string{"events:write"}); err != nil {
+		t.Fatalf("UpdateScopes: %v", err)
+	}
+
+	all, err := conn.Users.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("List len = %d, want 1", len(all))
+	}
+	if all[0].Status != domain.UserStatusRevoked || len(all[0].Scopes) != 1 {
+		t.Errorf("after updates: %+v", all[0])
+	}
+}
+
+func TestAgentRepository_RequiresKnownOwner(t *testing.T) {
+	t.Parallel()
+	conn := openMemory(t)
+	ctx := context.Background()
+
+	if err := conn.Agents.Create(ctx, domain.Agent{
+		ID: "a-1", Name: "ci-runner", OwnerID: "u-missing",
+		Status: domain.AgentStatusActive, CreatedAt: time.Now().UTC(),
+	}); err == nil {
+		t.Error("Create with unknown owner accepted; expected error")
+	}
+
+	if err := conn.Users.Create(ctx, domain.User{
+		ID: "u-1", Name: "owner", Email: "o@x", Status: domain.UserStatusActive, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	if err := conn.Agents.Create(ctx, domain.Agent{
+		ID: "a-1", Name: "ci-runner", OwnerID: "u-1",
+		Scopes:    []string{"events:write"},
+		Status:    domain.AgentStatusActive,
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := conn.Agents.UpdateAllowedRuns(ctx, "a-1", []string{"run-prod"}); err != nil {
+		t.Fatalf("UpdateAllowedRuns: %v", err)
+	}
+	got, err := conn.Agents.GetByID(ctx, "a-1")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if len(got.AllowedRuns) != 1 || got.AllowedRuns[0] != "run-prod" {
+		t.Errorf("AllowedRuns = %v", got.AllowedRuns)
+	}
+}
+
+func TestRevokedTokenRepository_AddIsRevokedPurge(t *testing.T) {
+	t.Parallel()
+	conn := openMemory(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	tok := domain.RevokedToken{JTI: "jti-1", RevokedAt: now, ExpiresAt: now.Add(time.Hour)}
+	old := domain.RevokedToken{JTI: "jti-old", RevokedAt: now.Add(-2 * time.Hour), ExpiresAt: now.Add(-time.Hour)}
+
+	if err := conn.RevokedTokens.Add(ctx, tok); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := conn.RevokedTokens.Add(ctx, tok); err != nil {
+		t.Fatalf("Add idempotent: %v", err)
+	}
+	if err := conn.RevokedTokens.Add(ctx, old); err != nil {
+		t.Fatalf("Add old: %v", err)
+	}
+
+	if ok, _ := conn.RevokedTokens.IsRevoked(ctx, "jti-1"); !ok {
+		t.Error("jti-1 should be revoked")
+	}
+	if ok, _ := conn.RevokedTokens.IsRevoked(ctx, "jti-other"); ok {
+		t.Error("jti-other should not be revoked")
+	}
+
+	n, err := conn.RevokedTokens.PurgeExpired(ctx, now)
+	if err != nil {
+		t.Fatalf("PurgeExpired: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("PurgeExpired removed %d, want 1", n)
+	}
+	if ok, _ := conn.RevokedTokens.IsRevoked(ctx, "jti-old"); ok {
+		t.Error("jti-old should be purged")
+	}
+}
+
+func newEvent(id, runID, content string) domain.Event {
+	now := time.Now().UTC()
+	return domain.Event{
+		ID:            id,
+		RunID:         runID,
+		SchemaVersion: "1",
+		Content:       content,
+		SourceInputID: "input-" + id,
+		Timestamp:     now,
+		IngestedAt:    now,
+		CreatedBy:     domain.SystemUser,
+	}
+}

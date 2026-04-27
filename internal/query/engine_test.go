@@ -37,6 +37,19 @@ type fakeClaimRepo struct {
 }
 
 func (f fakeClaimRepo) Upsert(_ context.Context, _ []domain.Claim) error { return nil }
+func (f fakeClaimRepo) UpsertWithReason(_ context.Context, _ []domain.Claim, _ string) error {
+	return nil
+}
+func (f fakeClaimRepo) UpsertWithReasonAs(_ context.Context, _ []domain.Claim, _, _ string) error {
+	return nil
+}
+func (f fakeClaimRepo) UpsertEvidence(_ context.Context, _ []domain.ClaimEvidence) error {
+	return nil
+}
+func (f fakeClaimRepo) ListAll(_ context.Context) ([]domain.Claim, error) { return f.claims, nil }
+func (f fakeClaimRepo) SetValidity(_ context.Context, _ string, _ time.Time) error {
+	return nil
+}
 func (f fakeClaimRepo) ListByEventIDs(_ context.Context, _ []string) ([]domain.Claim, error) {
 	return f.claims, nil
 }
@@ -190,7 +203,7 @@ func TestAnswer_HopExpansionWalksRelationshipGraph(t *testing.T) {
 	repo.claims = []domain.Claim{allClaims[0]}
 	// But ListByIDs (used during expansion) needs to find the others too —
 	// stash them via a wrapper that knows both sets.
-	wrapper := hopFakeClaimRepo{base: repo, all: allClaims}
+	wrapper := hopFakeClaimRepo{fakeClaimRepo: repo, all: allClaims}
 
 	engine := NewEngine(events, wrapper, rels)
 
@@ -238,24 +251,15 @@ func TestAnswer_HopExpansionWalksRelationshipGraph(t *testing.T) {
 }
 
 // hopFakeClaimRepo extends fakeClaimRepo so ListByIDs (used for
-// hop-expansion) can find claims that aren't in the seed set.
+// hop-expansion) can find claims that aren't in the seed set. The
+// embedded fakeClaimRepo promotes every other ports.ClaimRepository
+// method, so adding new methods to that interface only requires
+// touching the override list here.
 type hopFakeClaimRepo struct {
-	base fakeClaimRepo
-	all  []domain.Claim
+	fakeClaimRepo
+	all []domain.Claim
 }
 
-func (r hopFakeClaimRepo) Upsert(ctx context.Context, c []domain.Claim) error {
-	return r.base.Upsert(ctx, c)
-}
-func (r hopFakeClaimRepo) ListByEventIDs(ctx context.Context, ids []string) ([]domain.Claim, error) {
-	return r.base.ListByEventIDs(ctx, ids)
-}
-func (r hopFakeClaimRepo) ListEvidenceByClaimIDs(ctx context.Context, ids []string) ([]domain.ClaimEvidence, error) {
-	return r.base.ListEvidenceByClaimIDs(ctx, ids)
-}
-func (r hopFakeClaimRepo) ListStatusHistoryByClaimID(ctx context.Context, id string) ([]domain.ClaimStatusTransition, error) {
-	return r.base.ListStatusHistoryByClaimID(ctx, id)
-}
 func (r hopFakeClaimRepo) ListByIDs(_ context.Context, ids []string) ([]domain.Claim, error) {
 	wanted := map[string]struct{}{}
 	for _, id := range ids {
@@ -282,7 +286,7 @@ func TestAnswer_NarrativeSurfacesStatusTransitions(t *testing.T) {
 		Confidence: 0.9, CreatedAt: now,
 	}
 	repo := narrativeFakeClaimRepo{
-		base: fakeClaimRepo{
+		fakeClaimRepo: fakeClaimRepo{
 			claims:   []domain.Claim{claim},
 			evidence: []domain.ClaimEvidence{{ClaimID: "cl_evo", EventID: "ev1"}},
 		},
@@ -319,22 +323,10 @@ func TestAnswer_NarrativeSurfacesStatusTransitions(t *testing.T) {
 }
 
 type narrativeFakeClaimRepo struct {
-	base    fakeClaimRepo
+	fakeClaimRepo
 	history map[string][]domain.ClaimStatusTransition
 }
 
-func (r narrativeFakeClaimRepo) Upsert(ctx context.Context, c []domain.Claim) error {
-	return r.base.Upsert(ctx, c)
-}
-func (r narrativeFakeClaimRepo) ListByEventIDs(ctx context.Context, ids []string) ([]domain.Claim, error) {
-	return r.base.ListByEventIDs(ctx, ids)
-}
-func (r narrativeFakeClaimRepo) ListEvidenceByClaimIDs(ctx context.Context, ids []string) ([]domain.ClaimEvidence, error) {
-	return r.base.ListEvidenceByClaimIDs(ctx, ids)
-}
-func (r narrativeFakeClaimRepo) ListByIDs(ctx context.Context, ids []string) ([]domain.Claim, error) {
-	return r.base.ListByIDs(ctx, ids)
-}
 func (r narrativeFakeClaimRepo) ListStatusHistoryByClaimID(_ context.Context, id string) ([]domain.ClaimStatusTransition, error) {
 	return r.history[id], nil
 }

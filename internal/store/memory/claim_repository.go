@@ -1,0 +1,299 @@
+package memory
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/felixgeelhaar/mnemos/internal/domain"
+)
+
+// ClaimRepository is the in-memory implementation of
+// [ports.ClaimRepository]. Status transitions are recorded so the
+// status-history surface (mnemos audit etc.) works across both
+// backends.
+type ClaimRepository struct {
+	state *state
+}
+
+// Upsert records each claim, appending a status-transition row when
+// the status differs from the prior stored value (or when the claim
+// is new).
+func (r ClaimRepository) Upsert(ctx context.Context, claims []domain.Claim) error {
+	return r.upsertWithReason(ctx, claims, "", "")
+}
+
+// UpsertWithReason captures a free-form reason on every transition
+// row. Empty reason still records the row — the timestamp is the
+// salvageable signal.
+func (r ClaimRepository) UpsertWithReason(ctx context.Context, claims []domain.Claim, reason string) error {
+	return r.upsertWithReason(ctx, claims, reason, "")
+}
+
+// UpsertWithReasonAs is the actor-aware variant — the changedBy id
+// is stamped on every recorded transition.
+func (r ClaimRepository) UpsertWithReasonAs(ctx context.Context, claims []domain.Claim, reason, changedBy string) error {
+	return r.upsertWithReason(ctx, claims, reason, changedBy)
+}
+
+func (r ClaimRepository) upsertWithReason(_ context.Context, claims []domain.Claim, reason, changedBy string) error {
+	if len(claims) == 0 {
+		return nil
+	}
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+
+	now := time.Now().UTC()
+	for _, claim := range claims {
+		if err := claim.Validate(); err != nil {
+			return fmt.Errorf("invalid claim %s: %w", claim.ID, err)
+		}
+
+		var priorStatus domain.ClaimStatus
+		if existing, ok := r.state.claims[claim.ID]; ok {
+			priorStatus = existing.Status
+		}
+
+		stored := storedClaimFromDomain(claim)
+		// Preserve any pre-existing trust score when the caller hasn't
+		// set one explicitly — RecomputeTrust runs after Upsert in the
+		// pipeline and we don't want to clobber its output.
+		if claim.TrustScore == 0 {
+			if existing, ok := r.state.claims[claim.ID]; ok {
+				stored.TrustScore = existing.TrustScore
+			}
+		}
+
+		if _, ok := r.state.claims[claim.ID]; !ok {
+			r.state.claimOrder = append(r.state.claimOrder, claim.ID)
+		}
+		r.state.claims[claim.ID] = stored
+
+		if priorStatus == claim.Status {
+			continue
+		}
+		r.state.statusHistory[claim.ID] = append(r.state.statusHistory[claim.ID], storedTransition{
+			ClaimID:    claim.ID,
+			FromStatus: priorStatus, // empty for first insert
+			ToStatus:   claim.Status,
+			ChangedAt:  now,
+			Reason:     reason,
+			ChangedBy:  actorOr(changedBy),
+		})
+	}
+	return nil
+}
+
+// UpsertEvidence stores claim → event links. The (claim, event) pair
+// is the dedup key so duplicate links collapse silently.
+func (r ClaimRepository) UpsertEvidence(_ context.Context, links []domain.ClaimEvidence) error {
+	if len(links) == 0 {
+		return nil
+	}
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	for _, link := range links {
+		if err := link.Validate(); err != nil {
+			return fmt.Errorf("invalid claim evidence: %w", err)
+		}
+		set, ok := r.state.evidence[link.ClaimID]
+		if !ok {
+			set = map[string]struct{}{}
+			r.state.evidence[link.ClaimID] = set
+		}
+		set[link.EventID] = struct{}{}
+	}
+	return nil
+}
+
+// ListByEventIDs returns the claims that have evidence pointing to any
+// of the given event ids. Each claim appears once, ordered by
+// CreatedAt (matching the SQLite ORDER BY c.created_at ASC).
+func (r ClaimRepository) ListByEventIDs(_ context.Context, eventIDs []string) ([]domain.Claim, error) {
+	if len(eventIDs) == 0 {
+		return []domain.Claim{}, nil
+	}
+	wantedEvents := make(map[string]struct{}, len(eventIDs))
+	for _, id := range eventIDs {
+		wantedEvents[id] = struct{}{}
+	}
+
+	r.state.mu.RLock()
+	defer r.state.mu.RUnlock()
+	matched := map[string]struct{}{}
+	for claimID, events := range r.state.evidence {
+		for evID := range events {
+			if _, hit := wantedEvents[evID]; hit {
+				matched[claimID] = struct{}{}
+				break
+			}
+		}
+	}
+
+	out := make([]domain.Claim, 0, len(matched))
+	for _, id := range r.state.claimOrder {
+		if _, ok := matched[id]; !ok {
+			continue
+		}
+		if c, ok := r.state.claims[id]; ok {
+			out = append(out, c.toDomain())
+		}
+	}
+	return out, nil
+}
+
+// ListEvidenceByClaimIDs returns the (claim_id, event_id) links for
+// the given claim ids.
+func (r ClaimRepository) ListEvidenceByClaimIDs(_ context.Context, claimIDs []string) ([]domain.ClaimEvidence, error) {
+	if len(claimIDs) == 0 {
+		return []domain.ClaimEvidence{}, nil
+	}
+	r.state.mu.RLock()
+	defer r.state.mu.RUnlock()
+	out := make([]domain.ClaimEvidence, 0)
+	for _, cid := range claimIDs {
+		set, ok := r.state.evidence[cid]
+		if !ok {
+			continue
+		}
+		for evID := range set {
+			out = append(out, domain.ClaimEvidence{ClaimID: cid, EventID: evID})
+		}
+	}
+	return out, nil
+}
+
+// ListByIDs returns claims with the given ids. Missing ids are
+// dropped silently (parity with SQLite).
+func (r ClaimRepository) ListByIDs(_ context.Context, claimIDs []string) ([]domain.Claim, error) {
+	if len(claimIDs) == 0 {
+		return []domain.Claim{}, nil
+	}
+	r.state.mu.RLock()
+	defer r.state.mu.RUnlock()
+	out := make([]domain.Claim, 0, len(claimIDs))
+	for _, id := range claimIDs {
+		if c, ok := r.state.claims[id]; ok {
+			out = append(out, c.toDomain())
+		}
+	}
+	return out, nil
+}
+
+// ListAll returns every claim in insertion order.
+func (r ClaimRepository) ListAll(_ context.Context) ([]domain.Claim, error) {
+	r.state.mu.RLock()
+	defer r.state.mu.RUnlock()
+	out := make([]domain.Claim, 0, len(r.state.claimOrder))
+	for _, id := range r.state.claimOrder {
+		if c, ok := r.state.claims[id]; ok {
+			out = append(out, c.toDomain())
+		}
+	}
+	return out, nil
+}
+
+// ListStatusHistoryByClaimID returns the claim's status transitions
+// in insertion order (oldest first).
+func (r ClaimRepository) ListStatusHistoryByClaimID(_ context.Context, claimID string) ([]domain.ClaimStatusTransition, error) {
+	r.state.mu.RLock()
+	defer r.state.mu.RUnlock()
+	src := r.state.statusHistory[claimID]
+	out := make([]domain.ClaimStatusTransition, 0, len(src))
+	for _, t := range src {
+		out = append(out, domain.ClaimStatusTransition{
+			ClaimID:    t.ClaimID,
+			FromStatus: t.FromStatus,
+			ToStatus:   t.ToStatus,
+			ChangedAt:  t.ChangedAt,
+			Reason:     t.Reason,
+			ChangedBy:  t.ChangedBy,
+		})
+	}
+	return out, nil
+}
+
+// SetValidity sets (or, with a zero validTo, clears) the claim's
+// upper validity bound. Returns an error if the claim does not exist.
+func (r ClaimRepository) SetValidity(_ context.Context, claimID string, validTo time.Time) error {
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	c, ok := r.state.claims[claimID]
+	if !ok {
+		return fmt.Errorf("claim %s: not found", claimID)
+	}
+	if validTo.IsZero() {
+		c.ValidTo = time.Time{}
+	} else {
+		c.ValidTo = validTo.UTC()
+	}
+	r.state.claims[claimID] = c
+	return nil
+}
+
+// RecomputeTrust applies the supplied scoring function to every
+// stored claim and writes the result back. Returns the number of
+// claims touched.
+func (r ClaimRepository) RecomputeTrust(_ context.Context, score func(confidence float64, evidenceCount int, latestEvidence time.Time) float64) (int, error) {
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	count := 0
+	for _, id := range r.state.claimOrder {
+		c, ok := r.state.claims[id]
+		if !ok {
+			continue
+		}
+		evidenceCount := len(r.state.evidence[id])
+		latest := latestEvidenceTimestamp(r.state, id)
+		c.TrustScore = score(c.Confidence, evidenceCount, latest)
+		r.state.claims[id] = c
+		count++
+	}
+	return count, nil
+}
+
+// AverageTrust returns the mean trust score across every stored
+// claim, or 0 when none exist.
+func (r ClaimRepository) AverageTrust(_ context.Context) (float64, error) {
+	r.state.mu.RLock()
+	defer r.state.mu.RUnlock()
+	if len(r.state.claims) == 0 {
+		return 0, nil
+	}
+	var sum float64
+	for _, c := range r.state.claims {
+		sum += c.TrustScore
+	}
+	return sum / float64(len(r.state.claims)), nil
+}
+
+// CountClaimsBelowTrust returns the count of claims whose trust score
+// is strictly less than the threshold.
+func (r ClaimRepository) CountClaimsBelowTrust(_ context.Context, threshold float64) (int64, error) {
+	r.state.mu.RLock()
+	defer r.state.mu.RUnlock()
+	var n int64
+	for _, c := range r.state.claims {
+		if c.TrustScore < threshold {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// latestEvidenceTimestamp returns the timestamp of the most recent
+// event linked to the claim. The state mutex must already be held by
+// the caller. Zero time when no evidence is present.
+func latestEvidenceTimestamp(s *state, claimID string) time.Time {
+	var latest time.Time
+	for evID := range s.evidence[claimID] {
+		ev, ok := s.events[evID]
+		if !ok {
+			continue
+		}
+		if ev.Timestamp.After(latest) {
+			latest = ev.Timestamp
+		}
+	}
+	return latest
+}

@@ -86,16 +86,15 @@ func handleResolve(args []string, f Flags) {
 		return
 	}
 
-	dbPath := resolveDBPath()
-	db, err := sqlite.Open(dbPath)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	db, conn, err := openDB(ctx)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
-	defer closeDB(db)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	defer closeConn(conn)
 
 	if supersededID != "" {
 		runSupersession(ctx, db, primaryID, supersededID, reason, f.Actor)

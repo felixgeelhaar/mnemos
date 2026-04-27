@@ -78,13 +78,13 @@ func handleServe(args []string, _ Flags) {
 		}
 	}
 
-	dbPath := resolveDBPath()
-	db, err := sqlite.Open(dbPath)
+	dsn := resolveDSN()
+	db, conn, err := openDB(context.Background())
 	if err != nil {
-		exitWithMnemosError(false, NewSystemError(err, "failed to open database at %q", dbPath))
+		exitWithMnemosError(false, NewSystemError(err, "failed to open database at %q", dsn))
 		return
 	}
-	defer closeDB(db)
+	defer closeConn(conn)
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
@@ -101,7 +101,7 @@ func handleServe(args []string, _ Flags) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		fmt.Printf("mnemos registry serving on http://localhost:%d (db=%s)\n", port, dbPath)
+		fmt.Printf("mnemos registry serving on http://localhost:%d (db=%s)\n", port, dsn)
 		fmt.Println("Press Ctrl+C to stop.")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err

@@ -85,12 +85,12 @@ func handleAgentCreate(args []string) {
 		return
 	}
 
-	db, err := sqlite.Open(resolveDBPath())
+	db, conn, err := openDB(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
-	defer closeDB(db)
+	defer closeConn(conn)
 	ctx := context.Background()
 
 	// Resolve owner up front so the FK error message stays a friendly
@@ -136,12 +136,12 @@ func handleAgentList(args []string) {
 		exitWithMnemosError(false, NewUserError("agent list takes no arguments"))
 		return
 	}
-	db, err := sqlite.Open(resolveDBPath())
+	db, conn, err := openDB(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
-	defer closeDB(db)
+	defer closeConn(conn)
 
 	agents, err := sqlite.NewAgentRepository(db).List(context.Background())
 	if err != nil {
@@ -171,12 +171,12 @@ func handleAgentRevoke(args []string) {
 	}
 	id := args[0]
 
-	db, err := sqlite.Open(resolveDBPath())
+	db, conn, err := openDB(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
-	defer closeDB(db)
+	defer closeConn(conn)
 
 	if err := sqlite.NewAgentRepository(db).UpdateStatus(context.Background(), id, domain.AgentStatusRevoked); err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "revoke agent"))
@@ -231,12 +231,12 @@ func handleAgentToken(args []string) {
 		return
 	}
 
-	db, err := sqlite.Open(resolveDBPath())
+	db, conn, err := openDB(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
-	defer closeDB(db)
+	defer closeConn(conn)
 
 	agent, err := sqlite.NewAgentRepository(db).GetByID(context.Background(), agentID)
 	if err != nil {

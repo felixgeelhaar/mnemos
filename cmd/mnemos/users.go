@@ -77,12 +77,12 @@ func handleUserCreate(args []string) {
 	// Operators who want a least-privilege user must pass explicit
 	// --scope arguments.
 
-	db, err := sqlite.Open(resolveDBPath())
+	db, conn, err := openDB(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
-	defer closeDB(db)
+	defer closeConn(conn)
 
 	id, err := newUserID()
 	if err != nil {
@@ -115,12 +115,12 @@ func handleUserList(args []string) {
 		exitWithMnemosError(false, NewUserError("user list takes no arguments"))
 		return
 	}
-	db, err := sqlite.Open(resolveDBPath())
+	db, conn, err := openDB(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
-	defer closeDB(db)
+	defer closeConn(conn)
 
 	users, err := sqlite.NewUserRepository(db).List(context.Background())
 	if err != nil {
@@ -150,12 +150,12 @@ func handleUserRevoke(args []string) {
 	}
 	id := args[0]
 
-	db, err := sqlite.Open(resolveDBPath())
+	db, conn, err := openDB(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
-	defer closeDB(db)
+	defer closeConn(conn)
 
 	if err := sqlite.NewUserRepository(db).UpdateStatus(context.Background(), id, domain.UserStatusRevoked); err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "revoke user"))
@@ -222,12 +222,12 @@ func handleTokenIssue(args []string) {
 		return
 	}
 
-	db, err := sqlite.Open(resolveDBPath())
+	db, conn, err := openDB(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
-	defer closeDB(db)
+	defer closeConn(conn)
 
 	user, err := sqlite.NewUserRepository(db).GetByID(context.Background(), userID)
 	if err != nil {
@@ -262,12 +262,12 @@ func handleTokenRevoke(args []string) {
 	}
 	jti := args[0]
 
-	db, err := sqlite.Open(resolveDBPath())
+	db, conn, err := openDB(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
-	defer closeDB(db)
+	defer closeConn(conn)
 
 	// We don't know the original expiry from the JTI alone (the JWT
 	// would carry it in claims, but the operator typed the JTI not the

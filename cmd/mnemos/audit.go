@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"os"
 	"time"
-
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
 // auditExport is the on-the-wire shape of `mnemos audit`. Top-level fields
@@ -60,18 +58,17 @@ func handleAudit(args []string, flags Flags) {
 		}
 	}
 
-	dbPath := resolveDBPath()
-	db, err := sqlite.Open(dbPath)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	db, conn, err := openDB(ctx)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
-	defer closeDB(db)
+	defer closeConn(conn)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	export, err := buildAuditExport(ctx, db, dbPath, includeEmbeddings)
+	export, err := buildAuditExport(ctx, db, resolveDSN(), includeEmbeddings)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "build audit export"))
 		return

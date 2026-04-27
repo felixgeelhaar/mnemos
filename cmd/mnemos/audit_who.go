@@ -9,8 +9,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
 // auditWhoExport is the on-the-wire shape of `mnemos audit who`.
@@ -112,16 +110,15 @@ func handleAuditWho(args []string, f Flags) {
 		}
 	}
 
-	dbPath := resolveDBPath()
-	db, err := sqlite.Open(dbPath)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	db, conn, err := openDB(ctx)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
-	defer closeDB(db)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	defer closeConn(conn)
 
 	export, err := buildAuditWhoExport(ctx, db, principal, since)
 	if err != nil {

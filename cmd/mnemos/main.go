@@ -1274,19 +1274,22 @@ func jobTimeout() time.Duration {
 }
 
 func runJob(kind string, scope map[string]string, verbose bool, fn func(context.Context, *workflow.Job, *sql.DB) error) error {
+	// First-run detection still uses the resolved file path (it's a
+	// SQLite-only concept — checking whether the DB file is newly
+	// created). When MNEMOS_DB_URL points at a non-SQLite backend
+	// openDB would error first anyway.
 	dbPath := resolveDBPath()
-
 	if isFirstRun(dbPath) && kind != "ingest" && kind != "process" {
 		printWelcome()
 		fmt.Println("  First run detected. Use 'process' or 'ingest' to add knowledge.")
 		printFirstRunHints()
 	}
 
-	db, err := sqlite.Open(dbPath)
+	db, conn, err := openDB(context.Background())
 	if err != nil {
-		return NewSystemError(err, "failed to open database at %q", dbPath)
+		return NewSystemError(err, "failed to open database at %q", resolveDSN())
 	}
-	defer closeDB(db)
+	defer closeConn(conn)
 
 	runner := workflow.NewRunner(sqlite.NewCompilationJobRepository(db))
 	runner.Timeout = jobTimeout()

@@ -23,6 +23,7 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/pipeline"
 	"github.com/felixgeelhaar/mnemos/internal/query"
 	"github.com/felixgeelhaar/mnemos/internal/relate"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 	"github.com/felixgeelhaar/mnemos/internal/workflow"
 )
@@ -172,17 +173,21 @@ func handleMCP() {
 	var (
 		watcherOnce sync.Once
 		watcher     *Watcher
-		watcherDB   *sql.DB
+		watcherConn *store.Conn
 		watcherErr  error
 	)
 	getWatcher := func() (*Watcher, error) {
 		watcherOnce.Do(func() {
-			db, err := sqlite.Open(resolveDBPath())
+			// Background context is fine here: the open is a one-shot
+			// per process and the long-lived Conn lifecycle is governed
+			// by the deferred closeConn below, not by request-scoped
+			// cancellation.
+			db, conn, err := openDB(context.Background())
 			if err != nil {
 				watcherErr = err
 				return
 			}
-			watcherDB = db
+			watcherConn = conn
 			watcher = NewWatcher(db, mcpActor)
 		})
 		return watcher, watcherErr
@@ -325,8 +330,8 @@ func handleMCP() {
 		if watcher != nil {
 			watcher.Stop()
 		}
-		if watcherDB != nil {
-			_ = watcherDB.Close()
+		if watcherConn != nil {
+			_ = watcherConn.Close()
 		}
 	}()
 
@@ -336,15 +341,15 @@ func handleMCP() {
 }
 
 func runGitContextIngest(projectRoot, actor string) {
-	db, err := sqlite.Open(resolveDBPath())
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	db, conn, err := openDB(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "git: failed to open DB: %v\n", err)
 		return
 	}
-	defer func() { _ = db.Close() }()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	defer closeConn(conn)
 
 	ingested, skipped, err := ingestGitLog(ctx, db, projectRoot, defaultGitLogLimit, "", actor)
 	if err != nil {
@@ -366,12 +371,12 @@ func runPRContextIngest(projectRoot, actor string) {
 		return
 	}
 
-	db, err := sqlite.Open(resolveDBPath())
+	db, conn, err := openDB(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "git-prs: failed to open DB: %v\n", err)
 		return
 	}
-	defer func() { _ = db.Close() }()
+	defer closeConn(conn)
 
 	ingested, skipped, err := ingestGhPRs(ctx, db, projectRoot, defaultGitPRLimit, actor)
 	if err != nil {
@@ -391,11 +396,11 @@ func mcpRunIngestGitPRs(ctx context.Context, actor string, input mcpIngestGitPRs
 	if !ghAvailable(ctx) {
 		return mcpIngestGitPRsOutput{}, fmt.Errorf("gh CLI not installed or not authenticated for github.com")
 	}
-	db, err := sqlite.Open(resolveDBPath())
+	db, conn, err := openDB(ctx)
 	if err != nil {
 		return mcpIngestGitPRsOutput{}, err
 	}
-	defer func() { _ = db.Close() }()
+	defer closeConn(conn)
 
 	ingested, skipped, err := ingestGhPRs(ctx, db, projectRoot, input.Limit, actor)
 	if err != nil {
@@ -412,11 +417,11 @@ func mcpRunIngestGitLog(ctx context.Context, actor string, input mcpIngestGitLog
 	if !repoIsGit(projectRoot) {
 		return mcpIngestGitLogOutput{}, fmt.Errorf("project root %s is not a git repository", projectRoot)
 	}
-	db, err := sqlite.Open(resolveDBPath())
+	db, conn, err := openDB(ctx)
 	if err != nil {
 		return mcpIngestGitLogOutput{}, err
 	}
-	defer func() { _ = db.Close() }()
+	defer closeConn(conn)
 
 	ingested, skipped, err := ingestGitLog(ctx, db, projectRoot, input.Limit, input.Since, actor)
 	if err != nil {
@@ -426,15 +431,15 @@ func mcpRunIngestGitLog(ctx context.Context, actor string, input mcpIngestGitLog
 }
 
 func runAutoIngest(projectRoot, actor string) {
-	db, err := sqlite.Open(resolveDBPath())
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	db, conn, err := openDB(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "auto-ingest: failed to open DB: %v\n", err)
 		return
 	}
-	defer func() { _ = db.Close() }()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	defer closeConn(conn)
 
 	report := autoIngestProjectDocs(ctx, db, projectRoot, actor)
 	if report.Ingested > 0 || report.Skipped > 0 || report.HasFailures() {
@@ -460,15 +465,16 @@ func resolveMCPActor() string {
 	if candidate == "" {
 		return domain.SystemUser
 	}
-	db, err := sqlite.Open(resolveDBPath())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	db, conn, err := openDB(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp: MNEMOS_USER_ID=%s but couldn't open DB to validate: %v — using <system>\n", candidate, err)
 		return domain.SystemUser
 	}
-	defer func() { _ = db.Close() }()
+	defer closeConn(conn)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
 	actor, err := resolveActor(ctx, db, candidate)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mcp: MNEMOS_USER_ID=%s rejected: %v — using <system>\n", candidate, err)
@@ -477,12 +483,12 @@ func resolveMCPActor() string {
 	return actor
 }
 
-func mcpRunQuery(_ context.Context, input mcpQueryInput) (mcpQueryOutput, error) {
-	db, err := sqlite.Open(resolveDBPath())
+func mcpRunQuery(ctx context.Context, input mcpQueryInput) (mcpQueryOutput, error) {
+	db, conn, err := openDB(ctx)
 	if err != nil {
 		return mcpQueryOutput{}, err
 	}
-	defer func() { _ = db.Close() }()
+	defer closeConn(conn)
 
 	engine := query.NewEngine(
 		sqlite.NewEventRepository(db),
@@ -543,11 +549,11 @@ func mcpRunProcessText(ctx context.Context, actor string, input mcpProcessTextIn
 	normalizer := parser.NewNormalizer()
 	progress := mcp.ProgressFromContext(ctx)
 
-	db, err := sqlite.Open(resolveDBPath())
+	db, conn, err := openDB(ctx)
 	if err != nil {
 		return mcpProcessTextOutput{}, err
 	}
-	defer func() { _ = db.Close() }()
+	defer closeConn(conn)
 
 	runner := workflow.NewRunner(sqlite.NewCompilationJobRepository(db))
 	runner.Timeout = 30 * time.Second
@@ -669,11 +675,11 @@ func mcpRunProcessText(ctx context.Context, actor string, input mcpProcessTextIn
 }
 
 func mcpRunMetrics() (mcpMetricsOutput, error) {
-	db, err := sqlite.Open(resolveDBPath())
+	db, conn, err := openDB(context.Background())
 	if err != nil {
 		return mcpMetricsOutput{}, err
 	}
-	defer func() { _ = db.Close() }()
+	defer closeConn(conn)
 
 	return mcpMetricsOutput{
 		Runs:            mcpCountRows(db, `SELECT COUNT(DISTINCT run_id) FROM events WHERE run_id <> ''`),

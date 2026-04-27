@@ -177,16 +177,15 @@ func handlePush(args []string, _ Flags) {
 		return
 	}
 
-	dbPath := resolveDBPath()
-	db, err := sqlite.Open(dbPath)
+	ctx, cancel := context.WithTimeout(context.Background(), registryHTTPTimeout*5)
+	defer cancel()
+
+	db, conn, err := openDB(ctx)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
-	defer closeDB(db)
-
-	ctx, cancel := context.WithTimeout(context.Background(), registryHTTPTimeout*5)
-	defer cancel()
+	defer closeConn(conn)
 
 	client := &http.Client{Timeout: registryHTTPTimeout}
 
@@ -250,16 +249,15 @@ func handlePull(args []string, _ Flags) {
 		return
 	}
 
-	dbPath := resolveDBPath()
-	db, err := sqlite.Open(dbPath)
+	ctx, cancel := context.WithTimeout(context.Background(), registryHTTPTimeout*5)
+	defer cancel()
+
+	db, conn, err := openDB(ctx)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
-	defer closeDB(db)
-
-	ctx, cancel := context.WithTimeout(context.Background(), registryHTTPTimeout*5)
-	defer cancel()
+	defer closeConn(conn)
 
 	client := &http.Client{Timeout: registryHTTPTimeout}
 

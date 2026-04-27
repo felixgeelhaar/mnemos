@@ -307,9 +307,18 @@
       "estimate": "",
       "depends_on": [],
       "feature_id": "multi-backend-storage-mnemos_db_url"
+    },
+    {
+      "id": "task-multi-backend-storage-cmd/mnemos-call-site-migration",
+      "title": "Implement Multi-Backend Storage cmd/mnemos call site migration",
+      "description": "Implement the feature: Multi-Backend Storage cmd/mnemos call site migration. Phase 1c of ADR 0001: migrate every production cmd/mnemos call site that does sqlite.Open(resolveDBPath()) onto a registry-mediated open. Add an openDB(ctx) helper that returns (*sql.DB, *store.Conn, error) — most cmd/mnemos surfaces still need the raw *sql.DB for entity/job repos and raw SQL paginations that aren't on the ports yet. Migration is mechanical: replace the open call, defer conn.Close instead of closeDB(db). Tests using fixed temp paths via sqlite.Open(filepath.Join(t.TempDir(), ...)) stay untouched — they're not on the resolveDBPath path. Result: every operator-facing CLI/MCP/server command honours MNEMOS_DB_URL (including future SQLite DSN options like ?busy_timeout=). Out of scope: lifting EntityRepository/CompilationJobRepository into ports (separate later phase), refactoring pipeline functions that take *sql.DB (separate later phase), Postgres provider (separate later phase).",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "multi-backend-storage-cmd/mnemos-call-site-migration"
     }
   ],
   "approval_status": "approved",
   "created_at": "2026-04-12T11:03:09.397775+02:00",
-  "updated_at": "2026-04-27T22:51:56.342684+02:00"
+  "updated_at": "2026-04-27T23:00:41.366691+02:00"
 }

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
 const (
@@ -60,11 +59,11 @@ func mcpRunListClaims(ctx context.Context, input mcpListClaimsInput) (mcpListCla
 		return mcpListClaimsOutput{}, fmt.Errorf("invalid status %q (want active, contested, or deprecated)", input.Status)
 	}
 
-	db, err := sqlite.Open(resolveDBPath())
+	db, conn, err := openDB(ctx)
 	if err != nil {
 		return mcpListClaimsOutput{}, err
 	}
-	defer func() { _ = db.Close() }()
+	defer closeConn(conn)
 
 	claims, total, err := listClaimsFiltered(ctx, db, input.Type, input.Status, limit, offset)
 	if err != nil {
@@ -81,11 +80,11 @@ func mcpRunListClaims(ctx context.Context, input mcpListClaimsInput) (mcpListCla
 func mcpRunListContradictions(ctx context.Context, input mcpListContradictionsInput) (mcpListContradictionsOutput, error) {
 	limit, offset := normalizePagination(input.Limit, input.Offset)
 
-	db, err := sqlite.Open(resolveDBPath())
+	db, conn, err := openDB(ctx)
 	if err != nil {
 		return mcpListContradictionsOutput{}, err
 	}
-	defer func() { _ = db.Close() }()
+	defer closeConn(conn)
 
 	pairs, total, err := listContradictionPairs(ctx, db, limit, offset)
 	if err != nil {

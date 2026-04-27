@@ -8,9 +8,10 @@ import (
 
 	"github.com/felixgeelhaar/mnemos/internal/store"
 
-	// Register the SQLite and memory providers for the smoke tests.
+	// Register every provider for the smoke tests.
 	// Real binaries do the same blank imports in cmd/mnemos.
 	_ "github.com/felixgeelhaar/mnemos/internal/store/memory"
+	_ "github.com/felixgeelhaar/mnemos/internal/store/postgres"
 	_ "github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
@@ -92,7 +93,7 @@ func TestOpen_RejectsMissingScheme(t *testing.T) {
 func TestSupportedSchemes_IncludesRegisteredProviders(t *testing.T) {
 	t.Parallel()
 	got := store.SupportedSchemes()
-	want := map[string]bool{"sqlite": false, "sqlite3": false, "memory": false}
+	want := map[string]bool{"sqlite": false, "sqlite3": false, "memory": false, "postgres": false, "postgresql": false}
 	for _, s := range got {
 		if _, ok := want[s]; ok {
 			want[s] = true

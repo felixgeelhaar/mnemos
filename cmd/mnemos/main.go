@@ -26,10 +26,13 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/workflow"
 
 	// Register storage providers with the top-level store registry so
-	// resolveDSN()/openConn() and any future call-site migrations can
-	// dispatch on URL scheme. Side-effect imports only — main.go no
-	// longer needs the named sqlite import.
+	// resolveDSN()/openConn() can dispatch on URL scheme. Side-effect
+	// imports only. The postgres provider is currently a scaffold — it
+	// registers the scheme and parses DSNs but Open returns
+	// ErrNotImplemented; including it here means operators get a clear
+	// error rather than "unknown provider postgres".
 	_ "github.com/felixgeelhaar/mnemos/internal/store/memory"
+	_ "github.com/felixgeelhaar/mnemos/internal/store/postgres"
 	_ "github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 

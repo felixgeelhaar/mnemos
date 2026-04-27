@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/felixgeelhaar/mnemos/internal/auth"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 )
 
 // handleDoctor implements `mnemos doctor [--json]`. Surfaces every
@@ -55,12 +55,24 @@ func runDoctorChecks(ctx context.Context) healthCheckResult {
 		probeJWTSecret(),
 	}
 
-	dbCheck, db := probeDoctorDB(ctx)
+	dbCheck, conn := probeDoctorDB(ctx)
 	checks = append(checks, dbCheck)
-	if db != nil {
-		defer func() { _ = db.Close() }()
-		// The deep DB write probe lives on the open handle.
-		checks = append(checks, probeDB(ctx, db))
+	if conn != nil {
+		defer func() { _ = conn.Close() }()
+		// The deep DB write probe is currently SQLite-specific (it
+		// inserts into revoked_tokens inside a rolled-back tx). Other
+		// backends won't expose a *sql.DB through Raw, in which case
+		// we skip the deep write probe rather than fail it — the
+		// open check above already proved the backend is reachable.
+		if rawDB, ok := conn.Raw.(*sql.DB); ok && rawDB != nil {
+			checks = append(checks, probeDB(ctx, rawDB))
+		} else {
+			checks = append(checks, healthCheck{
+				Name:   "sqlite",
+				Status: "skipped",
+				Detail: "non-sqlite backend: write probe not implemented",
+			})
+		}
 	}
 
 	checks = append(checks,
@@ -124,18 +136,23 @@ func probeJWTSecret() healthCheck {
 	}
 }
 
-// probeDoctorDB is the open-handle counterpart that also returns the
-// DB so the deeper write probe can reuse it. We treat "can't open"
-// and "can't write" as separate checks so the human output reads
-// "DB open failed" rather than an opaque write-probe failure when
-// the file is missing.
-func probeDoctorDB(_ context.Context) (healthCheck, *sql.DB) {
-	dbPath := resolveDBPath()
-	db, err := sqlite.Open(dbPath)
+// probeDoctorDB opens the configured backend through the store
+// registry and returns both the result and the open Conn so the
+// deeper write probe can reuse it. We treat "can't open" and
+// "can't write" as separate checks so the human output reads
+// "store_open failed" rather than an opaque write-probe failure
+// when the file is missing or the DSN is malformed.
+//
+// The check name stays "store_open" (rather than "sqlite_open") so
+// the doctor output is honest about what it actually probed once
+// non-SQLite backends are wired in.
+func probeDoctorDB(ctx context.Context) (healthCheck, *store.Conn) {
+	dsn := resolveDSN()
+	conn, err := openConn(ctx)
 	if err != nil {
-		return healthCheck{Name: "sqlite_open", Status: "failed", Detail: err.Error()}, nil
+		return healthCheck{Name: "store_open", Status: "failed", Detail: fmt.Sprintf("dsn=%s: %s", dsn, err.Error())}, nil
 	}
-	return healthCheck{Name: "sqlite_open", Status: "ok", Detail: dbPath}, db
+	return healthCheck{Name: "store_open", Status: "ok", Detail: dsn}, conn
 }
 
 func printDoctorHuman(r healthCheckResult) {

@@ -23,6 +23,13 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/relate"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 	"github.com/felixgeelhaar/mnemos/internal/workflow"
+
+	// Register storage providers with the top-level store registry so
+	// resolveDSN()/openConn() and any future call-site migrations can
+	// dispatch on URL scheme. Side-effect imports only — direct API
+	// access still uses the named imports above during the migration
+	// window.
+	_ "github.com/felixgeelhaar/mnemos/internal/store/memory"
 )
 
 // resolveDBPath returns the database path in the following precedence:
@@ -1081,8 +1088,10 @@ func printUsage() {
 	fmt.Println("  -y, --yes      with reset: skip the confirmation prompt")
 	fmt.Println("")
 	fmt.Println("Environment Variables:")
-	fmt.Println("  MNEMOS_DB_PATH         database path (overrides project and global defaults)")
-	fmt.Println("                         resolution order: env → ./.mnemos/mnemos.db (walked up) → ~/.local/share/mnemos/mnemos.db")
+	fmt.Println("  MNEMOS_DB_URL          full storage DSN (any registered backend, takes precedence over MNEMOS_DB_PATH)")
+	fmt.Println("                         examples: sqlite:///var/lib/mnemos/mnemos.db   memory://")
+	fmt.Println("  MNEMOS_DB_PATH         SQLite file path (legacy; equivalent to MNEMOS_DB_URL=sqlite://<path>)")
+	fmt.Println("                         resolution order: MNEMOS_DB_URL → MNEMOS_DB_PATH → ./.mnemos/mnemos.db (walked up) → ~/.local/share/mnemos/mnemos.db")
 	fmt.Println("  MNEMOS_LLM_PROVIDER    anthropic, openai, gemini, ollama, openai-compat")
 	fmt.Println("  MNEMOS_LLM_API_KEY     API key (required for cloud providers)")
 	fmt.Println("  MNEMOS_LLM_MODEL       model override (optional)")

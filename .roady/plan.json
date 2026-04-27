@@ -298,9 +298,18 @@
       "estimate": "",
       "depends_on": [],
       "feature_id": "multi-backend-storage-foundation"
+    },
+    {
+      "id": "task-multi-backend-storage-mnemos_db_url",
+      "title": "Implement Multi-Backend Storage MNEMOS_DB_URL",
+      "description": "Implement the feature: Multi-Backend Storage MNEMOS_DB_URL. Phase 1b of ADR 0001: introduce a `MNEMOS_DB_URL` environment variable that takes precedence over `MNEMOS_DB_PATH` and is the canonical way to point Mnemos at any registered storage backend. Add a `resolveDSN()` helper in cmd/mnemos that returns the URL when set, otherwise wraps the legacy resolved file path as `sqlite:///\u003cpath\u003e`. Add an `openConn(ctx)` helper that calls `store.Open(ctx, resolveDSN())` so future call sites can switch by replacing two lines. Migrate the `mnemos doctor` deep-probe to use `openConn` as the proof-of-life consumer (it already exercises the deepest paths and is a natural smoke test for DSN resolution). Update help text + CLAUDE.md so MNEMOS_DB_URL appears alongside MNEMOS_DB_PATH. Mass call-site migration stays in a separate later phase.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "multi-backend-storage-mnemos_db_url"
     }
   ],
   "approval_status": "approved",
   "created_at": "2026-04-12T11:03:09.397775+02:00",
-  "updated_at": "2026-04-27T22:34:17.651585+02:00"
+  "updated_at": "2026-04-27T22:51:56.342684+02:00"
 }

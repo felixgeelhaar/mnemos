@@ -184,3 +184,9 @@ Build a web UI that sits on top of the Phase 2B registry HTTP API — not a stan
 Replace the hard-wired SQLite construction with a pluggable storage layer per ADR 0001. Phase 1a: add `internal/store` driver registry with URL-scheme dispatch (`store.Open(ctx, dsn)`), repackage the existing SQLite implementation behind the registry as a `sqlite://` provider, ship a `memory://` in-process provider implementing the same `ports.*` interfaces (forces port purity, unblocks fast tests + Nous embedding), and widen `ports.EventRepository`/`ports.ClaimRepository` to the union of methods callers actually reach for. Subsequent phases (separate features): migrate cmd/mnemos and internal/pipeline call sites onto `store.Open`, add `MNEMOS_DB_URL`, add the Postgres provider with `pgvector`/`tsvector` and namespace isolation. Source: docs/adr/0001-multi-backend-storage.md.
 
 ---
+
+## Multi-Backend Storage MNEMOS_DB_URL
+
+Phase 1b of ADR 0001: introduce a `MNEMOS_DB_URL` environment variable that takes precedence over `MNEMOS_DB_PATH` and is the canonical way to point Mnemos at any registered storage backend. Add a `resolveDSN()` helper in cmd/mnemos that returns the URL when set, otherwise wraps the legacy resolved file path as `sqlite:///<path>`. Add an `openConn(ctx)` helper that calls `store.Open(ctx, resolveDSN())` so future call sites can switch by replacing two lines. Migrate the `mnemos doctor` deep-probe to use `openConn` as the proof-of-life consumer (it already exercises the deepest paths and is a natural smoke test for DSN resolution). Update help text + CLAUDE.md so MNEMOS_DB_URL appears alongside MNEMOS_DB_PATH. Mass call-site migration stays in a separate later phase.
+
+---

@@ -159,6 +159,64 @@ type storedAgent struct {
 	CreatedAt   time.Time
 }
 
+type storedEntity struct {
+	ID             string
+	Name           string
+	NormalizedName string
+	Type           domain.EntityType
+	CreatedAt      time.Time
+	CreatedBy      string
+}
+
+func (e storedEntity) toDomain() domain.Entity {
+	return domain.Entity{
+		ID:             e.ID,
+		Name:           e.Name,
+		NormalizedName: e.NormalizedName,
+		Type:           e.Type,
+		CreatedAt:      e.CreatedAt,
+		CreatedBy:      e.CreatedBy,
+	}
+}
+
+// entityKey is the (normalized_name, type) tuple that mirrors the
+// SQLite UNIQUE(normalized_name, type) index — the dedup contract
+// for FindOrCreate.
+type entityKey struct {
+	NormalizedName string
+	Type           domain.EntityType
+}
+
+// claimEntityKey is the (claim_id, entity_id, role) tuple that
+// mirrors UNIQUE(claim_id, entity_id, role) on the link table.
+type claimEntityKey struct {
+	ClaimID  string
+	EntityID string
+	Role     string
+}
+
+type storedCompilationJob struct {
+	ID        string
+	Kind      string
+	Status    string
+	Scope     map[string]string
+	StartedAt time.Time
+	UpdatedAt time.Time
+	Error     string
+}
+
+func (j storedCompilationJob) toDomain() domain.CompilationJob {
+	return domain.CompilationJob{
+		ID:        j.ID,
+		Kind:      j.Kind,
+		Status:    j.Status,
+		Scope:     copyStringMap(j.Scope),
+		StartedAt: j.StartedAt,
+		UpdatedAt: j.UpdatedAt,
+		Error:     j.Error,
+	}
+}
+
 func copyStringMap(in map[string]string) map[string]string {
 	if in == nil {
 		return nil

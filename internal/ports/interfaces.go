@@ -113,3 +113,32 @@ type AgentRepository interface {
 	UpdateScopes(ctx context.Context, id string, scopes []string) error
 	UpdateAllowedRuns(ctx context.Context, id string, runs []string) error
 }
+
+// CompilationJobRepository persists workflow job state. The runner
+// in internal/workflow drives the lifecycle; this interface is just
+// the storage seam.
+type CompilationJobRepository interface {
+	Upsert(ctx context.Context, job domain.CompilationJob) error
+	GetByID(ctx context.Context, id string) (domain.CompilationJob, error)
+}
+
+// EntityRepository persists canonicalised entities and the
+// claim_entities link table. The interface mirrors the SQLite
+// implementation's public surface so cmd/mnemos and internal/pipeline
+// can drop their named SQLite import.
+//
+// Implementations must enforce the UNIQUE(normalized_name, type)
+// dedup contract: FindOrCreate is the only sanctioned write path
+// for new entities and is expected to be idempotent under contention.
+type EntityRepository interface {
+	FindOrCreate(ctx context.Context, name string, etype domain.EntityType, createdBy string) (domain.Entity, error)
+	LinkClaim(ctx context.Context, claimID, entityID, role string) error
+	List(ctx context.Context) ([]domain.Entity, error)
+	ListByType(ctx context.Context, etype domain.EntityType) ([]domain.Entity, error)
+	FindByName(ctx context.Context, name string) (domain.Entity, bool, error)
+	ListClaimsForEntity(ctx context.Context, entityID string) ([]domain.Claim, error)
+	ListEntitiesForClaim(ctx context.Context, claimID string) ([]domain.Entity, []string, error)
+	Merge(ctx context.Context, winnerID, loserID string) error
+	Count(ctx context.Context) (int64, error)
+	ClaimIDsMissingEntityLinks(ctx context.Context) ([]string, error)
+}

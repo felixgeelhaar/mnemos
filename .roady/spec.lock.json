@@ -212,6 +212,12 @@
       "title": "Multi-Backend Storage cmd/mnemos call site migration",
       "description": "Phase 1c of ADR 0001: migrate every production cmd/mnemos call site that does sqlite.Open(resolveDBPath()) onto a registry-mediated open. Add an openDB(ctx) helper that returns (*sql.DB, *store.Conn, error) — most cmd/mnemos surfaces still need the raw *sql.DB for entity/job repos and raw SQL paginations that aren't on the ports yet. Migration is mechanical: replace the open call, defer conn.Close instead of closeDB(db). Tests using fixed temp paths via sqlite.Open(filepath.Join(t.TempDir(), ...)) stay untouched — they're not on the resolveDBPath path. Result: every operator-facing CLI/MCP/server command honours MNEMOS_DB_URL (including future SQLite DSN options like ?busy_timeout=). Out of scope: lifting EntityRepository/CompilationJobRepository into ports (separate later phase), refactoring pipeline functions that take *sql.DB (separate later phase), Postgres provider (separate later phase).",
       "requirements": []
+    },
+    {
+      "id": "multi-backend-storage-port-lift-entity-job",
+      "title": "Multi-Backend Storage port lift Entity Job",
+      "description": "Phase 2a of ADR 0001: lift EntityRepository and CompilationJobRepository from concrete SQLite types into ports interfaces, populate them on the Conn struct, and add memory provider implementations of both. After this phase, callers can use conn.Entities and conn.Jobs without reaching into the SQLite package, and memory:// can persist canonicalised entities and compilation_jobs the same way SQLite does. Pipeline refactor (PersistArtifacts / MaterializeEntities switching from *sql.DB to *store.Conn) and Postgres provider remain separate later phases.",
+      "requirements": []
     }
   ],
   "constraints": [],

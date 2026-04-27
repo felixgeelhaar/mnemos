@@ -40,6 +40,8 @@ func openProvider(_ context.Context, dsn string) (*store.Conn, error) {
 		Users:         NewUserRepository(db),
 		RevokedTokens: NewRevokedTokenRepository(db),
 		Agents:        NewAgentRepository(db),
+		Entities:      NewEntityRepository(db),
+		Jobs:          NewCompilationJobRepository(db),
 		Raw:           db,
 		Closer:        db.Close,
 	}, nil

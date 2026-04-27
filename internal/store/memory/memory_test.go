@@ -57,6 +57,12 @@ func TestOpen_PopulatesAllRepositories(t *testing.T) {
 	if conn.Agents == nil {
 		t.Error("Conn.Agents is nil")
 	}
+	if conn.Entities == nil {
+		t.Error("Conn.Entities is nil")
+	}
+	if conn.Jobs == nil {
+		t.Error("Conn.Jobs is nil")
+	}
 }
 
 func TestOpen_InstancesAreIsolated(t *testing.T) {
@@ -490,6 +496,191 @@ func TestRevokedTokenRepository_AddIsRevokedPurge(t *testing.T) {
 	}
 	if ok, _ := conn.RevokedTokens.IsRevoked(ctx, "jti-old"); ok {
 		t.Error("jti-old should be purged")
+	}
+}
+
+func TestEntityRepository_FindOrCreateAndLink(t *testing.T) {
+	t.Parallel()
+	conn := openMemory(t)
+	ctx := context.Background()
+
+	// FindOrCreate is the dedup contract: same (normalized_name, type)
+	// returns the same id, regardless of casing.
+	a, err := conn.Entities.FindOrCreate(ctx, "Felix Geelhaar", domain.EntityTypePerson, "u-test")
+	if err != nil {
+		t.Fatalf("FindOrCreate: %v", err)
+	}
+	b, err := conn.Entities.FindOrCreate(ctx, "  felix   geelhaar  ", domain.EntityTypePerson, "u-test")
+	if err != nil {
+		t.Fatalf("FindOrCreate idempotent: %v", err)
+	}
+	if a.ID != b.ID {
+		t.Errorf("FindOrCreate id collision: a=%s b=%s (both Felix Geelhaar / person)", a.ID, b.ID)
+	}
+
+	// Different type with the same name is a different entity.
+	c, err := conn.Entities.FindOrCreate(ctx, "Felix Geelhaar", domain.EntityTypeOrg, "u-test")
+	if err != nil {
+		t.Fatalf("FindOrCreate diff type: %v", err)
+	}
+	if c.ID == a.ID {
+		t.Errorf("FindOrCreate collapsed across types: %+v", c)
+	}
+
+	// LinkClaim is idempotent on the (claim, entity, role) key.
+	if err := conn.Entities.LinkClaim(ctx, "cl-1", a.ID, "subject"); err != nil {
+		t.Fatalf("LinkClaim: %v", err)
+	}
+	if err := conn.Entities.LinkClaim(ctx, "cl-1", a.ID, "subject"); err != nil {
+		t.Fatalf("LinkClaim idempotent: %v", err)
+	}
+
+	count, err := conn.Entities.Count(ctx)
+	if err != nil {
+		t.Fatalf("Count: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("Count = %d, want 2 (Felix Geelhaar / person + Felix Geelhaar / org)", count)
+	}
+
+	// FindByName returns the first hit by insertion order.
+	got, ok, err := conn.Entities.FindByName(ctx, "FELIX GEELHAAR")
+	if err != nil {
+		t.Fatalf("FindByName: %v", err)
+	}
+	if !ok || got.ID != a.ID {
+		t.Errorf("FindByName = %+v ok=%v, want id=%s ok=true", got, ok, a.ID)
+	}
+
+	// ListByType returns only matching types.
+	persons, err := conn.Entities.ListByType(ctx, domain.EntityTypePerson)
+	if err != nil {
+		t.Fatalf("ListByType: %v", err)
+	}
+	if len(persons) != 1 || persons[0].ID != a.ID {
+		t.Errorf("ListByType(person) = %+v, want [%s]", persons, a.ID)
+	}
+}
+
+func TestEntityRepository_MergeRewritesLinks(t *testing.T) {
+	t.Parallel()
+	conn := openMemory(t)
+	ctx := context.Background()
+
+	winner, _ := conn.Entities.FindOrCreate(ctx, "Felix Geelhaar", domain.EntityTypePerson, "")
+	loser, _ := conn.Entities.FindOrCreate(ctx, "felixgeelhaar", domain.EntityTypePerson, "")
+
+	if err := conn.Entities.LinkClaim(ctx, "cl-1", loser.ID, "subject"); err != nil {
+		t.Fatalf("LinkClaim loser: %v", err)
+	}
+	if err := conn.Entities.LinkClaim(ctx, "cl-2", winner.ID, "subject"); err != nil {
+		t.Fatalf("LinkClaim winner: %v", err)
+	}
+
+	if err := conn.Entities.Merge(ctx, winner.ID, loser.ID); err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+
+	if _, hit, _ := conn.Entities.FindByName(ctx, "felixgeelhaar"); hit {
+		t.Error("loser should be deleted after merge")
+	}
+	count, _ := conn.Entities.Count(ctx)
+	if count != 1 {
+		t.Errorf("Count after merge = %d, want 1", count)
+	}
+
+	// Both claim links now point at winner.
+	for _, claimID := range []string{"cl-1", "cl-2"} {
+		ents, _, err := conn.Entities.ListEntitiesForClaim(ctx, claimID)
+		if err != nil {
+			t.Fatalf("ListEntitiesForClaim(%s): %v", claimID, err)
+		}
+		if len(ents) != 1 || ents[0].ID != winner.ID {
+			t.Errorf("after merge, claim %s links = %+v, want [winner=%s]", claimID, ents, winner.ID)
+		}
+	}
+
+	if err := conn.Entities.Merge(ctx, winner.ID, winner.ID); err == nil {
+		t.Error("Merge(winner, winner) accepted; expected ErrEntityMergeSelf")
+	}
+}
+
+func TestEntityRepository_ClaimIDsMissingEntityLinks(t *testing.T) {
+	t.Parallel()
+	conn := openMemory(t)
+	ctx := context.Background()
+
+	// Seed two claims.
+	now := time.Now().UTC()
+	for _, id := range []string{"cl-A", "cl-B"} {
+		if err := conn.Claims.Upsert(ctx, []domain.Claim{{
+			ID: id, Text: "x", Type: domain.ClaimTypeFact,
+			Confidence: 0.5, Status: domain.ClaimStatusActive, CreatedAt: now,
+		}}); err != nil {
+			t.Fatalf("seed claim %s: %v", id, err)
+		}
+	}
+
+	e, _ := conn.Entities.FindOrCreate(ctx, "Mnemos", domain.EntityTypeProject, "")
+	if err := conn.Entities.LinkClaim(ctx, "cl-A", e.ID, "subject"); err != nil {
+		t.Fatalf("LinkClaim: %v", err)
+	}
+
+	missing, err := conn.Entities.ClaimIDsMissingEntityLinks(ctx)
+	if err != nil {
+		t.Fatalf("ClaimIDsMissingEntityLinks: %v", err)
+	}
+	if len(missing) != 1 || missing[0] != "cl-B" {
+		t.Errorf("missing = %v, want [cl-B]", missing)
+	}
+}
+
+func TestCompilationJobRepository_RoundTrip(t *testing.T) {
+	t.Parallel()
+	conn := openMemory(t)
+	ctx := context.Background()
+
+	now := time.Now().UTC()
+	job := domain.CompilationJob{
+		ID:        "job-1",
+		Kind:      "process",
+		Status:    "running",
+		Scope:     map[string]string{"source": "raw_text"},
+		StartedAt: now,
+		UpdatedAt: now,
+	}
+	if err := conn.Jobs.Upsert(ctx, job); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	got, err := conn.Jobs.GetByID(ctx, "job-1")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Status != "running" || got.Scope["source"] != "raw_text" {
+		t.Errorf("GetByID = %+v, want status=running scope[source]=raw_text", got)
+	}
+
+	// Mutating the input scope must not corrupt the stored copy.
+	job.Scope["source"] = "tampered"
+	got, _ = conn.Jobs.GetByID(ctx, "job-1")
+	if got.Scope["source"] != "raw_text" {
+		t.Errorf("stored scope mutated through caller alias: %v", got.Scope)
+	}
+
+	// Upsert is replace-on-id.
+	job.Status = "completed"
+	job.Scope["source"] = "raw_text"
+	if err := conn.Jobs.Upsert(ctx, job); err != nil {
+		t.Fatalf("Upsert update: %v", err)
+	}
+	got, _ = conn.Jobs.GetByID(ctx, "job-1")
+	if got.Status != "completed" {
+		t.Errorf("after second Upsert, status = %q, want completed", got.Status)
+	}
+
+	if _, err := conn.Jobs.GetByID(ctx, "missing"); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("GetByID(missing) error = %v, want wrapping sql.ErrNoRows", err)
 	}
 }
 

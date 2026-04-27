@@ -37,13 +37,16 @@ type Conn struct {
 	Users         ports.UserRepository
 	RevokedTokens ports.RevokedTokenRepository
 	Agents        ports.AgentRepository
+	Entities      ports.EntityRepository
+	Jobs          ports.CompilationJobRepository
 
 	// Raw is the provider's underlying handle (e.g. *sql.DB for
 	// SQLite/Postgres, an in-memory state struct for memory). It is
-	// nil-safe to ignore. Callers that need concrete repository types
-	// not yet exposed via ports — currently EntityRepository and
-	// CompilationJobRepository — type-assert Raw to the provider's
-	// native handle and construct those locally.
+	// nil-safe to ignore. Some call sites still issue raw SQL or
+	// reach for SQLite-specific helpers (entity merge transaction
+	// internals, FTS5 search) — they type-assert Raw to the
+	// provider's native handle. Phase 2b will further reduce that
+	// surface.
 	Raw any
 
 	// Closer releases backend resources. Providers populate it; Close

@@ -56,6 +56,8 @@ func openProvider(_ context.Context, dsn string) (*store.Conn, error) {
 		Users:         UserRepository{state: st},
 		RevokedTokens: RevokedTokenRepository{state: st},
 		Agents:        AgentRepository{state: st},
+		Entities:      EntityRepository{state: st},
+		Jobs:          CompilationJobRepository{state: st},
 		Raw:           st,
 		Closer:        func() error { st.clear(); return nil },
 	}, nil
@@ -85,6 +87,11 @@ type state struct {
 	revokedTokens map[string]storedRevokedToken
 	agents        map[string]storedAgent
 	agentOrder    []string
+	entities      map[string]storedEntity
+	entityOrder   []string                  // insertion order, for List
+	entityByKey   map[entityKey]string      // (normalized_name, type) -> entity_id, dedup index
+	claimEntities map[claimEntityKey]string // (claim_id, entity_id, role) -> role, dedup index
+	jobs          map[string]storedCompilationJob
 }
 
 func newState() *state {
@@ -99,6 +106,10 @@ func newState() *state {
 		usersByEmail:  map[string]string{},
 		revokedTokens: map[string]storedRevokedToken{},
 		agents:        map[string]storedAgent{},
+		entities:      map[string]storedEntity{},
+		entityByKey:   map[entityKey]string{},
+		claimEntities: map[claimEntityKey]string{},
+		jobs:          map[string]storedCompilationJob{},
 	}
 }
 
@@ -122,6 +133,11 @@ func (s *state) clear() {
 	s.revokedTokens = map[string]storedRevokedToken{}
 	s.agents = map[string]storedAgent{}
 	s.agentOrder = nil
+	s.entities = map[string]storedEntity{}
+	s.entityOrder = nil
+	s.entityByKey = map[entityKey]string{}
+	s.claimEntities = map[claimEntityKey]string{}
+	s.jobs = map[string]storedCompilationJob{}
 }
 
 // actorOr mirrors sqlite.actorOr: an empty actor falls back to the

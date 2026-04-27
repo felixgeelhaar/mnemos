@@ -56,8 +56,14 @@ func TestOpen_SQLite_PopulatesAllRepositories(t *testing.T) {
 	if conn.Agents == nil {
 		t.Error("Conn.Agents is nil")
 	}
+	if conn.Entities == nil {
+		t.Error("Conn.Entities is nil")
+	}
+	if conn.Jobs == nil {
+		t.Error("Conn.Jobs is nil")
+	}
 	if conn.Raw == nil {
-		t.Error("Conn.Raw is nil; SQLite provider must expose *sql.DB until concrete repos are lifted to ports")
+		t.Error("Conn.Raw is nil; SQLite provider must still expose *sql.DB while raw-SQL call sites remain")
 	}
 }
 
@@ -113,7 +119,7 @@ func TestOpen_MemoryProviderReturnsPopulatedConn(t *testing.T) {
 
 	if conn.Events == nil || conn.Claims == nil || conn.Relationships == nil ||
 		conn.Embeddings == nil || conn.Users == nil || conn.RevokedTokens == nil ||
-		conn.Agents == nil {
+		conn.Agents == nil || conn.Entities == nil || conn.Jobs == nil {
 		t.Errorf("memory Conn has nil port: %+v", conn)
 	}
 }

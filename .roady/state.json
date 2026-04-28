@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 97,
+  "version": 98,
   "task_states": {
     "task-append-only-event-store": {
       "status": "done",
@@ -278,11 +278,15 @@
       "elapsed_minutes": 4
     },
     "task-multi-backend-storage-mysql-mariadb-provider": {
-      "status": "in_progress",
+      "status": "done",
       "path": "",
       "owner": "ai-agent",
+      "evidence": [
+        "6032331"
+      ],
       "started_at": "2026-04-28T09:05:35.44887+02:00",
-      "elapsed_minutes": 0
+      "completed_at": "2026-04-28T09:33:04.00986+02:00",
+      "elapsed_minutes": 27
     },
     "task-multi-backend-storage-pipeline-port-refactor": {
       "status": "done",
@@ -450,5 +454,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-04-28T09:05:35.44887+02:00"
+  "updated_at": "2026-04-28T09:33:04.00986+02:00"
 }

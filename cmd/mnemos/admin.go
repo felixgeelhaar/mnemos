@@ -213,7 +213,7 @@ func handleDedupe(args []string, f Flags) {
 		"threshold": strconv.FormatFloat(threshold, 'f', 2, 64),
 		"apply":     fmt.Sprintf("%t", apply),
 	}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, conn *store.Conn) error {
-		plan, err := pipeline.PlanSemanticDedupe(ctx, db, threshold)
+		plan, err := pipeline.PlanSemanticDedupe(ctx, conn, threshold)
 		if err != nil {
 			return NewSystemError(err, "plan semantic dedupe")
 		}
@@ -222,7 +222,7 @@ func handleDedupe(args []string, f Flags) {
 			fmt.Println("\nDry run. Re-run with --force to apply.")
 			return nil
 		}
-		merged, err := pipeline.ApplySemanticDedupe(ctx, db, plan)
+		merged, err := pipeline.ApplySemanticDedupe(ctx, conn, plan)
 		if err != nil {
 			return NewSystemError(err, "apply semantic dedupe")
 		}

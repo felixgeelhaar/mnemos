@@ -7,7 +7,7 @@ import (
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/embedding"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
 )
 
@@ -55,13 +55,12 @@ type SemanticMerge struct {
 // local-first scale Mnemos targets. If/when we need to scale past
 // hundreds of thousands of claims this should move to a vector
 // index (sqlite-vss with cgo, or a separate process).
-func PlanSemanticDedupe(ctx context.Context, db *sql.DB, threshold float64) (SemanticDedupePlan, error) {
+func PlanSemanticDedupe(ctx context.Context, conn *store.Conn, threshold float64) (SemanticDedupePlan, error) {
 	if threshold <= 0 || threshold > 1 {
 		return SemanticDedupePlan{}, fmt.Errorf("threshold must be in (0, 1]; got %v", threshold)
 	}
 
-	claimRepo := sqlite.NewClaimRepository(db)
-	allClaims, err := claimRepo.ListAll(ctx)
+	allClaims, err := conn.Claims.ListAll(ctx)
 	if err != nil {
 		return SemanticDedupePlan{}, fmt.Errorf("list claims: %w", err)
 	}
@@ -69,8 +68,7 @@ func PlanSemanticDedupe(ctx context.Context, db *sql.DB, threshold float64) (Sem
 		return SemanticDedupePlan{Threshold: threshold, ClaimsScanned: len(allClaims)}, nil
 	}
 
-	embRepo := sqlite.NewEmbeddingRepository(db)
-	stored, err := embRepo.ListByEntityType(ctx, "claim")
+	stored, err := conn.Embeddings.ListByEntityType(ctx, "claim")
 	if err != nil {
 		return SemanticDedupePlan{}, fmt.Errorf("list claim embeddings: %w", err)
 	}
@@ -216,14 +214,26 @@ func pickWinner(pool []indexedClaim, members []int) int {
 	return best
 }
 
-// ApplySemanticDedupe executes the plan: for each merge, every
+// ApplySemanticDedupe executes the plan against a SQLite-backed
+// Conn. The merge surgery (UPDATE OR IGNORE / INSERT OR IGNORE on
+// the relationships and claim_evidence tables) is SQLite-flavoured
+// SQL; backends that don't expose a *sql.DB through Conn.Raw will
+// receive a clear error so operators see the limitation rather
+// than a partial write. Postgres and MySQL parity is tracked as a
+// separate roady feature — the same semantics are achievable with
+// each provider's idioms (ON CONFLICT DO NOTHING / INSERT IGNORE),
+// they just need provider-specific bodies.
 // duplicate's evidence/relationship/embedding row is rewritten to
 // point at the winner, and the duplicate claim is deleted. All
 // changes happen in a single transaction so a mid-run crash leaves
 // the DB consistent.
-func ApplySemanticDedupe(ctx context.Context, db *sql.DB, plan SemanticDedupePlan) (int, error) {
+func ApplySemanticDedupe(ctx context.Context, conn *store.Conn, plan SemanticDedupePlan) (int, error) {
 	if len(plan.Merges) == 0 {
 		return 0, nil
+	}
+	db, ok := conn.Raw.(*sql.DB)
+	if !ok || db == nil {
+		return 0, fmt.Errorf("apply semantic dedupe: backend does not expose *sql.DB; SQLite-only operation today")
 	}
 
 	tx, err := db.BeginTx(ctx, nil)

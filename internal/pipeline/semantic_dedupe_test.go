@@ -2,20 +2,38 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/felixgeelhaar/mnemos/internal/store"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
+
+	// Register the sqlite provider so store.Open("sqlite://...") works.
+	_ "github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
-func TestPlanSemanticDedupe_FindsParaphraseCluster(t *testing.T) {
+// openDedupeDB opens a fresh SQLite-backed Conn at a temp path for
+// dedupe tests. Returns both the *sql.DB (for the test fixture's
+// raw inserts) and the *store.Conn (for the dedupe functions).
+func openDedupeDB(t *testing.T) (*sql.DB, *store.Conn) {
+	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "dedupe.db")
-	db, err := sqlite.Open(dbPath)
+	conn, err := store.Open(context.Background(), "sqlite://"+dbPath)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
+	db, ok := conn.Raw.(*sql.DB)
+	if !ok || db == nil {
+		t.Fatal("sqlite Conn missing *sql.DB raw handle")
+	}
+	return db, conn
+}
+
+func TestPlanSemanticDedupe_FindsParaphraseCluster(t *testing.T) {
+	db, conn := openDedupeDB(t)
 
 	ctx := context.Background()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -52,7 +70,7 @@ func TestPlanSemanticDedupe_FindsParaphraseCluster(t *testing.T) {
 		t.Fatalf("embed cl_c: %v", err)
 	}
 
-	plan, err := PlanSemanticDedupe(ctx, db, 0.95)
+	plan, err := PlanSemanticDedupe(ctx, conn, 0.95)
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
@@ -72,12 +90,7 @@ func TestPlanSemanticDedupe_FindsParaphraseCluster(t *testing.T) {
 }
 
 func TestPlanSemanticDedupe_SkipsClaimsWithoutEmbedding(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "dedupe.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db, conn := openDedupeDB(t)
 
 	ctx := context.Background()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -97,7 +110,7 @@ func TestPlanSemanticDedupe_SkipsClaimsWithoutEmbedding(t *testing.T) {
 		t.Fatalf("embed: %v", err)
 	}
 
-	plan, err := PlanSemanticDedupe(ctx, db, 0.9)
+	plan, err := PlanSemanticDedupe(ctx, conn, 0.9)
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
@@ -110,12 +123,7 @@ func TestPlanSemanticDedupe_SkipsClaimsWithoutEmbedding(t *testing.T) {
 }
 
 func TestApplySemanticDedupe_ReassignsEvidenceAndDeletesDup(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "dedupe.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db, conn := openDedupeDB(t)
 
 	ctx := context.Background()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -150,7 +158,7 @@ func TestApplySemanticDedupe_ReassignsEvidenceAndDeletesDup(t *testing.T) {
 			DuplicateIDs: []string{"cl_dup"},
 		}},
 	}
-	merged, err := ApplySemanticDedupe(ctx, db, plan)
+	merged, err := ApplySemanticDedupe(ctx, conn, plan)
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -180,12 +188,7 @@ func TestApplySemanticDedupe_ReassignsEvidenceAndDeletesDup(t *testing.T) {
 }
 
 func TestApplySemanticDedupe_DropsSelfLoopRelationships(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "dedupe.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db, conn := openDedupeDB(t)
 
 	ctx := context.Background()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
@@ -209,7 +212,7 @@ func TestApplySemanticDedupe_DropsSelfLoopRelationships(t *testing.T) {
 		t.Fatalf("insert rel: %v", err)
 	}
 
-	if _, err := ApplySemanticDedupe(ctx, db, SemanticDedupePlan{
+	if _, err := ApplySemanticDedupe(ctx, conn, SemanticDedupePlan{
 		Merges: []SemanticMerge{{WinnerID: "cl_winner", DuplicateIDs: []string{"cl_dup"}}},
 	}); err != nil {
 		t.Fatalf("apply: %v", err)

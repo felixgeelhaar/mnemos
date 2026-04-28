@@ -220,3 +220,15 @@ Phase 2c of ADR 0001: drop the remaining sqlite.NewXxxRepository(db) constructio
 Phase 3 of ADR 0001: add internal/store/postgres/ provider implementing every port interface. Uses pgx/v5 + database/sql. Translates ?namespace= into CREATE SCHEMA IF NOT EXISTS + SET search_path. pgvector for VectorSearcher capability, tsvector for TextSearcher. Migrations live alongside the provider and run on Open. CI gains a Postgres job (docker-compose). Mirrors the contract validated by SQLite + memory in Phases 1-2.
 
 ---
+
+## Multi-Backend Storage backend-agnostic serve and dedupe
+
+Phase 4a of ADR 0001: migrate the last two SQLite-bound surfaces in mnemos to ports — `cmd/mnemos/serve.go` HTTP handlers (events/claims/relationships/embeddings/metrics) and `internal/pipeline/semantic_dedupe.go` (PlanSemanticDedupe + ApplySemanticDedupe). Use port-typed repositories where they exist; keep raw SQL paths only when no port-level alternative is available, and clearly mark them as SQLite-specific. After this phase no production cmd/mnemos or pipeline code reaches for sqlite.NewXxxRepository directly outside its own package.
+
+---
+
+## Multi-Backend Storage MySQL MariaDB provider
+
+Phase 4b of ADR 0001: add internal/store/mysql/ provider implementing every port interface, registered for `mysql://` and `mariadb://` schemes. Uses github.com/go-sql-driver/mysql + database/sql. Per ADR 0001 §3, MySQL has no per-tenant schemas — namespace translates to "use a separate database (CREATE DATABASE IF NOT EXISTS <ns>; USE <ns>)". Schema SQL adapted: jsonb → JSON, bytea → LONGBLOB, bigserial → BIGINT AUTO_INCREMENT, timestamptz → DATETIME(6), now() → CURRENT_TIMESTAMP. Integration tests gated on TEST_MYSQL_DSN. MariaDB shares the wire protocol so the same provider serves both.
+
+---

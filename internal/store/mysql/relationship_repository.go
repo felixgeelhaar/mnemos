@@ -60,6 +60,72 @@ FROM relationships WHERE from_claim_id = ? OR to_claim_id = ?`, claimID, claimID
 	return collectRelationshipRows(rows)
 }
 
+// RepointEndpoint rewrites relationship endpoints from oldID to
+// newID. Like Postgres, MySQL has no UPDATE OR IGNORE; we
+// pre-emptively delete the rows that would conflict on the unique
+// (type, from_claim_id, to_claim_id) index, then update what's
+// left, then drop the resulting self-loops.
+func (r RelationshipRepository) RepointEndpoint(ctx context.Context, oldID, newID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin repoint endpoint tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	conflictFrom := `
+DELETE a FROM relationships a
+JOIN relationships b
+  ON b.type = a.type
+ AND b.from_claim_id = ?
+ AND b.to_claim_id = a.to_claim_id
+WHERE a.from_claim_id = ?`
+	conflictTo := `
+DELETE a FROM relationships a
+JOIN relationships b
+  ON b.type = a.type
+ AND b.from_claim_id = a.from_claim_id
+ AND b.to_claim_id = ?
+WHERE a.to_claim_id = ?`
+	if _, err := tx.ExecContext(ctx, conflictFrom, newID, oldID); err != nil {
+		return fmt.Errorf("clear conflicting from-edges: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, conflictTo, newID, oldID); err != nil {
+		return fmt.Errorf("clear conflicting to-edges: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE relationships SET from_claim_id = ? WHERE from_claim_id = ?`,
+		newID, oldID,
+	); err != nil {
+		return fmt.Errorf("repoint from %s -> %s: %w", oldID, newID, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE relationships SET to_claim_id = ? WHERE to_claim_id = ?`,
+		newID, oldID,
+	); err != nil {
+		return fmt.Errorf("repoint to %s -> %s: %w", oldID, newID, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM relationships WHERE from_claim_id = ? AND to_claim_id = ?`,
+		newID, newID,
+	); err != nil {
+		return fmt.Errorf("drop self-loops on %s: %w", newID, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit repoint endpoint tx: %w", err)
+	}
+	return nil
+}
+
+// DeleteByClaim removes every relationship touching the claim.
+func (r RelationshipRepository) DeleteByClaim(ctx context.Context, claimID string) error {
+	if _, err := r.db.ExecContext(ctx,
+		`DELETE FROM relationships WHERE from_claim_id = ? OR to_claim_id = ?`,
+		claimID, claimID,
+	); err != nil {
+		return fmt.Errorf("delete relationships for %s: %w", claimID, err)
+	}
+	return nil
+}
+
 // ListByClaimIDs returns relationships touching any of the given claims.
 func (r RelationshipRepository) ListByClaimIDs(ctx context.Context, claimIDs []string) ([]domain.Relationship, error) {
 	if len(claimIDs) == 0 {

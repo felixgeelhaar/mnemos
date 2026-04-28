@@ -66,7 +66,7 @@ func TestBuildMCPKernel_HelpDescribesEachTool(t *testing.T) {
 // MCP output struct, and the recorded session's evidence chain
 // verifies cleanly.
 func TestKernel_KnowledgeMetricsThroughKernel(t *testing.T) {
-	t.Setenv("MNEMOS_DB_PATH", filepath.Join(t.TempDir(), "mnemos.db"))
+	t.Setenv("MNEMOS_DB_URL", "sqlite://"+filepath.Join(t.TempDir(), "mnemos.db"))
 
 	logger := bolt.New(bolt.NewJSONHandler(os.Stderr))
 	kernel, err := buildMCPKernel(logger, mcpExecutorMap("", func() (*Watcher, error) { return nil, nil }))
@@ -90,7 +90,7 @@ func TestKernel_KnowledgeMetricsThroughKernel(t *testing.T) {
 // evidence chain hashes are populated and consistent.
 func TestKernel_ProcessTextEvidenceChainIntact(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "mnemos.db")
-	t.Setenv("MNEMOS_DB_PATH", dbPath)
+	t.Setenv("MNEMOS_DB_URL", "sqlite://"+dbPath)
 	// Open the DB once so the schema is created before the kernel runs.
 	db, err := sqlite.Open(dbPath)
 	if err != nil {

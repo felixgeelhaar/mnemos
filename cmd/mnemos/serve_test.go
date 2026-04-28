@@ -7,22 +7,28 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 )
 
+// newServerTestDB returns the *sql.DB underlying a fresh test
+// store. Most callers want both the db (for raw seed inserts) and
+// the conn (for newServerMux); use newServerTestStore for that.
 func newServerTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db, _ := newServerTestStore(t)
 	return db
+}
+
+// newServerTestStore opens a fresh SQLite-backed store at a temp
+// path and returns both handles. The conn is what newServerMux
+// expects; the *sql.DB is for raw fixtures like seedEvent.
+func newServerTestStore(t *testing.T) (*sql.DB, *store.Conn) {
+	t.Helper()
+	return openTestStore(t)
 }
 
 func seedEvent(t *testing.T, db *sql.DB, id, runID, content, srcInputID, metaJSON string, ts time.Time) {
@@ -37,7 +43,7 @@ func seedEvent(t *testing.T, db *sql.DB, id, runID, content, srcInputID, metaJSO
 }
 
 func TestServe_WebRootReturnsHTML(t *testing.T) {
-	srv := httptest.NewServer(newServerMux(newServerTestDB(t)))
+	srv := httptest.NewServer(newServerMux(newServerTestStore_conn(t)))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/")
@@ -65,7 +71,7 @@ func TestServe_WebRootReturnsHTML(t *testing.T) {
 }
 
 func TestServe_WebRootRejectsNonGetWithoutCatchAll(t *testing.T) {
-	srv := httptest.NewServer(newServerMux(newServerTestDB(t)))
+	srv := httptest.NewServer(newServerMux(newServerTestStore_conn(t)))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/random-path-not-a-route")
@@ -79,7 +85,7 @@ func TestServe_WebRootRejectsNonGetWithoutCatchAll(t *testing.T) {
 }
 
 func TestServe_HealthReturnsOK(t *testing.T) {
-	srv := httptest.NewServer(newServerMux(newServerTestDB(t)))
+	srv := httptest.NewServer(newServerMux(newServerTestStore_conn(t)))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/health")
@@ -107,7 +113,7 @@ func TestServe_ListEventsReturnsAndPaginates(t *testing.T) {
 		seedEvent(t, db, "e"+string(rune('1'+i)), "r1", "claim text "+string(rune('A'+i)), "in"+string(rune('1'+i)), `{"source":"file"}`, base.Add(time.Duration(i)*time.Minute))
 	}
 
-	mux := newServerMux(db)
+	mux := newServerMux(connFromDB(t, db))
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -134,7 +140,7 @@ func TestServe_ListEventsReturnsAndPaginates(t *testing.T) {
 
 func TestServe_ListEventsCapsAtMax(t *testing.T) {
 	db := newServerTestDB(t)
-	mux := newServerMux(db)
+	mux := newServerMux(connFromDB(t, db))
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -160,7 +166,7 @@ func TestServe_ListClaimsFiltersByType(t *testing.T) {
 	seedClaim(t, db, "c2", "decision one", "decision", "active", 0.9, now)
 	seedClaim(t, db, "c3", "decision two", "decision", "active", 0.85, now)
 
-	mux := newServerMux(db)
+	mux := newServerMux(connFromDB(t, db))
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -185,7 +191,7 @@ func TestServe_ListClaimsFiltersByType(t *testing.T) {
 }
 
 func TestServe_ListClaimsRejectsInvalidType(t *testing.T) {
-	srv := httptest.NewServer(newServerMux(newServerTestDB(t)))
+	srv := httptest.NewServer(newServerMux(newServerTestStore_conn(t)))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/v1/claims?type=bogus")
@@ -207,7 +213,7 @@ func TestServe_ListRelationshipsFiltersByType(t *testing.T) {
 	seedRelationship(t, db, "r1", "supports", "c1", "c2", now)
 	seedRelationship(t, db, "r2", "contradicts", "c1", "c3", now)
 
-	srv := httptest.NewServer(newServerMux(db))
+	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/v1/relationships?type=contradicts")
@@ -234,7 +240,7 @@ func TestServe_MetricsCountsSchemaCorrectly(t *testing.T) {
 	seedClaim(t, db, "c2", "b", "fact", "contested", 0.8, now)
 	seedRelationship(t, db, "r1", "contradicts", "c1", "c2", now)
 
-	srv := httptest.NewServer(newServerMux(db))
+	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/v1/metrics")
@@ -272,7 +278,7 @@ func TestServe_UnsupportedMethodReturns405(t *testing.T) {
 }
 
 func TestServe_UnknownRouteReturns404(t *testing.T) {
-	srv := httptest.NewServer(newServerMux(newServerTestDB(t)))
+	srv := httptest.NewServer(newServerMux(newServerTestStore_conn(t)))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/v1/nope")

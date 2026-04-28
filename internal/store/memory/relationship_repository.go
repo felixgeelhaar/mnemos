@@ -54,6 +54,54 @@ func (r RelationshipRepository) ListByClaim(_ context.Context, claimID string) (
 	return out, nil
 }
 
+// RepointEndpoint rewrites every relationship whose endpoints
+// equal oldID to point at newID. Self-loops and unique-edge
+// duplicates (same type + from + to) are dropped.
+func (r RelationshipRepository) RepointEndpoint(_ context.Context, oldID, newID string) error {
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	type edgeKey struct{ Type, From, To string }
+	// Build the set of edges that already exist after rewrites,
+	// keyed on (type, from, to). When a rewrite would introduce a
+	// duplicate, drop the redundant row.
+	existing := make(map[edgeKey]string, len(r.state.relationships))
+	for id, rel := range r.state.relationships {
+		from, to := rel.FromClaimID, rel.ToClaimID
+		if from == oldID {
+			from = newID
+		}
+		if to == oldID {
+			to = newID
+		}
+		if from == to {
+			delete(r.state.relationships, id)
+			continue
+		}
+		key := edgeKey{Type: string(rel.Type), From: from, To: to}
+		if _, dup := existing[key]; dup {
+			delete(r.state.relationships, id)
+			continue
+		}
+		existing[key] = id
+		rel.FromClaimID = from
+		rel.ToClaimID = to
+		r.state.relationships[id] = rel
+	}
+	return nil
+}
+
+// DeleteByClaim removes every relationship that touches claimID.
+func (r RelationshipRepository) DeleteByClaim(_ context.Context, claimID string) error {
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	for id, rel := range r.state.relationships {
+		if rel.FromClaimID == claimID || rel.ToClaimID == claimID {
+			delete(r.state.relationships, id)
+		}
+	}
+	return nil
+}
+
 // ListByClaimIDs returns every relationship touching any of the given
 // claim ids. Used by hop-expansion in the query engine.
 func (r RelationshipRepository) ListByClaimIDs(_ context.Context, claimIDs []string) ([]domain.Relationship, error) {

@@ -293,8 +293,7 @@ internal/
 
 | Variable | Description |
 |----------|-------------|
-| `MNEMOS_DB_URL` | Storage DSN. Takes precedence over `MNEMOS_DB_PATH`. Examples: `sqlite:///var/lib/mnemos/mnemos.db`, `memory://`. See [ADR 0001](docs/adr/0001-multi-backend-storage.md). |
-| `MNEMOS_DB_PATH` | Legacy SQLite-only path. Wrapped as `sqlite://<path>` when `MNEMOS_DB_URL` is unset. Default: `~/.local/share/mnemos/mnemos.db`. |
+| `MNEMOS_DB_URL` | Storage DSN dispatched by URL scheme: `sqlite:///var/lib/mnemos/mnemos.db`, `memory://`, `postgres://...`, `mysql://...`, `libsql://...`. When unset, Mnemos walks up from CWD looking for `.mnemos/mnemos.db`, falling back to `~/.local/share/mnemos/mnemos.db`. See [ADR 0001](docs/adr/0001-multi-backend-storage.md). |
 | `MNEMOS_LLM_PROVIDER` | `anthropic`, `openai`, `gemini`, `ollama`, `openai-compat` |
 | `MNEMOS_LLM_API_KEY` | API key (required for cloud providers) |
 | `MNEMOS_LLM_MODEL` | Model override (optional) |

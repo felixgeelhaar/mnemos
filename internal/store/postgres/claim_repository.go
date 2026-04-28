@@ -183,6 +183,55 @@ FROM %s WHERE id = ANY($1)`, qualify(r.ns, "claims")), pgArray(claimIDs))
 	return collectClaimRows(rows)
 }
 
+// RepointEvidence rewrites claim_evidence rows from one claim id
+// to another inside a transaction. Duplicate (claim_id, event_id)
+// pairs collapse via ON CONFLICT DO NOTHING.
+func (r ClaimRepository) RepointEvidence(ctx context.Context, fromClaimID, toClaimID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin repoint evidence tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`
+INSERT INTO %s (claim_id, event_id)
+SELECT $1, event_id FROM %s WHERE claim_id = $2
+ON CONFLICT (claim_id, event_id) DO NOTHING`,
+		qualify(r.ns, "claim_evidence"), qualify(r.ns, "claim_evidence")),
+		toClaimID, fromClaimID,
+	); err != nil {
+		return fmt.Errorf("copy evidence %s -> %s: %w", fromClaimID, toClaimID, err)
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE claim_id = $1`, qualify(r.ns, "claim_evidence")), fromClaimID); err != nil {
+		return fmt.Errorf("delete original evidence %s: %w", fromClaimID, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit repoint evidence tx: %w", err)
+	}
+	return nil
+}
+
+// DeleteCascade removes a claim plus its claim-owned dependent rows.
+func (r ClaimRepository) DeleteCascade(ctx context.Context, claimID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin claim delete tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, q := range []string{
+		fmt.Sprintf(`DELETE FROM %s WHERE claim_id = $1`, qualify(r.ns, "claim_evidence")),
+		fmt.Sprintf(`DELETE FROM %s WHERE claim_id = $1`, qualify(r.ns, "claim_status_history")),
+		fmt.Sprintf(`DELETE FROM %s WHERE id = $1`, qualify(r.ns, "claims")),
+	} {
+		if _, err := tx.ExecContext(ctx, q, claimID); err != nil {
+			return fmt.Errorf("claim delete cascade: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit claim delete tx: %w", err)
+	}
+	return nil
+}
+
 // ListAll satisfies the corresponding ports method.
 func (r ClaimRepository) ListAll(ctx context.Context) ([]domain.Claim, error) {
 	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`

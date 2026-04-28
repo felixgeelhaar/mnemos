@@ -40,7 +40,7 @@ func seedAuditFixture(t *testing.T, db *sql.DB, now time.Time) {
 		"rel_alice", "cl_alice", "cl_bob", rfc(2*time.Minute), "usr_alice")
 
 	// One embedding from bob.
-	if err := sqlite.NewEmbeddingRepository(db).UpsertAs(ctx, "ev_bob", "event", []float32{0.1, 0.2}, "test-model", "usr_bob"); err != nil {
+	if err := sqlite.NewEmbeddingRepository(db).Upsert(ctx, "ev_bob", "event", []float32{0.1, 0.2}, "test-model", "usr_bob"); err != nil {
 		t.Fatalf("upsert embedding: %v", err)
 	}
 

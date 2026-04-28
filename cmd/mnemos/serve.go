@@ -12,15 +12,13 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/felixgeelhaar/bolt"
 	"github.com/felixgeelhaar/mnemos/internal/auth"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
-	"github.com/felixgeelhaar/mnemos/internal/embedding"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 )
 
 //go:embed web/index.html
@@ -79,7 +77,7 @@ func handleServe(args []string, _ Flags) {
 	}
 
 	dsn := resolveDSN()
-	db, conn, err := openDB(context.Background())
+	conn, err := openConn(context.Background())
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "failed to open database at %q", dsn))
 		return
@@ -88,7 +86,7 @@ func handleServe(args []string, _ Flags) {
 
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
-		Handler:           newServerMux(db),
+		Handler:           newServerMux(conn),
 		ReadTimeout:       serveReadTimeout,
 		ReadHeaderTimeout: serveReadHeaderTimeout,
 		WriteTimeout:      serveWriteTimeout,
@@ -128,7 +126,7 @@ func handleServe(args []string, _ Flags) {
 // JWT signed with the server secret. The secret is resolved from
 // MNEMOS_JWT_SECRET or a per-install file (auto-created on first boot).
 // Revoked JTIs are honored via the RevokedTokenRepository denylist.
-func newServerMux(db *sql.DB) http.Handler {
+func newServerMux(conn *store.Conn) http.Handler {
 	_, projectRoot, _ := findProjectDB()
 	secretPath := auth.DefaultSecretPath(projectRoot)
 	secret, created, err := auth.LoadOrCreateSecret(secretPath)
@@ -142,16 +140,16 @@ func newServerMux(db *sql.DB) http.Handler {
 	if created {
 		fmt.Fprintf(os.Stderr, "serve: generated new JWT secret at %s — previously-issued tokens are invalid\n", secretPath)
 	}
-	verifier := auth.NewVerifier(secret, sqlite.NewRevokedTokenRepository(db))
+	verifier := auth.NewVerifier(secret, conn.RevokedTokens)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleWebRoot)
-	mux.HandleFunc("/health", makeHealthHandler(db))
-	mux.HandleFunc("/v1/events", makeEventsHandler(db))
-	mux.HandleFunc("/v1/claims", makeClaimsHandler(db))
-	mux.HandleFunc("/v1/relationships", makeRelationshipsHandler(db))
-	mux.HandleFunc("/v1/embeddings", makeEmbeddingsHandler(db))
-	mux.HandleFunc("/v1/metrics", makeMetricsHandler(db))
+	mux.HandleFunc("/health", makeHealthHandler(conn))
+	mux.HandleFunc("/v1/events", makeEventsHandler(conn))
+	mux.HandleFunc("/v1/claims", makeClaimsHandler(conn))
+	mux.HandleFunc("/v1/relationships", makeRelationshipsHandler(conn))
+	mux.HandleFunc("/v1/embeddings", makeEmbeddingsHandler(conn))
+	mux.HandleFunc("/v1/metrics", makeMetricsHandler(conn))
 
 	logger := bolt.New(bolt.NewJSONHandler(os.Stderr))
 	// panicRecover is the outermost layer so a panic in any later
@@ -185,9 +183,22 @@ type healthResponse struct {
 // Returns 503 when deep=true reveals a failed probe so HTTP-aware
 // load balancers / Kubernetes readiness gates can react without
 // parsing the JSON.
-func makeHealthHandler(db *sql.DB) http.HandlerFunc {
+func makeHealthHandler(conn *store.Conn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("deep") != "true" {
+			writeJSON(w, http.StatusOK, healthResponse{Status: "ok", Version: version})
+			return
+		}
+		// Deep health probe still expects a *sql.DB for the SQLite-
+		// flavoured write check; non-SQLite backends would need a
+		// per-backend probe that we haven't built. Pull *sql.DB out
+		// of Conn.Raw when available, else degrade to the shallow
+		// Healthy=true response.
+		var db *sql.DB
+		if raw, ok := conn.Raw.(*sql.DB); ok {
+			db = raw
+		}
+		if db == nil {
 			writeJSON(w, http.StatusOK, healthResponse{Status: "ok", Version: version})
 			return
 		}
@@ -253,53 +264,65 @@ type eventDTO struct {
 	IngestedAt    string            `json:"ingested_at"`
 }
 
-func makeEventsHandler(db *sql.DB) http.HandlerFunc {
+func makeEventsHandler(conn *store.Conn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			listEventsHandler(db, w, r)
+			listEventsHandler(conn, w, r)
 		case http.MethodPost:
-			appendEventsHandler(db, w, r)
+			appendEventsHandler(conn, w, r)
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
 	}
 }
 
-func listEventsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+func listEventsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request) {
 	limit, offset := parsePaginationFromQuery(r)
 	ctx := r.Context()
 
-	var total int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&total); err != nil {
-		writeInternalError(w, "count events", err)
-		return
-	}
-
-	rows, err := db.QueryContext(ctx,
-		`SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at
-		 FROM events ORDER BY timestamp DESC LIMIT ? OFFSET ?`, limit, offset)
+	all, err := conn.Events.ListAll(ctx)
 	if err != nil {
 		writeInternalError(w, "list events", err)
 		return
 	}
-	defer func() { _ = rows.Close() }()
+	// ListAll returns ascending; the federation client expects most-
+	// recent first. Reverse without sorting since timestamps are
+	// already monotonic by run.
+	reversed := make([]domain.Event, len(all))
+	for i, e := range all {
+		reversed[len(all)-1-i] = e
+	}
+	total := len(reversed)
+	page := paginate(reversed, limit, offset)
 
-	var events []eventDTO
-	for rows.Next() {
-		var (
-			e        eventDTO
-			metaJSON string
-		)
-		if err := rows.Scan(&e.ID, &e.RunID, &e.SchemaVersion, &e.Content, &e.SourceInputID, &e.Timestamp, &metaJSON, &e.IngestedAt); err != nil {
-			writeInternalError(w, "scan event", err)
-			return
-		}
-		e.Metadata = map[string]string{}
-		_ = json.Unmarshal([]byte(metaJSON), &e.Metadata)
-		events = append(events, e)
+	events := make([]eventDTO, 0, len(page))
+	for _, e := range page {
+		events = append(events, eventDTO{
+			ID:            e.ID,
+			RunID:         e.RunID,
+			SchemaVersion: e.SchemaVersion,
+			Content:       e.Content,
+			SourceInputID: e.SourceInputID,
+			Timestamp:     e.Timestamp.UTC().Format(time.RFC3339),
+			Metadata:      e.Metadata,
+			IngestedAt:    e.IngestedAt.UTC().Format(time.RFC3339),
+		})
 	}
 	writeJSON(w, http.StatusOK, eventsResponse{Events: events, Total: total, Limit: limit, Offset: offset})
+}
+
+// paginate slices xs by limit/offset; safe on empty input or
+// out-of-range offsets.
+func paginate[T any](xs []T, limit, offset int) []T {
+	if offset >= len(xs) {
+		return nil
+	}
+	end := offset + limit
+	if end > len(xs) {
+		end = len(xs)
+	}
+	return xs[offset:end]
 }
 
 type claimsResponse struct {
@@ -319,20 +342,20 @@ type claimDTO struct {
 	CreatedAt  string  `json:"created_at"`
 }
 
-func makeClaimsHandler(db *sql.DB) http.HandlerFunc {
+func makeClaimsHandler(conn *store.Conn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			listClaimsHandler(db, w, r)
+			listClaimsHandler(conn, w, r)
 		case http.MethodPost:
-			appendClaimsHandler(db, w, r)
+			appendClaimsHandler(conn, w, r)
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
 	}
 }
 
-func listClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+func listClaimsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request) {
 	limit, offset := parsePaginationFromQuery(r)
 	typeFilter := r.URL.Query().Get("type")
 	statusFilter := r.URL.Query().Get("status")
@@ -346,87 +369,58 @@ func listClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
-	var (
-		where string
-		args  []any
-	)
-	if typeFilter != "" && statusFilter != "" {
-		where = " WHERE type = ? AND status = ?"
-		args = []any{typeFilter, statusFilter}
-	} else if typeFilter != "" {
-		where = " WHERE type = ?"
-		args = []any{typeFilter}
-	} else if statusFilter != "" {
-		where = " WHERE status = ?"
-		args = []any{statusFilter}
-	}
-
-	var total int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM claims"+where, args...).Scan(&total); err != nil {
-		writeInternalError(w, "count claims", err)
-		return
-	}
-
-	rowArgs := append(append([]any{}, args...), limit, offset)
-	//nolint:gosec // G202: where clause is built from validated constant fragments only; values pass through ? placeholders
-	rows, err := db.QueryContext(ctx,
-		"SELECT id, text, type, confidence, status, created_at FROM claims"+where+" ORDER BY created_at DESC LIMIT ? OFFSET ?",
-		rowArgs...)
+	all, err := conn.Claims.ListAll(ctx)
 	if err != nil {
 		writeInternalError(w, "list claims", err)
 		return
 	}
-	defer func() { _ = rows.Close() }()
-
-	var claims []claimDTO
-	for rows.Next() {
-		var c claimDTO
-		if err := rows.Scan(&c.ID, &c.Text, &c.Type, &c.Confidence, &c.Status, &c.CreatedAt); err != nil {
-			writeInternalError(w, "scan claim", err)
-			return
+	filtered := all[:0]
+	for _, c := range all {
+		if typeFilter != "" && string(c.Type) != typeFilter {
+			continue
 		}
-		claims = append(claims, c)
+		if statusFilter != "" && string(c.Status) != statusFilter {
+			continue
+		}
+		filtered = append(filtered, c)
+	}
+	// Reverse for created_at DESC.
+	reversed := make([]domain.Claim, len(filtered))
+	for i, c := range filtered {
+		reversed[len(filtered)-1-i] = c
+	}
+	total := len(reversed)
+	page := paginate(reversed, limit, offset)
+
+	claims := make([]claimDTO, 0, len(page))
+	ids := make([]string, 0, len(page))
+	for _, c := range page {
+		claims = append(claims, claimDTO{
+			ID:         c.ID,
+			Text:       c.Text,
+			Type:       string(c.Type),
+			Confidence: c.Confidence,
+			Status:     string(c.Status),
+			CreatedAt:  c.CreatedAt.UTC().Format(time.RFC3339),
+		})
+		ids = append(ids, c.ID)
 	}
 
-	evidence, evErr := loadEvidenceForClaims(ctx, db, claims)
+	links, evErr := conn.Claims.ListEvidenceByClaimIDs(ctx, ids)
 	if evErr != nil {
 		writeInternalError(w, "load evidence", evErr)
 		return
+	}
+	var evidence []claimEvidenceItem
+	for _, l := range links {
+		evidence = append(evidence, claimEvidenceItem{ClaimID: l.ClaimID, EventID: l.EventID})
 	}
 
 	writeJSON(w, http.StatusOK, claimsResponse{Claims: claims, Evidence: evidence, Total: total, Limit: limit, Offset: offset})
 }
 
-// loadEvidenceForClaims returns the (claim_id, event_id) link rows for the
-// supplied claim IDs. Empty input → empty output. Used by GET /v1/claims so
-// pull can recover the evidence relations alongside the claims themselves.
-func loadEvidenceForClaims(ctx context.Context, db *sql.DB, claims []claimDTO) ([]claimEvidenceItem, error) {
-	if len(claims) == 0 {
-		return nil, nil
-	}
-	placeholders := make([]string, 0, len(claims))
-	args := make([]any, 0, len(claims))
-	for _, c := range claims {
-		placeholders = append(placeholders, "?")
-		args = append(args, c.ID)
-	}
-	//nolint:gosec // G202: placeholders are literal "?", IDs flow through ? bindings
-	q := "SELECT claim_id, event_id FROM claim_evidence WHERE claim_id IN (" + strings.Join(placeholders, ",") + ")"
-	rows, err := db.QueryContext(ctx, q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []claimEvidenceItem
-	for rows.Next() {
-		var item claimEvidenceItem
-		if err := rows.Scan(&item.ClaimID, &item.EventID); err != nil {
-			return nil, err
-		}
-		out = append(out, item)
-	}
-	return out, rows.Err()
-}
+// (loadEvidenceForClaims is gone — folded into listClaimsHandler via
+// the conn.Claims.ListEvidenceByClaimIDs port method.)
 
 type relationshipsResponse struct {
 	Relationships []relationshipDTO `json:"relationships"`
@@ -443,64 +437,75 @@ type relationshipDTO struct {
 	CreatedAt   string `json:"created_at"`
 }
 
-func makeRelationshipsHandler(db *sql.DB) http.HandlerFunc {
+func makeRelationshipsHandler(conn *store.Conn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			listRelationshipsHandler(db, w, r)
+			listRelationshipsHandler(conn, w, r)
 		case http.MethodPost:
-			appendRelationshipsHandler(db, w, r)
+			appendRelationshipsHandler(conn, w, r)
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
 	}
 }
 
-func listRelationshipsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+func listRelationshipsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request) {
 	limit, offset := parsePaginationFromQuery(r)
 	typeFilter := r.URL.Query().Get("type")
-	ctx := r.Context()
-
-	var (
-		where string
-		args  []any
-	)
-	if typeFilter != "" {
-		if typeFilter != "supports" && typeFilter != "contradicts" {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid type %q (want supports or contradicts)", typeFilter))
-			return
-		}
-		where = " WHERE type = ?"
-		args = []any{typeFilter}
-	}
-
-	var total int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM relationships"+where, args...).Scan(&total); err != nil {
-		writeInternalError(w, "count relationships", err)
+	if typeFilter != "" && typeFilter != "supports" && typeFilter != "contradicts" {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid type %q (want supports or contradicts)", typeFilter))
 		return
 	}
 
-	rowArgs := append(append([]any{}, args...), limit, offset)
-	//nolint:gosec // G202: where clause is built from validated constant fragments only; values pass through ? placeholders
-	rows, err := db.QueryContext(ctx,
-		"SELECT id, type, from_claim_id, to_claim_id, created_at FROM relationships"+where+" ORDER BY created_at DESC LIMIT ? OFFSET ?",
-		rowArgs...)
+	// The relationships repository doesn't expose a "list all"
+	// since the use case is hop-traversal, not export. Walk
+	// every claim and union its edges; dedup by relationship id.
+	// This is bounded by the federation page size (200 max), so
+	// scanning every claim once per page request is acceptable for
+	// the registry-server scale.
+	ctx := r.Context()
+	allClaims, err := conn.Claims.ListAll(ctx)
+	if err != nil {
+		writeInternalError(w, "list claims for relationship export: %v", err)
+		return
+	}
+	claimIDs := make([]string, 0, len(allClaims))
+	for _, c := range allClaims {
+		claimIDs = append(claimIDs, c.ID)
+	}
+	rels, err := conn.Relationships.ListByClaimIDs(ctx, claimIDs)
 	if err != nil {
 		writeInternalError(w, "list relationships", err)
 		return
 	}
-	defer func() { _ = rows.Close() }()
-
-	var rels []relationshipDTO
-	for rows.Next() {
-		var rel relationshipDTO
-		if err := rows.Scan(&rel.ID, &rel.Type, &rel.FromClaimID, &rel.ToClaimID, &rel.CreatedAt); err != nil {
-			writeInternalError(w, "scan relationship", err)
-			return
+	filtered := rels[:0]
+	for _, rel := range rels {
+		if typeFilter != "" && string(rel.Type) != typeFilter {
+			continue
 		}
-		rels = append(rels, rel)
+		filtered = append(filtered, rel)
 	}
-	writeJSON(w, http.StatusOK, relationshipsResponse{Relationships: rels, Total: total, Limit: limit, Offset: offset})
+	// Reverse for created_at DESC (rels come back in storage order,
+	// which approximates created_at ASC).
+	reversed := make([]domain.Relationship, len(filtered))
+	for i, rel := range filtered {
+		reversed[len(filtered)-1-i] = rel
+	}
+	total := len(reversed)
+	page := paginate(reversed, limit, offset)
+
+	out := make([]relationshipDTO, 0, len(page))
+	for _, rel := range page {
+		out = append(out, relationshipDTO{
+			ID:          rel.ID,
+			Type:        string(rel.Type),
+			FromClaimID: rel.FromClaimID,
+			ToClaimID:   rel.ToClaimID,
+			CreatedAt:   rel.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	writeJSON(w, http.StatusOK, relationshipsResponse{Relationships: out, Total: total, Limit: limit, Offset: offset})
 }
 
 // appendEventsRequest is the body for POST /v1/events. Single-event submits
@@ -565,7 +570,7 @@ func parseTimeFlexible(s string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unrecognized time format %q (want RFC3339)", s)
 }
 
-func appendEventsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+func appendEventsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, domain.ScopeEventsWrite) {
 		return
 	}
@@ -598,7 +603,6 @@ func appendEventsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	repo := sqlite.NewEventRepository(db)
 	ctx := r.Context()
 	actor := actorFromContext(ctx)
 	now := time.Now().UTC()
@@ -628,7 +632,7 @@ func appendEventsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 			IngestedAt:    ingested,
 			CreatedBy:     actor,
 		}
-		if err := repo.Append(ctx, event); err != nil {
+		if err := conn.Events.Append(ctx, event); err != nil {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("events[%d]: %v", i, err))
 			return
 		}
@@ -647,7 +651,7 @@ type claimEvidenceItem struct {
 	EventID string `json:"event_id"`
 }
 
-func appendClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+func appendClaimsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, domain.ScopeClaimsWrite) {
 		return
 	}
@@ -699,7 +703,6 @@ func appendClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		claims = append(claims, claim)
 	}
 
-	repo := sqlite.NewClaimRepository(db)
 	ctx := r.Context()
 
 	// F.4.b: if the bearer is run-scoped, every event referenced by
@@ -711,7 +714,7 @@ func appendClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		for _, e := range req.Evidence {
 			eventIDs = append(eventIDs, e.EventID)
 		}
-		bad, badRun, err := checkEventRunsAllowed(ctx, db, eventIDs, allowed)
+		bad, badRun, err := checkEventRunsAllowed(ctx, conn, eventIDs, allowed)
 		if err != nil {
 			writeInternalError(w, "run-scope check", err)
 			return
@@ -722,7 +725,7 @@ func appendClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := repo.Upsert(ctx, claims); err != nil {
+	if err := conn.Claims.Upsert(ctx, claims); err != nil {
 		writeInternalError(w, "upsert claims", err)
 		return
 	}
@@ -732,7 +735,7 @@ func appendClaimsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		for _, e := range req.Evidence {
 			links = append(links, domain.ClaimEvidence{ClaimID: e.ClaimID, EventID: e.EventID})
 		}
-		if err := repo.UpsertEvidence(ctx, links); err != nil {
+		if err := conn.Claims.UpsertEvidence(ctx, links); err != nil {
 			writeInternalError(w, "upsert evidence", err)
 			return
 		}
@@ -744,7 +747,7 @@ type appendRelationshipsRequest struct {
 	Relationships []relationshipDTO `json:"relationships"`
 }
 
-func appendRelationshipsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+func appendRelationshipsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, domain.ScopeRelationshipsWrite) {
 		return
 	}
@@ -801,12 +804,12 @@ func appendRelationshipsHandler(db *sql.DB, w http.ResponseWriter, r *http.Reque
 				claimIDs = append(claimIDs, id)
 			}
 		}
-		evIDs, err := claimEventIDs(r.Context(), db, claimIDs)
+		evIDs, err := claimEventIDs(r.Context(), conn, claimIDs)
 		if err != nil {
 			writeInternalError(w, "run-scope lookup", err)
 			return
 		}
-		bad, badRun, err := checkEventRunsAllowed(r.Context(), db, evIDs, allowed)
+		bad, badRun, err := checkEventRunsAllowed(r.Context(), conn, evIDs, allowed)
 		if err != nil {
 			writeInternalError(w, "run-scope check", err)
 			return
@@ -817,8 +820,7 @@ func appendRelationshipsHandler(db *sql.DB, w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	repo := sqlite.NewRelationshipRepository(db)
-	if err := repo.Upsert(r.Context(), rels); err != nil {
+	if err := conn.Relationships.Upsert(r.Context(), rels); err != nil {
 		writeInternalError(w, "upsert relationships", err)
 		return
 	}
@@ -848,78 +850,60 @@ type appendEmbeddingsRequest struct {
 	Embeddings []embeddingDTO `json:"embeddings"`
 }
 
-func makeEmbeddingsHandler(db *sql.DB) http.HandlerFunc {
+func makeEmbeddingsHandler(conn *store.Conn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			listEmbeddingsHandler(db, w, r)
+			listEmbeddingsHandler(conn, w, r)
 		case http.MethodPost:
-			appendEmbeddingsHandler(db, w, r)
+			appendEmbeddingsHandler(conn, w, r)
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
 	}
 }
 
-func listEmbeddingsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+func listEmbeddingsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request) {
 	limit, offset := parsePaginationFromQuery(r)
 	typeFilter := r.URL.Query().Get("entity_type")
 	ctx := r.Context()
-
-	var (
-		where string
-		args  []any
-	)
-	if typeFilter != "" {
-		if typeFilter != "event" && typeFilter != "claim" {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid entity_type %q (want event or claim)", typeFilter))
-			return
-		}
-		where = " WHERE entity_type = ?"
-		args = []any{typeFilter}
-	}
-
-	var total int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM embeddings"+where, args...).Scan(&total); err != nil {
-		writeInternalError(w, "count embeddings", err)
+	if typeFilter != "" && typeFilter != "event" && typeFilter != "claim" {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid entity_type %q (want event or claim)", typeFilter))
 		return
 	}
 
-	rowArgs := append(append([]any{}, args...), limit, offset)
-	//nolint:gosec // G202: where clause is built from validated constant fragments only; values pass through ? placeholders
-	rows, err := db.QueryContext(ctx,
-		"SELECT entity_id, entity_type, vector, model, dimensions FROM embeddings"+where+" ORDER BY entity_type, entity_id LIMIT ? OFFSET ?",
-		rowArgs...)
-	if err != nil {
-		writeInternalError(w, "list embeddings", err)
-		return
+	// Two-pass: when no filter is set we union both entity types so
+	// the federation pull can mirror the registry.
+	var records []domain.EmbeddingRecord
+	wantedTypes := []string{typeFilter}
+	if typeFilter == "" {
+		wantedTypes = []string{"event", "claim"}
 	}
-	defer func() { _ = rows.Close() }()
-
-	var out []embeddingDTO
-	for rows.Next() {
-		var (
-			e    embeddingDTO
-			blob []byte
-			dims int64
-		)
-		if err := rows.Scan(&e.EntityID, &e.EntityType, &blob, &e.Model, &dims); err != nil {
-			writeInternalError(w, "scan embedding", err)
-			return
-		}
-		vec, err := embedding.DecodeVector(blob)
+	for _, t := range wantedTypes {
+		recs, err := conn.Embeddings.ListByEntityType(ctx, t)
 		if err != nil {
-			writeInternalError(w, "decode embedding", err)
+			writeInternalError(w, "list embeddings", err)
 			return
 		}
-		e.Vector = vec
-		e.Dimensions = int(dims)
-		out = append(out, e)
+		records = append(records, recs...)
+	}
+	total := len(records)
+	page := paginate(records, limit, offset)
+
+	out := make([]embeddingDTO, 0, len(page))
+	for _, rec := range page {
+		out = append(out, embeddingDTO{
+			EntityID:   rec.EntityID,
+			EntityType: rec.EntityType,
+			Vector:     rec.Vector,
+			Model:      rec.Model,
+			Dimensions: rec.Dimensions,
+		})
 	}
 	writeJSON(w, http.StatusOK, embeddingsResponse{Embeddings: out, Total: total, Limit: limit, Offset: offset})
 }
 
-func appendEmbeddingsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+func appendEmbeddingsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request) {
 	if !requireScope(w, r, domain.ScopeEmbeddingsWrite) {
 		return
 	}
@@ -936,7 +920,6 @@ func appendEmbeddingsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	repo := sqlite.NewEmbeddingRepository(db)
 	ctx := r.Context()
 	actor := actorFromContext(ctx)
 
@@ -953,13 +936,13 @@ func appendEmbeddingsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request)
 				claimIDs = append(claimIDs, e.EntityID)
 			}
 		}
-		extraEvents, err := claimEventIDs(ctx, db, claimIDs)
+		extraEvents, err := claimEventIDs(ctx, conn, claimIDs)
 		if err != nil {
 			writeInternalError(w, "run-scope lookup", err)
 			return
 		}
 		eventIDs = append(eventIDs, extraEvents...)
-		bad, badRun, err := checkEventRunsAllowed(ctx, db, eventIDs, allowed)
+		bad, badRun, err := checkEventRunsAllowed(ctx, conn, eventIDs, allowed)
 		if err != nil {
 			writeInternalError(w, "run-scope check", err)
 			return
@@ -988,7 +971,7 @@ func appendEmbeddingsHandler(db *sql.DB, w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("embeddings[%d]: dimensions=%d but vector length=%d", i, e.Dimensions, len(e.Vector)))
 			return
 		}
-		if err := repo.UpsertAs(ctx, e.EntityID, e.EntityType, e.Vector, e.Model, actor); err != nil {
+		if err := conn.Embeddings.Upsert(ctx, e.EntityID, e.EntityType, e.Vector, e.Model, actor); err != nil {
 			writeInternalError(w, "upsert embedding", err)
 			return
 		}
@@ -1007,30 +990,56 @@ type metricsResponse struct {
 	Embeddings      int64 `json:"embeddings"`
 }
 
-func makeMetricsHandler(db *sql.DB) http.HandlerFunc {
+func makeMetricsHandler(conn *store.Conn) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
+		ctx := r.Context()
+		events, _ := conn.Events.ListAll(ctx)
+		claims, _ := conn.Claims.ListAll(ctx)
+		// Same union pattern as listEmbeddingsHandler — no port-level
+		// "list every embedding type" since we deliberately segregate
+		// event vs claim vectors at the storage layer.
+		eventEmbs, _ := conn.Embeddings.ListByEntityType(ctx, "event")
+		claimEmbs, _ := conn.Embeddings.ListByEntityType(ctx, "claim")
+
+		runs := map[string]struct{}{}
+		for _, e := range events {
+			if e.RunID != "" {
+				runs[e.RunID] = struct{}{}
+			}
+		}
+		var contestedClaims int64
+		for _, c := range claims {
+			if c.Status == domain.ClaimStatusContested {
+				contestedClaims++
+			}
+		}
+		// Relationships need the union of every claim's edges.
+		ids := make([]string, 0, len(claims))
+		for _, c := range claims {
+			ids = append(ids, c.ID)
+		}
+		rels, _ := conn.Relationships.ListByClaimIDs(ctx, ids)
+		var contradictions int64
+		for _, rel := range rels {
+			if rel.Type == domain.RelationshipTypeContradicts {
+				contradictions++
+			}
+		}
+
 		writeJSON(w, http.StatusOK, metricsResponse{
-			Runs:            countRowsServe(db, `SELECT COUNT(DISTINCT run_id) FROM events WHERE run_id <> ''`),
-			Events:          countRowsServe(db, `SELECT COUNT(*) FROM events`),
-			Claims:          countRowsServe(db, `SELECT COUNT(*) FROM claims`),
-			ContestedClaims: countRowsServe(db, `SELECT COUNT(*) FROM claims WHERE status = 'contested'`),
-			Relationships:   countRowsServe(db, `SELECT COUNT(*) FROM relationships`),
-			Contradictions:  countRowsServe(db, `SELECT COUNT(*) FROM relationships WHERE type = 'contradicts'`),
-			Embeddings:      countRowsServe(db, `SELECT COUNT(*) FROM embeddings`),
+			Runs:            int64(len(runs)),
+			Events:          int64(len(events)),
+			Claims:          int64(len(claims)),
+			ContestedClaims: contestedClaims,
+			Relationships:   int64(len(rels)),
+			Contradictions:  contradictions,
+			Embeddings:      int64(len(eventEmbs) + len(claimEmbs)),
 		})
 	}
-}
-
-func countRowsServe(db *sql.DB, q string) int64 {
-	var n int64
-	if err := db.QueryRow(q).Scan(&n); err != nil {
-		return 0
-	}
-	return n
 }
 
 // parsePaginationFromQuery reads ?limit and ?offset query params with the

@@ -86,6 +86,64 @@ func (r RelationshipRepository) ListByClaim(ctx context.Context, claimID string)
 	return rels, nil
 }
 
+// RepointEndpoint rewrites every relationship whose from_claim_id
+// or to_claim_id equals oldID to point at newID. Self-loops created
+// by the rewrite (newID-newID) are dropped, and unique-edge
+// conflicts collapse via UPDATE OR IGNORE — Mnemos doesn't
+// distinguish duplicate edges. Used by ApplySemanticDedupe.
+func (r RelationshipRepository) RepointEndpoint(ctx context.Context, oldID, newID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin repoint endpoint tx: %w", err)
+	}
+	defer rollbackTx(tx)
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE OR IGNORE relationships SET from_claim_id = ? WHERE from_claim_id = ?`,
+		newID, oldID,
+	); err != nil {
+		return fmt.Errorf("repoint from %s -> %s: %w", oldID, newID, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE OR IGNORE relationships SET to_claim_id = ? WHERE to_claim_id = ?`,
+		newID, oldID,
+	); err != nil {
+		return fmt.Errorf("repoint to %s -> %s: %w", oldID, newID, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM relationships WHERE from_claim_id = ? AND to_claim_id = ?`,
+		newID, newID,
+	); err != nil {
+		return fmt.Errorf("drop self-loops on %s: %w", newID, err)
+	}
+	// UPDATE OR IGNORE silently drops rows that would violate the
+	// unique edge index. Clean up the orphans: any rows still
+	// pointing at oldID after the rewrites are conflicts we accept
+	// losing (they would have collapsed onto an already-existing
+	// edge anyway).
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM relationships WHERE from_claim_id = ? OR to_claim_id = ?`,
+		oldID, oldID,
+	); err != nil {
+		return fmt.Errorf("drop orphans on %s: %w", oldID, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit repoint endpoint tx: %w", err)
+	}
+	return nil
+}
+
+// DeleteByClaim removes every relationship that touches the given
+// claim (as source or target).
+func (r RelationshipRepository) DeleteByClaim(ctx context.Context, claimID string) error {
+	if _, err := r.db.ExecContext(ctx,
+		`DELETE FROM relationships WHERE from_claim_id = ? OR to_claim_id = ?`,
+		claimID, claimID,
+	); err != nil {
+		return fmt.Errorf("delete relationships for %s: %w", claimID, err)
+	}
+	return nil
+}
+
 // ListByClaimIDs returns every relationship that touches any of the given
 // claim IDs (as source OR target). Used by hop-expansion in the query
 // engine — N IDs in one round trip rather than N round trips.

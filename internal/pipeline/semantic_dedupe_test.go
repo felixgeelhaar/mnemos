@@ -60,13 +60,13 @@ func TestPlanSemanticDedupe_FindsParaphraseCluster(t *testing.T) {
 	// Embeddings: cl_a and cl_b are nearly identical (cos ≈ 0.999);
 	// cl_c is orthogonal.
 	embRepo := sqlite.NewEmbeddingRepository(db)
-	if err := embRepo.Upsert(ctx, "cl_a", "claim", []float32{1, 0.01, 0}, "test"); err != nil {
+	if err := embRepo.Upsert(ctx, "cl_a", "claim", []float32{1, 0.01, 0}, "test", ""); err != nil {
 		t.Fatalf("embed cl_a: %v", err)
 	}
-	if err := embRepo.Upsert(ctx, "cl_b", "claim", []float32{1, 0.02, 0}, "test"); err != nil {
+	if err := embRepo.Upsert(ctx, "cl_b", "claim", []float32{1, 0.02, 0}, "test", ""); err != nil {
 		t.Fatalf("embed cl_b: %v", err)
 	}
-	if err := embRepo.Upsert(ctx, "cl_c", "claim", []float32{0, 0, 1}, "test"); err != nil {
+	if err := embRepo.Upsert(ctx, "cl_c", "claim", []float32{0, 0, 1}, "test", ""); err != nil {
 		t.Fatalf("embed cl_c: %v", err)
 	}
 
@@ -106,7 +106,7 @@ func TestPlanSemanticDedupe_SkipsClaimsWithoutEmbedding(t *testing.T) {
 	}
 	// Only one has an embedding.
 	embRepo := sqlite.NewEmbeddingRepository(db)
-	if err := embRepo.Upsert(ctx, "a", "claim", []float32{1, 0, 0}, "m"); err != nil {
+	if err := embRepo.Upsert(ctx, "a", "claim", []float32{1, 0, 0}, "m", ""); err != nil {
 		t.Fatalf("embed: %v", err)
 	}
 

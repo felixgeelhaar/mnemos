@@ -521,14 +521,14 @@ Add to `~/.claude/mcp.json` (global) or `.claude/mcp.json` (per-project):
       "command": "mnemos",
       "args": ["mcp"],
       "env": {
-        "MNEMOS_DB_PATH": "/absolute/path/to/project/.mnemos/mnemos.db"
+        "MNEMOS_DB_URL": "sqlite:///absolute/path/to/project/.mnemos/mnemos.db"
       }
     }
   }
 }
 ```
 
-Setting `MNEMOS_DB_PATH` per-project scopes the knowledge base to that project. Without it, Mnemos uses the default at `~/.local/share/mnemos/mnemos.db`.
+Setting `MNEMOS_DB_URL` per-project scopes the knowledge base to that project. Without it, Mnemos walks up looking for `.mnemos/mnemos.db` and falls back to `~/.local/share/mnemos/mnemos.db`.
 
 ### Cursor
 
@@ -541,7 +541,7 @@ Add to `.cursor/mcp.json` in your project root:
       "command": "mnemos",
       "args": ["mcp"],
       "env": {
-        "MNEMOS_DB_PATH": ".mnemos/mnemos.db"
+        "MNEMOS_DB_URL": "sqlite://.mnemos/mnemos.db"
       }
     }
   }
@@ -582,10 +582,10 @@ For multi-project setups, use separate databases:
 
 ```bash
 # Project A
-MNEMOS_DB_PATH=~/projects/project-a/.mnemos/mnemos.db mnemos process docs/*.md
+MNEMOS_DB_URL=sqlite://~/projects/project-a/.mnemos/mnemos.db mnemos process docs/*.md
 
 # Project B
-MNEMOS_DB_PATH=~/projects/project-b/.mnemos/mnemos.db mnemos process specs/*.md
+MNEMOS_DB_URL=sqlite://~/projects/project-b/.mnemos/mnemos.db mnemos process specs/*.md
 ```
 
-Each MCP config can point to a different `MNEMOS_DB_PATH`, so your agent's knowledge stays scoped to the project it is working on.
+Each MCP config can point to a different `MNEMOS_DB_URL`, so your agent's knowledge stays scoped to the project it is working on.

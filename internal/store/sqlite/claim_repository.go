@@ -393,6 +393,61 @@ func (r ClaimRepository) CountClaimsBelowTrust(ctx context.Context, threshold fl
 	return r.q.CountClaimsBelowTrust(ctx, threshold)
 }
 
+// RepointEvidence rewrites every claim_evidence row pointing at
+// fromClaimID to point at toClaimID, then deletes the original
+// rows. Idempotent on the (claim_id, event_id) primary key —
+// duplicate evidence collapses silently. Single-tx so partial
+// failures don't leave dangling pointers.
+func (r ClaimRepository) RepointEvidence(ctx context.Context, fromClaimID, toClaimID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin repoint evidence tx: %w", err)
+	}
+	defer rollbackTx(tx)
+	if _, err := tx.ExecContext(ctx,
+		`INSERT OR IGNORE INTO claim_evidence (claim_id, event_id)
+		 SELECT ?, event_id FROM claim_evidence WHERE claim_id = ?`,
+		toClaimID, fromClaimID,
+	); err != nil {
+		return fmt.Errorf("copy evidence %s -> %s: %w", fromClaimID, toClaimID, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM claim_evidence WHERE claim_id = ?`, fromClaimID,
+	); err != nil {
+		return fmt.Errorf("delete original evidence %s: %w", fromClaimID, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit repoint evidence tx: %w", err)
+	}
+	return nil
+}
+
+// DeleteCascade removes a claim and the rows owned only by it
+// (claim_evidence by claim_id, claim_status_history by claim_id,
+// the claim row itself). Embeddings, relationships, and
+// claim_entities are owned by other repositories — callers must
+// clean those up separately. Single-tx for atomicity.
+func (r ClaimRepository) DeleteCascade(ctx context.Context, claimID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin claim delete tx: %w", err)
+	}
+	defer rollbackTx(tx)
+	if _, err := tx.ExecContext(ctx, `DELETE FROM claim_evidence WHERE claim_id = ?`, claimID); err != nil {
+		return fmt.Errorf("delete claim_evidence: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM claim_status_history WHERE claim_id = ?`, claimID); err != nil {
+		return fmt.Errorf("delete claim_status_history: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM claims WHERE id = ?`, claimID); err != nil {
+		return fmt.Errorf("delete claim: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit claim delete tx: %w", err)
+	}
+	return nil
+}
+
 // ListAll returns every claim stored in the database.
 func (r ClaimRepository) ListAll(ctx context.Context) ([]domain.Claim, error) {
 	rows, err := r.q.ListAllClaims(ctx)

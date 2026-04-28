@@ -2,13 +2,11 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/embedding"
 	"github.com/felixgeelhaar/mnemos/internal/store"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
 )
 
 // SemanticDedupePlan is the result of a similarity scan: a list of
@@ -214,107 +212,50 @@ func pickWinner(pool []indexedClaim, members []int) int {
 	return best
 }
 
-// ApplySemanticDedupe executes the plan against a SQLite-backed
-// Conn. The merge surgery (UPDATE OR IGNORE / INSERT OR IGNORE on
-// the relationships and claim_evidence tables) is SQLite-flavoured
-// SQL; backends that don't expose a *sql.DB through Conn.Raw will
-// receive a clear error so operators see the limitation rather
-// than a partial write. Postgres and MySQL parity is tracked as a
-// separate roady feature — the same semantics are achievable with
-// each provider's idioms (ON CONFLICT DO NOTHING / INSERT IGNORE),
-// they just need provider-specific bodies.
-// duplicate's evidence/relationship/embedding row is rewritten to
-// point at the winner, and the duplicate claim is deleted. All
-// changes happen in a single transaction so a mid-run crash leaves
-// the DB consistent.
+// ApplySemanticDedupe executes the plan through port-typed
+// repository methods so it works against every storage backend.
+// For each merge:
+//
+//  1. claim_evidence rows pointing at the duplicate are rewritten
+//     to point at the winner (Claims.RepointEvidence).
+//  2. relationships with the duplicate as endpoint are rewritten
+//     to point at the winner; self-loops and unique-edge
+//     duplicates are dropped (Relationships.RepointEndpoint).
+//  3. The duplicate's embedding row is deleted (Embeddings.Delete).
+//  4. The duplicate claim and its status_history are deleted via
+//     ClaimRepository.DeleteCascade.
+//
+// Cross-table atomicity is no longer guaranteed: each repository
+// call commits independently. Every step is idempotent, so a retry
+// after a partial failure converges. This trades the previous
+// SQLite-only single-transaction guarantee for backend portability;
+// a future Phase could add a Conn-scoped Transactional capability
+// for backends that support it.
 func ApplySemanticDedupe(ctx context.Context, conn *store.Conn, plan SemanticDedupePlan) (int, error) {
 	if len(plan.Merges) == 0 {
 		return 0, nil
 	}
-	db, ok := conn.Raw.(*sql.DB)
-	if !ok || db == nil {
-		return 0, fmt.Errorf("apply semantic dedupe: backend does not expose *sql.DB; SQLite-only operation today")
+	if conn == nil || conn.Claims == nil || conn.Relationships == nil || conn.Embeddings == nil {
+		return 0, fmt.Errorf("apply semantic dedupe: conn missing required repositories")
 	}
-
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, fmt.Errorf("begin tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	q := sqlcgen.New(tx)
 
 	merged := 0
 	for _, m := range plan.Merges {
 		for _, dupID := range m.DuplicateIDs {
-			// Repoint evidence: each (dup, event_id) becomes
-			// (winner, event_id). Use REPLACE-style upsert so we
-			// don't double-insert when the winner already had the
-			// same evidence link.
-			if _, err := tx.ExecContext(ctx,
-				`INSERT OR IGNORE INTO claim_evidence (claim_id, event_id)
-				 SELECT ?, event_id FROM claim_evidence WHERE claim_id = ?`,
-				m.WinnerID, dupID,
-			); err != nil {
-				return 0, fmt.Errorf("repoint evidence %s→%s: %w", dupID, m.WinnerID, err)
+			if err := conn.Claims.RepointEvidence(ctx, dupID, m.WinnerID); err != nil {
+				return merged, fmt.Errorf("repoint evidence %s→%s: %w", dupID, m.WinnerID, err)
 			}
-			if err := q.DeleteClaimEvidenceByClaimID(ctx, dupID); err != nil {
-				return 0, fmt.Errorf("delete evidence for %s: %w", dupID, err)
+			if err := conn.Relationships.RepointEndpoint(ctx, dupID, m.WinnerID); err != nil {
+				return merged, fmt.Errorf("repoint relationships %s→%s: %w", dupID, m.WinnerID, err)
 			}
-
-			// Repoint relationships: dup as either endpoint becomes
-			// the winner. Drop edges that would self-loop after the
-			// rewrite (winner→winner is meaningless).
-			if _, err := tx.ExecContext(ctx,
-				`UPDATE OR IGNORE relationships SET from_claim_id = ? WHERE from_claim_id = ?`,
-				m.WinnerID, dupID,
-			); err != nil {
-				return 0, fmt.Errorf("repoint rels.from %s→%s: %w", dupID, m.WinnerID, err)
+			if err := conn.Embeddings.Delete(ctx, dupID, "claim"); err != nil {
+				return merged, fmt.Errorf("delete embedding for %s: %w", dupID, err)
 			}
-			if _, err := tx.ExecContext(ctx,
-				`UPDATE OR IGNORE relationships SET to_claim_id = ? WHERE to_claim_id = ?`,
-				m.WinnerID, dupID,
-			); err != nil {
-				return 0, fmt.Errorf("repoint rels.to %s→%s: %w", dupID, m.WinnerID, err)
-			}
-			if _, err := tx.ExecContext(ctx,
-				`DELETE FROM relationships
-				 WHERE from_claim_id = ? AND to_claim_id = ?`,
-				m.WinnerID, m.WinnerID,
-			); err != nil {
-				return 0, fmt.Errorf("drop self-loop for %s: %w", m.WinnerID, err)
-			}
-			// UPDATE OR IGNORE silently drops rows that would
-			// violate the unique edge index. Clean up the orphans:
-			// any rels still pointing at the duplicate after the
-			// repoint above are conflicts that we accept losing.
-			if _, err := tx.ExecContext(ctx,
-				`DELETE FROM relationships
-				 WHERE from_claim_id = ? OR to_claim_id = ?`,
-				dupID, dupID,
-			); err != nil {
-				return 0, fmt.Errorf("drop dangling rels for %s: %w", dupID, err)
-			}
-
-			// Status history and the duplicate's own embedding row
-			// follow the claim into the bin — keeping them would
-			// leave dangling references.
-			if err := q.DeleteClaimStatusHistoryByClaimID(ctx, dupID); err != nil {
-				return 0, fmt.Errorf("delete status history for %s: %w", dupID, err)
-			}
-			if err := q.DeleteEmbeddingByEntity(ctx, sqlcgen.DeleteEmbeddingByEntityParams{
-				EntityID: dupID, EntityType: "claim",
-			}); err != nil {
-				return 0, fmt.Errorf("delete embedding for %s: %w", dupID, err)
-			}
-			if err := q.DeleteClaimByID(ctx, dupID); err != nil {
-				return 0, fmt.Errorf("delete claim %s: %w", dupID, err)
+			if err := conn.Claims.DeleteCascade(ctx, dupID); err != nil {
+				return merged, fmt.Errorf("delete claim %s: %w", dupID, err)
 			}
 			merged++
 		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("commit dedupe: %w", err)
 	}
 	return merged, nil
 }

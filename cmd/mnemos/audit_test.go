@@ -58,7 +58,7 @@ func TestBuildAuditExport_IncludesEmbeddingsOnRequest(t *testing.T) {
 	now := time.Now().UTC()
 	seedEvent(t, db, "ev1", "r", "x", "in1", `{}`, now)
 	repo := sqlite.NewEmbeddingRepository(db)
-	if err := repo.Upsert(context.Background(), "ev1", "event", []float32{0.1, 0.2, 0.3}, "test-model"); err != nil {
+	if err := repo.Upsert(context.Background(), "ev1", "event", []float32{0.1, 0.2, 0.3}, "test-model", ""); err != nil {
 		t.Fatalf("seed embedding: %v", err)
 	}
 

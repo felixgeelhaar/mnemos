@@ -124,7 +124,7 @@ func newFakeRegistry(t *testing.T) (url string, client *http.Client, token strin
 		t.Fatalf("issue token: %v", err)
 	}
 
-	srv := httptest.NewServer(newServerMux(regDB))
+	srv := httptest.NewServer(newServerMux(connFromDB(t, regDB)))
 	closer = func() {
 		srv.Close()
 		_ = regDB.Close()
@@ -291,10 +291,10 @@ func TestPushPull_EmbeddingsRoundTripBitExact(t *testing.T) {
 	ctx := context.Background()
 	v1 := []float32{0.0, -1.5, 0.123456789, 3.14159265, -0.0001}
 	v2 := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0}
-	if err := repo.Upsert(ctx, "ev_emb", "event", v1, "test-model"); err != nil {
+	if err := repo.Upsert(ctx, "ev_emb", "event", v1, "test-model", ""); err != nil {
 		t.Fatalf("upsert v1: %v", err)
 	}
-	if err := repo.Upsert(ctx, "cl_emb", "claim", v2, "test-model"); err != nil {
+	if err := repo.Upsert(ctx, "cl_emb", "claim", v2, "test-model", ""); err != nil {
 		t.Fatalf("upsert v2: %v", err)
 	}
 
@@ -443,7 +443,7 @@ func TestPullEvents_PaginatesUntilExhausted(t *testing.T) {
 		seedEvent(t, regDB, "e"+string(rune('a'+i%26))+string(rune('0'+i/26)), "r", "x", "in"+string(rune('a'+i%26)), `{}`, now)
 	}
 
-	srv := httptest.NewServer(newServerMux(regDB))
+	srv := httptest.NewServer(newServerMux(connFromDB(t, regDB)))
 	defer srv.Close()
 
 	got, err := pullEvents(context.Background(), srv.Client(), srv.URL, "")

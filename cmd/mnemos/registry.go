@@ -719,7 +719,7 @@ func persistPulledEmbeddings(ctx context.Context, db *sql.DB, records []embeddin
 	repo := sqlite.NewEmbeddingRepository(db)
 	persisted := 0
 	for _, e := range records {
-		if err := repo.Upsert(ctx, e.EntityID, e.EntityType, e.Vector, e.Model); err != nil {
+		if err := repo.Upsert(ctx, e.EntityID, e.EntityType, e.Vector, e.Model, ""); err != nil {
 			return persisted, fmt.Errorf("upsert embedding %s/%s: %w", e.EntityID, e.EntityType, err)
 		}
 		persisted++

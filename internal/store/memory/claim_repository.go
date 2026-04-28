@@ -180,6 +180,50 @@ func (r ClaimRepository) ListByIDs(_ context.Context, claimIDs []string) ([]doma
 	return out, nil
 }
 
+// RepointEvidence rewrites every (fromClaimID, eventID) link to
+// (toClaimID, eventID). Duplicates collapse via the dedup map key.
+func (r ClaimRepository) RepointEvidence(_ context.Context, fromClaimID, toClaimID string) error {
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	src, ok := r.state.evidence[fromClaimID]
+	if !ok || len(src) == 0 {
+		return nil
+	}
+	dst, ok := r.state.evidence[toClaimID]
+	if !ok {
+		dst = map[string]struct{}{}
+		r.state.evidence[toClaimID] = dst
+	}
+	for evID := range src {
+		dst[evID] = struct{}{}
+	}
+	delete(r.state.evidence, fromClaimID)
+	return nil
+}
+
+// DeleteCascade removes a claim plus its claim-owned dependents.
+func (r ClaimRepository) DeleteCascade(_ context.Context, claimID string) error {
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	if _, ok := r.state.claims[claimID]; !ok {
+		return nil
+	}
+	delete(r.state.claims, claimID)
+	r.state.claimOrder = removeStringFromSlice(r.state.claimOrder, claimID)
+	delete(r.state.evidence, claimID)
+	delete(r.state.statusHistory, claimID)
+	return nil
+}
+
+func removeStringFromSlice(s []string, v string) []string {
+	for i, x := range s {
+		if x == v {
+			return append(s[:i], s[i+1:]...)
+		}
+	}
+	return s
+}
+
 // ListAll returns every claim in insertion order.
 func (r ClaimRepository) ListAll(_ context.Context) ([]domain.Claim, error) {
 	r.state.mu.RLock()

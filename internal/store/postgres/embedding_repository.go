@@ -20,7 +20,7 @@ type EmbeddingRepository struct {
 }
 
 // Upsert satisfies the corresponding ports method.
-func (r EmbeddingRepository) Upsert(ctx context.Context, entityID, entityType string, vector []float32, model string) error {
+func (r EmbeddingRepository) Upsert(ctx context.Context, entityID, entityType string, vector []float32, model, createdBy string) error {
 	blob := embedding.EncodeVector(vector)
 	_, err := r.db.ExecContext(ctx, fmt.Sprintf(`
 INSERT INTO %s (entity_id, entity_type, vector, model, dimensions, created_at, created_by)
@@ -31,10 +31,21 @@ ON CONFLICT (entity_id, entity_type) DO UPDATE SET
   dimensions = EXCLUDED.dimensions,
   created_at = EXCLUDED.created_at`, qualify(r.ns, "embeddings")),
 		entityID, entityType, blob, model, len(vector),
-		time.Now().UTC(), domain.SystemUser,
+		time.Now().UTC(), actorOr(createdBy),
 	)
 	if err != nil {
 		return fmt.Errorf("upsert embedding: %w", err)
+	}
+	return nil
+}
+
+// Delete removes the embedding for (entityID, entityType). Idempotent.
+func (r EmbeddingRepository) Delete(ctx context.Context, entityID, entityType string) error {
+	if _, err := r.db.ExecContext(ctx,
+		fmt.Sprintf(`DELETE FROM %s WHERE entity_id = $1 AND entity_type = $2`, qualify(r.ns, "embeddings")),
+		entityID, entityType,
+	); err != nil {
+		return fmt.Errorf("delete embedding (%s, %s): %w", entityID, entityType, err)
 	}
 	return nil
 }

@@ -38,14 +38,14 @@ import (
 	_ "github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
-// resolveDBPath returns the database path in the following precedence:
-//  1. MNEMOS_DB_PATH environment variable (explicit override)
-//  2. Nearest .mnemos/mnemos.db walking up from the working directory
-//  3. XDG-compliant global default (~/.local/share/mnemos/mnemos.db)
+// resolveDBPath returns the SQLite file path used when MNEMOS_DB_URL
+// is not set. Precedence:
+//  1. Nearest .mnemos/mnemos.db walking up from the working directory
+//  2. XDG-compliant global default (~/.local/share/mnemos/mnemos.db)
+//
+// Operators who want a non-SQLite backend (or any path not matching
+// these defaults) set MNEMOS_DB_URL explicitly.
 func resolveDBPath() string {
-	if p := os.Getenv("MNEMOS_DB_PATH"); p != "" {
-		return p
-	}
 	if p, _, ok := findProjectDB(); ok {
 		return p
 	}
@@ -1099,10 +1099,10 @@ func printUsage() {
 	fmt.Println("  -y, --yes      with reset: skip the confirmation prompt")
 	fmt.Println("")
 	fmt.Println("Environment Variables:")
-	fmt.Println("  MNEMOS_DB_URL          full storage DSN (any registered backend, takes precedence over MNEMOS_DB_PATH)")
+	fmt.Println("  MNEMOS_DB_URL          full storage DSN (any registered backend)")
 	fmt.Println("                         examples: sqlite:///var/lib/mnemos/mnemos.db   memory://")
-	fmt.Println("  MNEMOS_DB_PATH         SQLite file path (legacy; equivalent to MNEMOS_DB_URL=sqlite://<path>)")
-	fmt.Println("                         resolution order: MNEMOS_DB_URL → MNEMOS_DB_PATH → ./.mnemos/mnemos.db (walked up) → ~/.local/share/mnemos/mnemos.db")
+	fmt.Println("                         postgres://...   mysql://...   libsql://...")
+	fmt.Println("                         when unset: ./.mnemos/mnemos.db (walked up) → ~/.local/share/mnemos/mnemos.db")
 	fmt.Println("  MNEMOS_LLM_PROVIDER    anthropic, openai, gemini, ollama, openai-compat")
 	fmt.Println("  MNEMOS_LLM_API_KEY     API key (required for cloud providers)")
 	fmt.Println("  MNEMOS_LLM_MODEL       model override (optional)")

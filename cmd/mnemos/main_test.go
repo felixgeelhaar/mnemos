@@ -101,26 +101,9 @@ func TestFindProjectDB_StopsAtHomeDirectory(t *testing.T) {
 	}
 }
 
-func TestResolveDBPath_EnvVarOverridesProjectAndGlobal(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("HOME", root)
-	if err := os.Mkdir(filepath.Join(root, ".mnemos"), 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	t.Chdir(root)
-
-	override := filepath.Join(root, "custom.db")
-	t.Setenv("MNEMOS_DB_PATH", override)
-
-	if got := resolveDBPath(); got != override {
-		t.Fatalf("resolveDBPath = %q, want %q (env should win)", got, override)
-	}
-}
-
 func TestResolveDBPath_ProjectBeatsGlobalDefault(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", root)
-	t.Setenv("MNEMOS_DB_PATH", "")
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, "xdg"))
 	if err := os.Mkdir(filepath.Join(root, ".mnemos"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -136,7 +119,6 @@ func TestResolveDBPath_ProjectBeatsGlobalDefault(t *testing.T) {
 func TestResolveDBPath_FallsBackToXDGGlobal(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", root)
-	t.Setenv("MNEMOS_DB_PATH", "")
 	xdg := filepath.Join(root, "xdg")
 	t.Setenv("XDG_DATA_HOME", xdg)
 	t.Chdir(root)

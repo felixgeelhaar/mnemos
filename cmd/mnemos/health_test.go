@@ -13,7 +13,7 @@ import (
 
 func TestHealth_DefaultIsShallow(t *testing.T) {
 	db := newServerTestDB(t)
-	srv := httptest.NewServer(newServerMux(db))
+	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/health")
@@ -43,7 +43,7 @@ func TestHealth_DeepIncludesDBProbe(t *testing.T) {
 	t.Setenv("MNEMOS_EMBED_PROVIDER", "")
 
 	db := newServerTestDB(t)
-	srv := httptest.NewServer(newServerMux(db))
+	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/health?deep=true")
@@ -99,7 +99,7 @@ func TestRunHealthChecks_DBFailureReportsAsFailed(t *testing.T) {
 func TestRunDoctorChecks_NoCrashOnEmptyConfig(t *testing.T) {
 	t.Setenv("MNEMOS_LLM_PROVIDER", "")
 	t.Setenv("MNEMOS_EMBED_PROVIDER", "")
-	t.Setenv("MNEMOS_DB_PATH", filepath.Join(t.TempDir(), "doctor.db"))
+	t.Setenv("MNEMOS_DB_URL", "sqlite://"+filepath.Join(t.TempDir(), "doctor.db"))
 
 	r := runDoctorChecks(context.Background())
 	// Healthy may be true or false depending on environment (Ollama

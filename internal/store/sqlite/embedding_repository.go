@@ -23,15 +23,8 @@ func NewEmbeddingRepository(db *sql.DB) EmbeddingRepository {
 }
 
 // Upsert stores or updates a vector embedding for the given entity.
-// Records SystemUser as created_by; callers that have an authenticated
-// actor should use UpsertAs instead.
-func (r EmbeddingRepository) Upsert(ctx context.Context, entityID, entityType string, vector []float32, model string) error {
-	return r.UpsertAs(ctx, entityID, entityType, vector, model, "")
-}
-
-// UpsertAs is the actor-aware variant of Upsert. The empty string
-// resolves to SystemUser via actorOr.
-func (r EmbeddingRepository) UpsertAs(ctx context.Context, entityID, entityType string, vector []float32, model, createdBy string) error {
+// An empty createdBy is recorded as domain.SystemUser via actorOr.
+func (r EmbeddingRepository) Upsert(ctx context.Context, entityID, entityType string, vector []float32, model, createdBy string) error {
 	blob := embedding.EncodeVector(vector)
 	return r.q.UpsertEmbedding(ctx, sqlcgen.UpsertEmbeddingParams{
 		EntityID:   entityID,
@@ -57,6 +50,14 @@ func (r EmbeddingRepository) GetByEntityID(ctx context.Context, entityID, entity
 		return domain.EmbeddingRecord{}, fmt.Errorf("get embedding: %w", err)
 	}
 	return mapSQLEmbedding(row)
+}
+
+// Delete removes the embedding for (entityID, entityType). Idempotent.
+func (r EmbeddingRepository) Delete(ctx context.Context, entityID, entityType string) error {
+	return r.q.DeleteEmbeddingByEntity(ctx, sqlcgen.DeleteEmbeddingByEntityParams{
+		EntityID:   entityID,
+		EntityType: entityType,
+	})
 }
 
 // ListByEntityType returns all embeddings of the given type (e.g. "event").

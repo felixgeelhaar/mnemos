@@ -63,6 +63,83 @@ FROM %s WHERE from_claim_id = $1 OR to_claim_id = $1`, qualify(r.ns, "relationsh
 	return collectRelationshipRows(rows)
 }
 
+// RepointEndpoint rewrites every relationship whose endpoints
+// equal oldID to point at newID. Duplicates (existing edges with
+// the same type+from+to) drop via the unique-edge index, surfaced
+// by removing every leftover row pointing at oldID after the
+// rewrite. Self-loops (newID-newID) are also dropped.
+func (r RelationshipRepository) RepointEndpoint(ctx context.Context, oldID, newID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin repoint endpoint tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// Postgres has no UPDATE OR IGNORE; use a delete-then-update
+	// dance: pre-emptively drop rows that would conflict on the
+	// unique index after rewriting, then update what's left.
+	conflictFrom := fmt.Sprintf(`
+DELETE FROM %s WHERE id IN (
+  SELECT a.id FROM %s a
+  WHERE a.from_claim_id = $1
+    AND EXISTS (SELECT 1 FROM %s b
+                WHERE b.type = a.type
+                  AND b.from_claim_id = $2
+                  AND b.to_claim_id = a.to_claim_id))`,
+		qualify(r.ns, "relationships"),
+		qualify(r.ns, "relationships"),
+		qualify(r.ns, "relationships"))
+	conflictTo := fmt.Sprintf(`
+DELETE FROM %s WHERE id IN (
+  SELECT a.id FROM %s a
+  WHERE a.to_claim_id = $1
+    AND EXISTS (SELECT 1 FROM %s b
+                WHERE b.type = a.type
+                  AND b.from_claim_id = a.from_claim_id
+                  AND b.to_claim_id = $2))`,
+		qualify(r.ns, "relationships"),
+		qualify(r.ns, "relationships"),
+		qualify(r.ns, "relationships"))
+	for _, stmt := range []string{conflictFrom, conflictTo} {
+		if _, err := tx.ExecContext(ctx, stmt, oldID, newID); err != nil {
+			return fmt.Errorf("clear conflicting edges: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx,
+		fmt.Sprintf(`UPDATE %s SET from_claim_id = $1 WHERE from_claim_id = $2`, qualify(r.ns, "relationships")),
+		newID, oldID,
+	); err != nil {
+		return fmt.Errorf("repoint from %s -> %s: %w", oldID, newID, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		fmt.Sprintf(`UPDATE %s SET to_claim_id = $1 WHERE to_claim_id = $2`, qualify(r.ns, "relationships")),
+		newID, oldID,
+	); err != nil {
+		return fmt.Errorf("repoint to %s -> %s: %w", oldID, newID, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		fmt.Sprintf(`DELETE FROM %s WHERE from_claim_id = $1 AND to_claim_id = $1`, qualify(r.ns, "relationships")),
+		newID,
+	); err != nil {
+		return fmt.Errorf("drop self-loops on %s: %w", newID, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit repoint endpoint tx: %w", err)
+	}
+	return nil
+}
+
+// DeleteByClaim removes every relationship touching the claim.
+func (r RelationshipRepository) DeleteByClaim(ctx context.Context, claimID string) error {
+	if _, err := r.db.ExecContext(ctx,
+		fmt.Sprintf(`DELETE FROM %s WHERE from_claim_id = $1 OR to_claim_id = $1`, qualify(r.ns, "relationships")),
+		claimID,
+	); err != nil {
+		return fmt.Errorf("delete relationships for %s: %w", claimID, err)
+	}
+	return nil
+}
+
 // ListByClaimIDs satisfies the corresponding ports method.
 func (r RelationshipRepository) ListByClaimIDs(ctx context.Context, claimIDs []string) ([]domain.Relationship, error) {
 	if len(claimIDs) == 0 {

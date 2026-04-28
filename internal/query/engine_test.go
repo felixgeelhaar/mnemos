@@ -50,6 +50,8 @@ func (f fakeClaimRepo) ListAll(_ context.Context) ([]domain.Claim, error) { retu
 func (f fakeClaimRepo) SetValidity(_ context.Context, _ string, _ time.Time) error {
 	return nil
 }
+func (f fakeClaimRepo) RepointEvidence(_ context.Context, _, _ string) error { return nil }
+func (f fakeClaimRepo) DeleteCascade(_ context.Context, _ string) error      { return nil }
 func (f fakeClaimRepo) ListByEventIDs(_ context.Context, _ []string) ([]domain.Claim, error) {
 	return f.claims, nil
 }
@@ -88,6 +90,8 @@ type fakeRelationshipRepo struct {
 }
 
 func (f fakeRelationshipRepo) Upsert(_ context.Context, _ []domain.Relationship) error { return nil }
+func (f fakeRelationshipRepo) RepointEndpoint(_ context.Context, _, _ string) error    { return nil }
+func (f fakeRelationshipRepo) DeleteByClaim(_ context.Context, _ string) error         { return nil }
 func (f fakeRelationshipRepo) ListByClaim(_ context.Context, claimID string) ([]domain.Relationship, error) {
 	return f.rels[claimID], nil
 }

@@ -18,7 +18,7 @@ type EmbeddingRepository struct {
 }
 
 // Upsert stores or replaces an embedding for (entityID, entityType).
-func (r EmbeddingRepository) Upsert(ctx context.Context, entityID, entityType string, vector []float32, model string) error {
+func (r EmbeddingRepository) Upsert(ctx context.Context, entityID, entityType string, vector []float32, model, createdBy string) error {
 	blob := embedding.EncodeVector(vector)
 	_, err := r.db.ExecContext(ctx, `
 INSERT INTO embeddings (entity_id, entity_type, vector, model, dimensions, created_at, created_by)
@@ -29,10 +29,21 @@ ON DUPLICATE KEY UPDATE
   dimensions = VALUES(dimensions),
   created_at = VALUES(created_at)`,
 		entityID, entityType, blob, model, len(vector),
-		time.Now().UTC(), domain.SystemUser,
+		time.Now().UTC(), actorOr(createdBy),
 	)
 	if err != nil {
 		return fmt.Errorf("upsert embedding: %w", err)
+	}
+	return nil
+}
+
+// Delete removes the embedding for (entityID, entityType). Idempotent.
+func (r EmbeddingRepository) Delete(ctx context.Context, entityID, entityType string) error {
+	if _, err := r.db.ExecContext(ctx,
+		`DELETE FROM embeddings WHERE entity_id = ? AND entity_type = ?`,
+		entityID, entityType,
+	); err != nil {
+		return fmt.Errorf("delete embedding (%s, %s): %w", entityID, entityType, err)
 	}
 	return nil
 }

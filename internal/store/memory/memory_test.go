@@ -346,7 +346,7 @@ func TestEmbeddingRepository_RoundTrip(t *testing.T) {
 	ctx := context.Background()
 
 	vec := []float32{0.1, 0.2, 0.3}
-	if err := conn.Embeddings.Upsert(ctx, "ev-E", "event", vec, "model-X"); err != nil {
+	if err := conn.Embeddings.Upsert(ctx, "ev-E", "event", vec, "model-X", ""); err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
 

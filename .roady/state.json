@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 104,
+  "version": 106,
   "task_states": {
     "task-append-only-event-store": {
       "status": "done",
@@ -266,6 +266,13 @@
       "completed_at": "2026-04-27T23:10:09.54569+02:00",
       "elapsed_minutes": 9
     },
+    "task-multi-backend-storage-everything-on-ports-legacy-cleanup": {
+      "status": "in_progress",
+      "path": "",
+      "owner": "ai-agent",
+      "started_at": "2026-04-28T15:41:52.15506+02:00",
+      "elapsed_minutes": 0
+    },
     "task-multi-backend-storage-foundation": {
       "status": "done",
       "path": "",
@@ -476,5 +483,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-04-28T15:34:14.921194+02:00"
+  "updated_at": "2026-04-28T15:41:52.15506+02:00"
 }

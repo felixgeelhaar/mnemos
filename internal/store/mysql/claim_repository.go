@@ -185,6 +185,52 @@ FROM claims WHERE id IN (`+placeholders+`)`, args...)
 	return collectClaimRows(rows)
 }
 
+// RepointEvidence rewrites claim_evidence rows; INSERT IGNORE
+// collapses duplicates on the (claim_id, event_id) primary key.
+func (r ClaimRepository) RepointEvidence(ctx context.Context, fromClaimID, toClaimID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin repoint evidence tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `
+INSERT IGNORE INTO claim_evidence (claim_id, event_id)
+SELECT ?, event_id FROM claim_evidence WHERE claim_id = ?`,
+		toClaimID, fromClaimID,
+	); err != nil {
+		return fmt.Errorf("copy evidence %s -> %s: %w", fromClaimID, toClaimID, err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM claim_evidence WHERE claim_id = ?`, fromClaimID); err != nil {
+		return fmt.Errorf("delete original evidence %s: %w", fromClaimID, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit repoint evidence tx: %w", err)
+	}
+	return nil
+}
+
+// DeleteCascade drops claim + claim-owned dependents in one tx.
+func (r ClaimRepository) DeleteCascade(ctx context.Context, claimID string) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin claim delete tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, q := range []string{
+		`DELETE FROM claim_evidence WHERE claim_id = ?`,
+		`DELETE FROM claim_status_history WHERE claim_id = ?`,
+		`DELETE FROM claims WHERE id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, q, claimID); err != nil {
+			return fmt.Errorf("claim delete cascade: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit claim delete tx: %w", err)
+	}
+	return nil
+}
+
 // ListAll returns every claim ordered by created_at.
 func (r ClaimRepository) ListAll(ctx context.Context) ([]domain.Claim, error) {
 	rows, err := r.db.QueryContext(ctx, `

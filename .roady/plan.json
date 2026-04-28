@@ -388,9 +388,18 @@
       "estimate": "",
       "depends_on": [],
       "feature_id": "multi-backend-storage-libsql-provider"
+    },
+    {
+      "id": "task-multi-backend-storage-everything-on-ports-legacy-cleanup",
+      "title": "Implement Multi-Backend Storage everything-on-ports legacy cleanup",
+      "description": "Implement the feature: Multi-Backend Storage everything-on-ports legacy cleanup. Phase 7 of ADR 0001: every production surface is backend-agnostic; no legacy. Add the port methods needed to express semantic dedupe and the serve.go HTTP handlers without raw SQL — Claims.RepointEvidence, Claims.DeleteCascade, Relationships.RepointEndpoint, Relationships.DeleteByClaim, Embeddings.Delete, plus paginated list methods on Events/Claims/Relationships/Embeddings. Implement in every native provider (sqlite, memory, postgres, mysql; libsql inherits sqlite). Migrate pipeline.ApplySemanticDedupe and the serve.go handlers to ports. Then drop legacy: MNEMOS_DB_PATH env var, openDB helper (keep openConn only), sqlite.Open public function, any remaining sqlite-only call sites in cmd/mnemos. Pre-launch posture — no backwards-compat stubs.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "multi-backend-storage-everything-on-ports-legacy-cleanup"
     }
   ],
   "approval_status": "approved",
   "created_at": "2026-04-12T11:03:09.397775+02:00",
-  "updated_at": "2026-04-28T15:21:24.182052+02:00"
+  "updated_at": "2026-04-28T15:41:36.132332+02:00"
 }

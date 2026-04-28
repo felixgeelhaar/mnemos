@@ -17,16 +17,14 @@ import (
 // Precedence:
 //
 //  1. MNEMOS_DB_URL — explicit, takes any registered scheme
-//     (sqlite://, sqlite3://, memory://, future postgres://, ...).
-//     Used as-is without any path interpretation.
-//  2. Otherwise: "sqlite://" + resolveDBPath(), which itself walks
-//     MNEMOS_DB_PATH → nearest project .mnemos/mnemos.db → XDG
-//     default.
+//     (sqlite://, sqlite3://, memory://, postgres://, mysql://,
+//     libsql://). Used as-is without any path interpretation.
+//  2. Otherwise: "sqlite://" + resolveDBPath(), which walks the
+//     working directory looking for .mnemos/mnemos.db, then falls
+//     back to the XDG global default.
 //
-// The legacy MNEMOS_DB_PATH variable continues to work unchanged
-// because resolveDBPath still consults it. Operators who want a
-// non-SQLite backend (or who want to be explicit) should set
-// MNEMOS_DB_URL.
+// Operators who want a non-SQLite backend set MNEMOS_DB_URL
+// explicitly.
 func resolveDSN() string {
 	if u := os.Getenv("MNEMOS_DB_URL"); u != "" {
 		return u

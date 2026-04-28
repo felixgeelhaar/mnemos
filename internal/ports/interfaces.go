@@ -33,6 +33,22 @@ type ClaimRepository interface {
 	ListAll(ctx context.Context) ([]domain.Claim, error)
 	ListStatusHistoryByClaimID(ctx context.Context, claimID string) ([]domain.ClaimStatusTransition, error)
 	SetValidity(ctx context.Context, claimID string, validTo time.Time) error
+
+	// RepointEvidence rewrites every claim_evidence row pointing at
+	// fromClaimID to point at toClaimID instead, then deletes the
+	// original rows. Idempotent on the (claim_id, event_id) dedup
+	// key — duplicate evidence collapses silently. Used by
+	// pipeline.ApplySemanticDedupe.
+	RepointEvidence(ctx context.Context, fromClaimID, toClaimID string) error
+
+	// DeleteCascade removes a claim and its dependent rows that are
+	// owned by the claim alone (claim_evidence by claim_id,
+	// claim_status_history by claim_id, the claim row itself). Rows
+	// owned by other entities (relationships, embeddings, claim
+	// entity links) must be cleaned up by the caller via the
+	// relevant repositories — DeleteCascade does not reach across
+	// repository boundaries.
+	DeleteCascade(ctx context.Context, claimID string) error
 }
 
 // TrustScorer is the optional capability to recompute and aggregate
@@ -50,6 +66,19 @@ type RelationshipRepository interface {
 	Upsert(ctx context.Context, relationships []domain.Relationship) error
 	ListByClaim(ctx context.Context, claimID string) ([]domain.Relationship, error)
 	ListByClaimIDs(ctx context.Context, claimIDs []string) ([]domain.Relationship, error)
+
+	// RepointEndpoint rewrites every relationship whose from_claim_id
+	// or to_claim_id equals oldID so that endpoint becomes newID.
+	// Self-loops created by the rewrite (newID = newID) are dropped,
+	// and unique-edge conflicts collapse silently — Mnemos doesn't
+	// distinguish duplicate edges. Used by ApplySemanticDedupe to
+	// fold a duplicate claim's edges onto its winner.
+	RepointEndpoint(ctx context.Context, oldID, newID string) error
+
+	// DeleteByClaim removes every relationship that touches the
+	// given claim (as source OR target). Used to clean up a claim's
+	// edges before the claim itself is deleted.
+	DeleteByClaim(ctx context.Context, claimID string) error
 }
 
 // ExtractionEngine extracts structured claims from domain events.
@@ -64,8 +93,17 @@ type QueryEngine interface {
 
 // EmbeddingRepository persists and retrieves vector embeddings.
 type EmbeddingRepository interface {
-	Upsert(ctx context.Context, entityID, entityType string, vector []float32, model string) error
+	// Upsert stores or replaces a vector for (entityID, entityType).
+	// createdBy stamps the row's actor; pass "" to fall back to
+	// domain.SystemUser at the storage boundary.
+	Upsert(ctx context.Context, entityID, entityType string, vector []float32, model, createdBy string) error
 	ListByEntityType(ctx context.Context, entityType string) ([]domain.EmbeddingRecord, error)
+
+	// Delete removes the embedding row for the given entity. Idempotent
+	// — deleting a non-existent embedding is a no-op. Used by
+	// pipeline.ApplySemanticDedupe to drop a duplicate claim's
+	// vector before deleting the claim itself.
+	Delete(ctx context.Context, entityID, entityType string) error
 }
 
 // TextHit is one row of a keyword search: the matched row's id and a

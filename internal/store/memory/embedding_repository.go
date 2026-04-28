@@ -16,9 +16,8 @@ type EmbeddingRepository struct {
 }
 
 // Upsert stores or replaces the embedding for (entityID, entityType).
-// Falls back to SystemUser as creator since [ports.EmbeddingRepository]
-// does not surface an actor parameter.
-func (r EmbeddingRepository) Upsert(_ context.Context, entityID, entityType string, vector []float32, model string) error {
+// An empty createdBy is recorded as domain.SystemUser.
+func (r EmbeddingRepository) Upsert(_ context.Context, entityID, entityType string, vector []float32, model, createdBy string) error {
 	r.state.mu.Lock()
 	defer r.state.mu.Unlock()
 	r.state.embeddings[embeddingKey{EntityID: entityID, EntityType: entityType}] = storedEmbedding{
@@ -28,8 +27,16 @@ func (r EmbeddingRepository) Upsert(_ context.Context, entityID, entityType stri
 		Model:      model,
 		Dimensions: len(vector),
 		CreatedAt:  time.Now().UTC(),
-		CreatedBy:  domain.SystemUser,
+		CreatedBy:  actorOr(createdBy),
 	}
+	return nil
+}
+
+// Delete removes the embedding for (entityID, entityType). Idempotent.
+func (r EmbeddingRepository) Delete(_ context.Context, entityID, entityType string) error {
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	delete(r.state.embeddings, embeddingKey{EntityID: entityID, EntityType: entityType})
 	return nil
 }
 

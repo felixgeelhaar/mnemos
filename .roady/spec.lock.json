@@ -260,6 +260,12 @@
       "title": "Multi-Backend Storage libSQL provider",
       "description": "Phase 6 of ADR 0001: ship a libSQL/Turso provider for cloud-replicated and edge-deployable SQLite-compatible storage. Since libSQL is wire-compatible with SQLite, the provider reuses the existing sql/sqlite/schema.sql and the existing SQLite repository implementations — only the registration, DSN parsing, and sql.Open driver name change. Pure-Go driver (github.com/tursodatabase/libsql-client-go) keeps CGO_ENABLED=0. Supports both remote DSNs (libsql://my-db.turso.io?authToken=xyz) and local file DSNs (libsql:///tmp/test.db). Namespace param is ignored — each Turso database is its own tenant boundary, like plain SQLite. Plus a CLAUDE.md note that the existing postgres:// provider already serves any Postgres wire-protocol-compatible engine (CockroachDB, Yugabyte, Neon, Crunchy Bridge), no extra code needed.",
       "requirements": []
+    },
+    {
+      "id": "multi-backend-storage-everything-on-ports-legacy-cleanup",
+      "title": "Multi-Backend Storage everything-on-ports legacy cleanup",
+      "description": "Phase 7 of ADR 0001: every production surface is backend-agnostic; no legacy. Add the port methods needed to express semantic dedupe and the serve.go HTTP handlers without raw SQL — Claims.RepointEvidence, Claims.DeleteCascade, Relationships.RepointEndpoint, Relationships.DeleteByClaim, Embeddings.Delete, plus paginated list methods on Events/Claims/Relationships/Embeddings. Implement in every native provider (sqlite, memory, postgres, mysql; libsql inherits sqlite). Migrate pipeline.ApplySemanticDedupe and the serve.go handlers to ports. Then drop legacy: MNEMOS_DB_PATH env var, openDB helper (keep openConn only), sqlite.Open public function, any remaining sqlite-only call sites in cmd/mnemos. Pre-launch posture — no backwards-compat stubs.",
+      "requirements": []
     }
   ],
   "constraints": [],

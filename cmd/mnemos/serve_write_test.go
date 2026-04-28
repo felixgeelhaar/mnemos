@@ -82,7 +82,7 @@ func newServeJWTTest(t *testing.T) serveJWTBase {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	seedUser(t, db, "usr_writer")
-	srv := httptest.NewServer(newServerMux(db))
+	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
 	t.Cleanup(srv.Close)
 	return serveJWTBase{
 		DB:    db,
@@ -372,7 +372,7 @@ func TestServe_Auth_RejectsRevokedJTI(t *testing.T) {
 		t.Fatalf("revoke: %v", err)
 	}
 
-	srv := httptest.NewServer(newServerMux(db))
+	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
 	defer srv.Close()
 
 	resp := postJSON(t, srv.URL+"/v1/events",
@@ -408,7 +408,7 @@ func TestServe_Auth_AgentScopeEnforcement(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	srv := httptest.NewServer(newServerMux(db))
+	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
 	defer srv.Close()
 
 	// Mint a narrow agent token (events:write only).
@@ -464,7 +464,7 @@ func TestServe_Auth_AgentRunWhitelist(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	srv := httptest.NewServer(newServerMux(db))
+	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
 	defer srv.Close()
 
 	// Agent restricted to one run.
@@ -531,7 +531,7 @@ func TestServe_Auth_AgentRunWhitelist_BatchAllOrNothing(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	srv := httptest.NewServer(newServerMux(db))
+	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
 	defer srv.Close()
 
 	tok, _, err := auth.NewIssuer(secret).IssueAgentTokenWithScopesAndRuns(
@@ -575,7 +575,7 @@ func TestServe_Auth_AgentRunWhitelist_BlocksClaimsWithCrossRunEvidence(t *testin
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	srv := httptest.NewServer(newServerMux(db))
+	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
 	defer srv.Close()
 
 	// Seed an event in a run the agent shouldn't be able to touch.
@@ -627,7 +627,7 @@ func TestServe_Auth_AgentRunWhitelist_BlocksRelationshipWithCrossRunClaim(t *tes
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	srv := httptest.NewServer(newServerMux(db))
+	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
 	defer srv.Close()
 
 	now := time.Now().UTC()
@@ -671,7 +671,7 @@ func TestServe_Auth_AgentRunWhitelist_BlocksEmbeddingForCrossRunEvent(t *testing
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	srv := httptest.NewServer(newServerMux(db))
+	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
 	defer srv.Close()
 
 	now := time.Now().UTC()
@@ -707,7 +707,7 @@ func TestServe_Auth_AgentRunWhitelist_AllowsClaimsInOwnRun(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	srv := httptest.NewServer(newServerMux(db))
+	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
 	defer srv.Close()
 
 	now := time.Now().UTC()
@@ -766,7 +766,7 @@ func TestServe_Auth_NarrowUserScopeRejectsOtherEndpoints(t *testing.T) {
 	}
 	hdrs := map[string]string{"Authorization": "Bearer " + tok}
 
-	srv := httptest.NewServer(newServerMux(db))
+	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
 	defer srv.Close()
 
 	// Allowed: events.
@@ -812,7 +812,7 @@ func TestServe_Auth_UserTokenGetsAllScopes(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	seedUser(t, db, "usr_full")
-	srv := httptest.NewServer(newServerMux(db))
+	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
 	defer srv.Close()
 
 	hdrs := map[string]string{"Authorization": issueTestToken(t, secret, "usr_full")}

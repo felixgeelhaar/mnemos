@@ -18,11 +18,10 @@ func TestResolveDSN_URLEnvWinsEverything(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	t.Chdir(root)
-	t.Setenv("MNEMOS_DB_PATH", filepath.Join(root, "ignored.db"))
 
 	t.Setenv("MNEMOS_DB_URL", "memory://")
 	if got, want := resolveDSN(), "memory://"; got != want {
-		t.Errorf("resolveDSN = %q, want %q (URL env should win even when DB_PATH is set)", got, want)
+		t.Errorf("resolveDSN = %q, want %q (URL env should win even when project DB exists)", got, want)
 	}
 
 	t.Setenv("MNEMOS_DB_URL", "sqlite:///srv/cogstack.db?namespace=mnemos")
@@ -31,38 +30,37 @@ func TestResolveDSN_URLEnvWinsEverything(t *testing.T) {
 	}
 }
 
-// TestResolveDSN_FallsBackToSQLiteFromPath verifies the legacy
-// migration path: with no MNEMOS_DB_URL, we must wrap the resolved
-// SQLite file path as sqlite://<path> so the registry can dispatch.
-func TestResolveDSN_FallsBackToSQLiteFromPath(t *testing.T) {
+// TestResolveDSN_FallsBackToSQLiteFromProjectPath verifies the
+// no-MNEMOS_DB_URL path: we wrap the resolved SQLite project file as
+// sqlite://<path> so the registry can dispatch.
+func TestResolveDSN_FallsBackToSQLiteFromProjectPath(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", root)
 	t.Setenv("MNEMOS_DB_URL", "")
-	override := filepath.Join(root, "legacy.db")
-	t.Setenv("MNEMOS_DB_PATH", override)
-	t.Chdir(root)
-
-	want := "sqlite://" + override
-	if got := resolveDSN(); got != want {
-		t.Errorf("resolveDSN = %q, want %q", got, want)
-	}
-}
-
-// TestResolveDSN_ProjectFallback covers the case where neither env
-// var is set but a .mnemos/ directory exists: we should still
-// produce a usable sqlite:// DSN pointing at the project DB.
-func TestResolveDSN_ProjectFallback(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("HOME", root)
-	t.Setenv("MNEMOS_DB_URL", "")
-	t.Setenv("MNEMOS_DB_PATH", "")
-	t.Setenv("XDG_DATA_HOME", filepath.Join(root, "xdg"))
 	if err := os.Mkdir(filepath.Join(root, ".mnemos"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 	t.Chdir(root)
 
 	want := "sqlite://" + filepath.Join(root, ".mnemos", "mnemos.db")
+	if got := resolveDSN(); got != want {
+		t.Errorf("resolveDSN = %q, want %q", got, want)
+	}
+}
+
+// TestResolveDSN_FallsBackToXDGGlobal covers the case where neither
+// MNEMOS_DB_URL nor a .mnemos/ project directory exists: the resolver
+// should still produce a usable sqlite:// DSN pointing at the XDG
+// global default.
+func TestResolveDSN_FallsBackToXDGGlobal(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	t.Setenv("MNEMOS_DB_URL", "")
+	xdg := filepath.Join(root, "xdg")
+	t.Setenv("XDG_DATA_HOME", xdg)
+	t.Chdir(root)
+
+	want := "sqlite://" + filepath.Join(xdg, "mnemos", "mnemos.db")
 	if got := resolveDSN(); got != want {
 		t.Errorf("resolveDSN = %q, want %q", got, want)
 	}
@@ -75,7 +73,6 @@ func TestOpenConn_OpensMemoryBackend(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", root)
 	t.Setenv("MNEMOS_DB_URL", "memory://")
-	t.Setenv("MNEMOS_DB_PATH", "")
 	t.Chdir(root)
 
 	conn, err := openConn(context.Background())
@@ -89,19 +86,18 @@ func TestOpenConn_OpensMemoryBackend(t *testing.T) {
 	}
 }
 
-// TestOpenConn_OpensSQLiteBackendFromLegacyPath mirrors
-// TestOpenConn_OpensMemoryBackend but covers the migration default:
-// users with only MNEMOS_DB_PATH set still get a working SQLite Conn.
-func TestOpenConn_OpensSQLiteBackendFromLegacyPath(t *testing.T) {
+// TestOpenConn_OpensSQLiteBackendFromURL mirrors the memory test for
+// the SQLite provider — the registry should dispatch sqlite:// DSNs
+// to the SQLite provider and surface a *sql.DB on Conn.Raw.
+func TestOpenConn_OpensSQLiteBackendFromURL(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("HOME", root)
-	t.Setenv("MNEMOS_DB_URL", "")
-	t.Setenv("MNEMOS_DB_PATH", filepath.Join(root, "legacy.db"))
+	t.Setenv("MNEMOS_DB_URL", "sqlite://"+filepath.Join(root, "explicit.db"))
 	t.Chdir(root)
 
 	conn, err := openConn(context.Background())
 	if err != nil {
-		t.Fatalf("openConn(sqlite legacy): %v", err)
+		t.Fatalf("openConn(sqlite): %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 

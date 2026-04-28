@@ -12,7 +12,7 @@ func TestEmbeddingRepositoryUpsertAndGet(t *testing.T) {
 	repo := NewEmbeddingRepository(db)
 	vector := []float32{0.1, 0.2, 0.3, 0.4}
 
-	if err := repo.Upsert(context.Background(), "ev_1", "event", vector, "test-model"); err != nil {
+	if err := repo.Upsert(context.Background(), "ev_1", "event", vector, "test-model", ""); err != nil {
 		t.Fatalf("Upsert() error = %v", err)
 	}
 
@@ -48,10 +48,10 @@ func TestEmbeddingRepositoryUpsertOverwrite(t *testing.T) {
 
 	repo := NewEmbeddingRepository(db)
 
-	if err := repo.Upsert(context.Background(), "ev_1", "event", []float32{0.1, 0.2}, "model-a"); err != nil {
+	if err := repo.Upsert(context.Background(), "ev_1", "event", []float32{0.1, 0.2}, "model-a", ""); err != nil {
 		t.Fatalf("first Upsert() error = %v", err)
 	}
-	if err := repo.Upsert(context.Background(), "ev_1", "event", []float32{0.9, 0.8, 0.7}, "model-b"); err != nil {
+	if err := repo.Upsert(context.Background(), "ev_1", "event", []float32{0.9, 0.8, 0.7}, "model-b", ""); err != nil {
 		t.Fatalf("second Upsert() error = %v", err)
 	}
 
@@ -73,13 +73,13 @@ func TestEmbeddingRepositoryListByEntityType(t *testing.T) {
 
 	repo := NewEmbeddingRepository(db)
 
-	if err := repo.Upsert(context.Background(), "ev_1", "event", []float32{0.1}, "model"); err != nil {
+	if err := repo.Upsert(context.Background(), "ev_1", "event", []float32{0.1}, "model", ""); err != nil {
 		t.Fatalf("Upsert ev_1 error = %v", err)
 	}
-	if err := repo.Upsert(context.Background(), "ev_2", "event", []float32{0.2}, "model"); err != nil {
+	if err := repo.Upsert(context.Background(), "ev_2", "event", []float32{0.2}, "model", ""); err != nil {
 		t.Fatalf("Upsert ev_2 error = %v", err)
 	}
-	if err := repo.Upsert(context.Background(), "cl_1", "claim", []float32{0.3}, "model"); err != nil {
+	if err := repo.Upsert(context.Background(), "cl_1", "claim", []float32{0.3}, "model", ""); err != nil {
 		t.Fatalf("Upsert cl_1 error = %v", err)
 	}
 

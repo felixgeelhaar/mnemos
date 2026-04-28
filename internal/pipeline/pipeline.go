@@ -271,7 +271,7 @@ func GenerateEmbeddings(ctx context.Context, conn *store.Conn, events []domain.E
 		if i >= len(vectors) {
 			break
 		}
-		if err := conn.Embeddings.Upsert(ctx, ev.ID, "event", vectors[i], model); err != nil {
+		if err := conn.Embeddings.Upsert(ctx, ev.ID, "event", vectors[i], model, ""); err != nil {
 			return 0, fmt.Errorf("store embedding for event %s: %w", ev.ID, err)
 		}
 	}
@@ -326,7 +326,7 @@ func GenerateClaimEmbeddings(ctx context.Context, conn *store.Conn, claims []dom
 		if i >= len(vectors) {
 			break
 		}
-		if err := conn.Embeddings.Upsert(ctx, cl.ID, "claim", vectors[i], model); err != nil {
+		if err := conn.Embeddings.Upsert(ctx, cl.ID, "claim", vectors[i], model, ""); err != nil {
 			return 0, fmt.Errorf("store embedding for claim %s: %w", cl.ID, err)
 		}
 	}

@@ -87,7 +87,7 @@ All domain types have `Validate()` methods. Contradictions are first-class conce
 - **Run isolation**: `run_id` on events enables scoped queries and extraction across ingestion runs
 - **Contested detection**: happens during rule-based extraction (high token overlap + same polarity), separate from relationship detection
 - **CGO_ENABLED=0**: builds are pure Go via modernc.org/sqlite (no C compiler needed)
-- **XDG-compliant storage**: database defaults to `~/.local/share/mnemos/mnemos.db`, overridable via `MNEMOS_DB_URL` (any registered backend) or `MNEMOS_DB_PATH` (legacy SQLite-only)
+- **XDG-compliant storage**: database defaults to `~/.local/share/mnemos/mnemos.db`, overridable via `MNEMOS_DB_URL` (any registered backend)
 - **Pluggable backends (ADR 0001)**: `internal/store` is a URL-scheme dispatched registry. Providers self-register from init():
   - `sqlite://` (default, modernc.org/sqlite, FTS5)
   - `memory://` (in-process)
@@ -95,7 +95,7 @@ All domain types have `Validate()` methods. Contradictions are first-class conce
   - `mysql://` / `mariadb://` (go-sql-driver/mysql, namespace = MySQL database, integration tests gated on `TEST_MYSQL_DSN`). MySQL-wire-compatible engines also work through this provider: **PlanetScale**, **TiDB**, **MariaDB**, **Vitess**.
   - `libsql://` (tursodatabase/libsql-client-go, pure-Go, supports both Turso remote URLs and local file mode). libSQL is wire-compatible with SQLite so the SQLite schema and repository implementations are reused unchanged.
 
-  `MNEMOS_DB_URL` takes precedence over `MNEMOS_DB_PATH`; `cmd/mnemos` blank-imports providers it wants to support.
+  `cmd/mnemos` blank-imports providers it wants to support. When `MNEMOS_DB_URL` is unset, the resolver walks up from CWD looking for `.mnemos/mnemos.db` and falls back to the XDG global default.
 
 ## Database
 
@@ -108,8 +108,7 @@ Embeddings are stored as little-endian float32 binary BLOBs, encoded/decoded via
 ## Environment Variables
 
 ```
-MNEMOS_DB_URL          # Storage DSN; any registered backend (sqlite://, memory://, ...). Takes precedence.
-MNEMOS_DB_PATH         # Legacy SQLite path (default: ~/.local/share/mnemos/mnemos.db). Wrapped as sqlite://<path>.
+MNEMOS_DB_URL          # Storage DSN; any registered backend (sqlite://, memory://, postgres://, mysql://, libsql://). When unset: ./.mnemos/mnemos.db (walked up) → ~/.local/share/mnemos/mnemos.db.
 MNEMOS_LLM_PROVIDER    # anthropic, openai, gemini, ollama, openai-compat
 MNEMOS_LLM_API_KEY     # API key for cloud providers
 MNEMOS_LLM_MODEL       # Model name (e.g., llama3.2)

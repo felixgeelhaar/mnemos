@@ -372,7 +372,7 @@ func handleReembed(args []string, f Flags) {
 			if i >= len(vectors) {
 				break
 			}
-			if err := repo.Upsert(ctx, id, "claim", vectors[i], cfg.Model); err != nil {
+			if err := repo.Upsert(ctx, id, "claim", vectors[i], cfg.Model, ""); err != nil {
 				return NewSystemError(err, "store embedding for %s", id)
 			}
 		}

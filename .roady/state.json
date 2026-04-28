@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 98,
+  "version": 100,
   "task_states": {
     "task-append-only-event-store": {
       "status": "done",
@@ -244,6 +244,13 @@
       "completed_at": "2026-04-27T23:53:39.868776+02:00",
       "elapsed_minutes": 13
     },
+    "task-multi-backend-storage-ci-integration-job": {
+      "status": "in_progress",
+      "path": "",
+      "owner": "ai-agent",
+      "started_at": "2026-04-28T15:06:21.546141+02:00",
+      "elapsed_minutes": 0
+    },
     "task-multi-backend-storage-cmd/mnemos-call-site-migration": {
       "status": "done",
       "path": "",
@@ -454,5 +461,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-04-28T09:33:04.00986+02:00"
+  "updated_at": "2026-04-28T15:06:21.546141+02:00"
 }

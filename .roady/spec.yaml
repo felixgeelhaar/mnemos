@@ -166,5 +166,9 @@ features:
       title: Multi-Backend Storage MySQL MariaDB provider
       description: 'Phase 4b of ADR 0001: add internal/store/mysql/ provider implementing every port interface, registered for `mysql://` and `mariadb://` schemes. Uses github.com/go-sql-driver/mysql + database/sql. Per ADR 0001 §3, MySQL has no per-tenant schemas — namespace translates to "use a separate database (CREATE DATABASE IF NOT EXISTS <ns>; USE <ns>)". Schema SQL adapted: jsonb → JSON, bytea → LONGBLOB, bigserial → BIGINT AUTO_INCREMENT, timestamptz → DATETIME(6), now() → CURRENT_TIMESTAMP. Integration tests gated on TEST_MYSQL_DSN. MariaDB shares the wire protocol so the same provider serves both.'
       requirements: []
+    - id: multi-backend-storage-ci-integration-job
+      title: Multi-Backend Storage CI integration job
+      description: 'Phase 5 of ADR 0001: lock in the Postgres and MySQL integration tests with a CI job. Add a `database-providers` GitHub Actions job that runs alongside the existing `Build & Test` job, spinning up postgres:16 + mysql:8 services and running `go test -race -count=1 ./internal/store/postgres/ ./internal/store/mysql/` with TEST_POSTGRES_DSN + TEST_MYSQL_DSN populated. Add a `make test-integration` target so developers can run the same suite locally.'
+      requirements: []
 constraints: []
 version: 0.1.0

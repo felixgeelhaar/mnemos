@@ -49,6 +49,16 @@ func Open(path string) (*sql.DB, error) {
 	return db, nil
 }
 
+// Bootstrap applies the SQLite schema and runs migrations against
+// any database that speaks SQLite's SQL dialect. The libSQL provider
+// reuses this on every Open since libSQL is wire-compatible with
+// SQLite and the same schema works unchanged. ensureSchema already
+// calls migrate, so this is a thin alias kept exported for cross-
+// package callers.
+func Bootstrap(db *sql.DB) error {
+	return ensureSchema(db)
+}
+
 func ensureSchema(db *sql.DB) error {
 	const schema = `
 CREATE TABLE IF NOT EXISTS events (

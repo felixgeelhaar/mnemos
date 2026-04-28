@@ -379,9 +379,18 @@
       "estimate": "",
       "depends_on": [],
       "feature_id": "multi-backend-storage-ci-integration-job"
+    },
+    {
+      "id": "task-multi-backend-storage-libsql-provider",
+      "title": "Implement Multi-Backend Storage libSQL provider",
+      "description": "Implement the feature: Multi-Backend Storage libSQL provider. Phase 6 of ADR 0001: ship a libSQL/Turso provider for cloud-replicated and edge-deployable SQLite-compatible storage. Since libSQL is wire-compatible with SQLite, the provider reuses the existing sql/sqlite/schema.sql and the existing SQLite repository implementations — only the registration, DSN parsing, and sql.Open driver name change. Pure-Go driver (github.com/tursodatabase/libsql-client-go) keeps CGO_ENABLED=0. Supports both remote DSNs (libsql://my-db.turso.io?authToken=xyz) and local file DSNs (libsql:///tmp/test.db). Namespace param is ignored — each Turso database is its own tenant boundary, like plain SQLite. Plus a CLAUDE.md note that the existing postgres:// provider already serves any Postgres wire-protocol-compatible engine (CockroachDB, Yugabyte, Neon, Crunchy Bridge), no extra code needed.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "multi-backend-storage-libsql-provider"
     }
   ],
   "approval_status": "approved",
   "created_at": "2026-04-12T11:03:09.397775+02:00",
-  "updated_at": "2026-04-28T15:06:07.35065+02:00"
+  "updated_at": "2026-04-28T15:21:24.182052+02:00"
 }

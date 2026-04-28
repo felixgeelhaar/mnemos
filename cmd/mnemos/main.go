@@ -31,6 +31,7 @@ import (
 	// registers the scheme and parses DSNs but Open returns
 	// ErrNotImplemented; including it here means operators get a clear
 	// error rather than "unknown provider postgres".
+	_ "github.com/felixgeelhaar/mnemos/internal/store/libsql"
 	_ "github.com/felixgeelhaar/mnemos/internal/store/memory"
 	_ "github.com/felixgeelhaar/mnemos/internal/store/mysql"
 	_ "github.com/felixgeelhaar/mnemos/internal/store/postgres"

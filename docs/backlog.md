@@ -238,3 +238,9 @@ Phase 4b of ADR 0001: add internal/store/mysql/ provider implementing every port
 Phase 5 of ADR 0001: lock in the Postgres and MySQL integration tests with a CI job. Add a `database-providers` GitHub Actions job that runs alongside the existing `Build & Test` job, spinning up postgres:16 + mysql:8 services and running `go test -race -count=1 ./internal/store/postgres/ ./internal/store/mysql/` with TEST_POSTGRES_DSN + TEST_MYSQL_DSN populated. Add a `make test-integration` target so developers can run the same suite locally.
 
 ---
+
+## Multi-Backend Storage libSQL provider
+
+Phase 6 of ADR 0001: ship a libSQL/Turso provider for cloud-replicated and edge-deployable SQLite-compatible storage. Since libSQL is wire-compatible with SQLite, the provider reuses the existing sql/sqlite/schema.sql and the existing SQLite repository implementations — only the registration, DSN parsing, and sql.Open driver name change. Pure-Go driver (github.com/tursodatabase/libsql-client-go) keeps CGO_ENABLED=0. Supports both remote DSNs (libsql://my-db.turso.io?authToken=xyz) and local file DSNs (libsql:///tmp/test.db). Namespace param is ignored — each Turso database is its own tenant boundary, like plain SQLite. Plus a CLAUDE.md note that the existing postgres:// provider already serves any Postgres wire-protocol-compatible engine (CockroachDB, Yugabyte, Neon, Crunchy Bridge), no extra code needed.
+
+---

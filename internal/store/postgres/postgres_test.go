@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/store"
 	"github.com/felixgeelhaar/mnemos/internal/store/postgres"
@@ -83,18 +84,28 @@ func TestParseDSN_RejectsNonPostgresScheme(t *testing.T) {
 	}
 }
 
-// TestStoreOpen_ReturnsNotImplemented documents the scaffold contract:
-// while the provider is in development, store.Open with a postgres://
-// DSN must return ErrNotImplemented (wrapped) rather than crashing or
-// claiming success. Operators see a clear, actionable error.
-func TestStoreOpen_ReturnsNotImplemented(t *testing.T) {
+// TestStoreOpen_BadDSN exercises the unhappy path: a syntactically-
+// valid postgres:// DSN pointing nowhere should return a clear
+// connection error rather than panic. We deliberately keep this
+// fast (no real network round-trip — invalid host on a port that
+// refuses connections immediately on most systems).
+func TestStoreOpen_BadDSN(t *testing.T) {
 	t.Parallel()
-	_, err := store.Open(context.Background(), "postgres://user:pw@localhost/cogstack")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	// Reserved IP that no listener responds on; ping should time out
+	// or refuse fast on every platform. The point is to prove the
+	// provider surfaces driver-level errors with the DSN context
+	// rather than crashing.
+	_, err := store.Open(ctx, "postgres://nobody:nopw@127.0.0.1:1/nodb?sslmode=disable")
 	if err == nil {
-		t.Fatal("expected error from scaffold provider, got nil")
+		t.Fatal("expected error opening a bad postgres dsn, got nil")
 	}
-	if !errors.Is(err, postgres.ErrNotImplemented) {
-		t.Errorf("error chain missing ErrNotImplemented: %v", err)
+	// We don't pin the exact error chain — pgx's error surface
+	// varies by environment. Just confirm something happened and
+	// it's not the old scaffold sentinel.
+	if errors.Is(err, postgres.ErrNotImplemented) {
+		t.Errorf("provider still returning ErrNotImplemented: %v", err)
 	}
 }
 

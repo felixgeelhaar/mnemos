@@ -88,7 +88,7 @@ All domain types have `Validate()` methods. Contradictions are first-class conce
 - **Contested detection**: happens during rule-based extraction (high token overlap + same polarity), separate from relationship detection
 - **CGO_ENABLED=0**: builds are pure Go via modernc.org/sqlite (no C compiler needed)
 - **XDG-compliant storage**: database defaults to `~/.local/share/mnemos/mnemos.db`, overridable via `MNEMOS_DB_URL` (any registered backend) or `MNEMOS_DB_PATH` (legacy SQLite-only)
-- **Pluggable backends (ADR 0001)**: `internal/store` is a URL-scheme dispatched registry. Providers self-register from init(): `sqlite://` (default), `memory://` (in-process, fast tests + Nous embedding), `postgres://` / `postgresql://` (full implementation via pgx/v5/stdlib, namespace = Postgres schema, integration tests gated on `TEST_POSTGRES_DSN`). `MNEMOS_DB_URL` takes precedence over `MNEMOS_DB_PATH`; `cmd/mnemos` blank-imports providers it wants to support.
+- **Pluggable backends (ADR 0001)**: `internal/store` is a URL-scheme dispatched registry. Providers self-register from init(): `sqlite://` (default), `memory://` (in-process), `postgres://` / `postgresql://` (pgx/v5/stdlib, namespace = Postgres schema, integration tests gated on `TEST_POSTGRES_DSN`), `mysql://` / `mariadb://` (go-sql-driver/mysql, namespace = MySQL database, integration tests gated on `TEST_MYSQL_DSN`). `MNEMOS_DB_URL` takes precedence over `MNEMOS_DB_PATH`; `cmd/mnemos` blank-imports providers it wants to support.
 
 ## Database
 

@@ -32,6 +32,7 @@ import (
 	// ErrNotImplemented; including it here means operators get a clear
 	// error rather than "unknown provider postgres".
 	_ "github.com/felixgeelhaar/mnemos/internal/store/memory"
+	_ "github.com/felixgeelhaar/mnemos/internal/store/mysql"
 	_ "github.com/felixgeelhaar/mnemos/internal/store/postgres"
 	_ "github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )

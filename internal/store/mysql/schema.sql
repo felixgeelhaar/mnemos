@@ -1,0 +1,172 @@
+-- Mnemos schema for MySQL / MariaDB. Mirrors sql/sqlite/schema.sql
+-- and sql/postgres/schema.sql, with MySQL-specific type choices:
+--
+--   * text columns use VARCHAR for indexed identifiers and
+--     MEDIUMTEXT for free-form content. utf8mb4_bin is used on the
+--     id-style columns so equality comparisons stay byte-exact.
+--   * timestamps use DATETIME(6) for microsecond precision; MySQL
+--     has no timezone-aware timestamp type, so callers always
+--     write UTC.
+--   * jsonb -> JSON.
+--   * bytea -> LONGBLOB (4 GB ceiling; embeddings are typically
+--     <16 KB so a smaller type would also work, but LONGBLOB
+--     leaves headroom for future vector dimensions).
+--   * INTEGER PK AUTOINCREMENT / BIGSERIAL -> BIGINT UNSIGNED
+--     AUTO_INCREMENT.
+--
+-- Namespace is the database (CREATE DATABASE per namespace is the
+-- ADR §3 translation for MySQL). The provider runs CREATE DATABASE
+-- IF NOT EXISTS <namespace> before applying this file, so plain
+-- table names here land in the right database.
+
+CREATE TABLE IF NOT EXISTS events (
+  id              VARCHAR(190) NOT NULL,
+  run_id          VARCHAR(190) NOT NULL,
+  schema_version  VARCHAR(64)  NOT NULL,
+  content         MEDIUMTEXT   NOT NULL,
+  source_input_id VARCHAR(190) NOT NULL,
+  timestamp       DATETIME(6)  NOT NULL,
+  metadata_json   JSON         NOT NULL,
+  ingested_at     DATETIME(6)  NOT NULL,
+  created_by      VARCHAR(190) NOT NULL DEFAULT '<system>',
+  PRIMARY KEY (id),
+  KEY idx_events_timestamp       (timestamp),
+  KEY idx_events_source_input_id (source_input_id),
+  KEY idx_events_run_id          (run_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS claims (
+  id          VARCHAR(190)     NOT NULL,
+  text        MEDIUMTEXT       NOT NULL,
+  type        VARCHAR(32)      NOT NULL,
+  confidence  DOUBLE           NOT NULL,
+  status      VARCHAR(32)      NOT NULL,
+  created_at  DATETIME(6)      NOT NULL,
+  created_by  VARCHAR(190)     NOT NULL DEFAULT '<system>',
+  trust_score DOUBLE           NOT NULL DEFAULT 0,
+  valid_from  DATETIME(6)      NULL,
+  valid_to    DATETIME(6)      NULL,
+  PRIMARY KEY (id),
+  KEY idx_claims_trust_score (trust_score),
+  KEY idx_claims_valid_to    (valid_to)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS entities (
+  id              VARCHAR(190) NOT NULL,
+  name            VARCHAR(255) NOT NULL,
+  normalized_name VARCHAR(255) NOT NULL,
+  type            VARCHAR(64)  NOT NULL,
+  created_at      DATETIME(6)  NOT NULL,
+  created_by      VARCHAR(190) NOT NULL DEFAULT '<system>',
+  PRIMARY KEY (id),
+  UNIQUE KEY uniq_entities_norm_type (normalized_name, type),
+  KEY idx_entities_normalized_name  (normalized_name),
+  KEY idx_entities_type             (type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS claim_entities (
+  claim_id  VARCHAR(190) NOT NULL,
+  entity_id VARCHAR(190) NOT NULL,
+  role      VARCHAR(64)  NOT NULL DEFAULT 'mention',
+  PRIMARY KEY (claim_id, entity_id, role),
+  KEY idx_claim_entities_entity_id (entity_id),
+  CONSTRAINT fk_claim_entities_claim  FOREIGN KEY (claim_id)  REFERENCES claims(id),
+  CONSTRAINT fk_claim_entities_entity FOREIGN KEY (entity_id) REFERENCES entities(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS claim_evidence (
+  claim_id VARCHAR(190) NOT NULL,
+  event_id VARCHAR(190) NOT NULL,
+  PRIMARY KEY (claim_id, event_id),
+  KEY idx_claim_evidence_event_id (event_id),
+  CONSTRAINT fk_claim_evidence_claim FOREIGN KEY (claim_id) REFERENCES claims(id),
+  CONSTRAINT fk_claim_evidence_event FOREIGN KEY (event_id) REFERENCES events(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS relationships (
+  id            VARCHAR(190) NOT NULL,
+  type          VARCHAR(32)  NOT NULL,
+  from_claim_id VARCHAR(190) NOT NULL,
+  to_claim_id   VARCHAR(190) NOT NULL,
+  created_at    DATETIME(6)  NOT NULL,
+  created_by    VARCHAR(190) NOT NULL DEFAULT '<system>',
+  PRIMARY KEY (id),
+  UNIQUE KEY uniq_relationships_edge (type, from_claim_id, to_claim_id),
+  KEY idx_relationships_from_claim   (from_claim_id),
+  KEY idx_relationships_to_claim     (to_claim_id),
+  CONSTRAINT fk_relationships_from FOREIGN KEY (from_claim_id) REFERENCES claims(id),
+  CONSTRAINT fk_relationships_to   FOREIGN KEY (to_claim_id)   REFERENCES claims(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS compilation_jobs (
+  id         VARCHAR(190) NOT NULL,
+  kind       VARCHAR(64)  NOT NULL,
+  status     VARCHAR(32)  NOT NULL,
+  scope_json JSON         NOT NULL,
+  started_at DATETIME(6)  NOT NULL,
+  updated_at DATETIME(6)  NOT NULL,
+  error      MEDIUMTEXT   NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_compilation_jobs_kind   (kind),
+  KEY idx_compilation_jobs_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS claim_status_history (
+  id          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  claim_id    VARCHAR(190)    NOT NULL,
+  from_status VARCHAR(32)     NOT NULL,
+  to_status   VARCHAR(32)     NOT NULL,
+  changed_at  DATETIME(6)     NOT NULL,
+  reason      MEDIUMTEXT      NOT NULL,
+  changed_by  VARCHAR(190)    NOT NULL DEFAULT '<system>',
+  PRIMARY KEY (id),
+  KEY idx_claim_status_history_claim_id   (claim_id),
+  KEY idx_claim_status_history_changed_at (changed_at),
+  CONSTRAINT fk_claim_status_history_claim FOREIGN KEY (claim_id) REFERENCES claims(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS embeddings (
+  entity_id   VARCHAR(190) NOT NULL,
+  entity_type VARCHAR(64)  NOT NULL,
+  vector      LONGBLOB     NOT NULL,
+  model       VARCHAR(190) NOT NULL,
+  dimensions  INT          NOT NULL,
+  created_at  DATETIME(6)  NOT NULL,
+  created_by  VARCHAR(190) NOT NULL DEFAULT '<system>',
+  PRIMARY KEY (entity_id, entity_type),
+  KEY idx_embeddings_entity_type (entity_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS users (
+  id          VARCHAR(190) NOT NULL,
+  name        VARCHAR(255) NOT NULL,
+  email       VARCHAR(255) NOT NULL,
+  status      VARCHAR(32)  NOT NULL DEFAULT 'active',
+  scopes_json JSON         NOT NULL,
+  created_at  DATETIME(6)  NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uniq_users_email (email),
+  KEY idx_users_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS revoked_tokens (
+  jti        VARCHAR(190) NOT NULL,
+  revoked_at DATETIME(6)  NOT NULL,
+  expires_at DATETIME(6)  NOT NULL,
+  PRIMARY KEY (jti),
+  KEY idx_revoked_tokens_expires_at (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS agents (
+  id                VARCHAR(190) NOT NULL,
+  name              VARCHAR(255) NOT NULL,
+  owner_id          VARCHAR(190) NOT NULL,
+  scopes_json       JSON         NOT NULL,
+  allowed_runs_json JSON         NOT NULL,
+  status            VARCHAR(32)  NOT NULL DEFAULT 'active',
+  created_at        DATETIME(6)  NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_agents_owner_id (owner_id),
+  KEY idx_agents_status   (status),
+  CONSTRAINT fk_agents_owner FOREIGN KEY (owner_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci

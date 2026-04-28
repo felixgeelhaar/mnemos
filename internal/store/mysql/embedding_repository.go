@@ -1,0 +1,66 @@
+package mysql
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"time"
+
+	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/embedding"
+)
+
+// EmbeddingRepository persists vector embeddings as LONGBLOB using
+// the same little-endian float32 encoding as SQLite/Postgres so
+// federation push/pull stays byte-compatible across backends.
+type EmbeddingRepository struct {
+	db *sql.DB
+}
+
+// Upsert stores or replaces an embedding for (entityID, entityType).
+func (r EmbeddingRepository) Upsert(ctx context.Context, entityID, entityType string, vector []float32, model string) error {
+	blob := embedding.EncodeVector(vector)
+	_, err := r.db.ExecContext(ctx, `
+INSERT INTO embeddings (entity_id, entity_type, vector, model, dimensions, created_at, created_by)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON DUPLICATE KEY UPDATE
+  vector = VALUES(vector),
+  model = VALUES(model),
+  dimensions = VALUES(dimensions),
+  created_at = VALUES(created_at)`,
+		entityID, entityType, blob, model, len(vector),
+		time.Now().UTC(), domain.SystemUser,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert embedding: %w", err)
+	}
+	return nil
+}
+
+// ListByEntityType returns every embedding whose type matches.
+func (r EmbeddingRepository) ListByEntityType(ctx context.Context, entityType string) ([]domain.EmbeddingRecord, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT entity_id, entity_type, vector, model, dimensions, created_by
+FROM embeddings WHERE entity_type = ?`, entityType)
+	if err != nil {
+		return nil, fmt.Errorf("list embeddings by type: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]domain.EmbeddingRecord, 0)
+	for rows.Next() {
+		var rec domain.EmbeddingRecord
+		var vec []byte
+		var dims int64
+		if err := rows.Scan(&rec.EntityID, &rec.EntityType, &vec, &rec.Model, &dims, &rec.CreatedBy); err != nil {
+			return nil, fmt.Errorf("scan embedding row: %w", err)
+		}
+		v, err := embedding.DecodeVector(vec)
+		if err != nil {
+			return nil, fmt.Errorf("decode embedding: %w", err)
+		}
+		rec.Vector = v
+		rec.Dimensions = int(dims)
+		out = append(out, rec)
+	}
+	return out, rows.Err()
+}

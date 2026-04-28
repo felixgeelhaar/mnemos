@@ -1,0 +1,356 @@
+package mysql
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/felixgeelhaar/mnemos/internal/domain"
+)
+
+// ClaimRepository implements ports.ClaimRepository (and
+// ports.TrustScorer) against MySQL. INSERT … ON DUPLICATE KEY UPDATE
+// is the MySQL analog of Postgres's ON CONFLICT … DO UPDATE.
+type ClaimRepository struct {
+	db *sql.DB
+}
+
+// Upsert is the no-reason variant; status_history rows lose their
+// reason/changed_by attribution.
+func (r ClaimRepository) Upsert(ctx context.Context, claims []domain.Claim) error {
+	return r.upsertWithReason(ctx, claims, "", "")
+}
+
+// UpsertWithReason captures a free-form reason on the transition row.
+func (r ClaimRepository) UpsertWithReason(ctx context.Context, claims []domain.Claim, reason string) error {
+	return r.upsertWithReason(ctx, claims, reason, "")
+}
+
+// UpsertWithReasonAs is the actor-aware variant.
+func (r ClaimRepository) UpsertWithReasonAs(ctx context.Context, claims []domain.Claim, reason, changedBy string) error {
+	return r.upsertWithReason(ctx, claims, reason, changedBy)
+}
+
+func (r ClaimRepository) upsertWithReason(ctx context.Context, claims []domain.Claim, reason, changedBy string) error {
+	if len(claims) == 0 {
+		return nil
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin claim upsert tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	now := time.Now().UTC()
+	upsert := `
+INSERT INTO claims (id, text, type, confidence, status, created_at, created_by, valid_from, trust_score, valid_to)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, NULL)
+ON DUPLICATE KEY UPDATE
+  text = VALUES(text),
+  type = VALUES(type),
+  confidence = VALUES(confidence),
+  status = VALUES(status),
+  valid_from = VALUES(valid_from)`
+	historyInsert := `
+INSERT INTO claim_status_history (claim_id, from_status, to_status, changed_at, reason, changed_by)
+VALUES (?, ?, ?, ?, ?, ?)`
+	priorQuery := `SELECT status FROM claims WHERE id = ?`
+
+	for _, claim := range claims {
+		if err := claim.Validate(); err != nil {
+			return fmt.Errorf("invalid claim %s: %w", claim.ID, err)
+		}
+		var priorStatus string
+		err := tx.QueryRowContext(ctx, priorQuery, claim.ID).Scan(&priorStatus)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("look up prior status for %s: %w", claim.ID, err)
+		}
+
+		validFrom := claim.ValidFrom
+		if validFrom.IsZero() {
+			validFrom = claim.CreatedAt
+		}
+		if _, err := tx.ExecContext(ctx, upsert,
+			claim.ID, claim.Text, string(claim.Type), claim.Confidence,
+			string(claim.Status), claim.CreatedAt.UTC(), actorOr(claim.CreatedBy),
+			validFrom.UTC(),
+		); err != nil {
+			return fmt.Errorf("upsert claim %s: %w", claim.ID, err)
+		}
+
+		newStatus := string(claim.Status)
+		if priorStatus == newStatus {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, historyInsert,
+			claim.ID, priorStatus, newStatus, now, reason, actorOr(changedBy),
+		); err != nil {
+			return fmt.Errorf("record status transition for %s: %w", claim.ID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit claim upsert tx: %w", err)
+	}
+	return nil
+}
+
+// UpsertEvidence inserts (claim, event) link rows; INSERT IGNORE
+// makes it idempotent.
+func (r ClaimRepository) UpsertEvidence(ctx context.Context, links []domain.ClaimEvidence) error {
+	if len(links) == 0 {
+		return nil
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin evidence tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt := `INSERT IGNORE INTO claim_evidence (claim_id, event_id) VALUES (?, ?)`
+	for _, link := range links {
+		if err := link.Validate(); err != nil {
+			return fmt.Errorf("invalid claim evidence: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, stmt, link.ClaimID, link.EventID); err != nil {
+			return fmt.Errorf("upsert claim evidence (%s,%s): %w", link.ClaimID, link.EventID, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit evidence tx: %w", err)
+	}
+	return nil
+}
+
+// ListByEventIDs returns claims linked to any of the given event ids.
+func (r ClaimRepository) ListByEventIDs(ctx context.Context, eventIDs []string) ([]domain.Claim, error) {
+	if len(eventIDs) == 0 {
+		return []domain.Claim{}, nil
+	}
+	placeholders, args := inPlaceholders(eventIDs)
+	//nolint:gosec // G202: placeholders are literal "?" tokens, not user input
+	q := `
+SELECT DISTINCT c.id, c.text, c.type, c.confidence, c.status, c.created_at, c.created_by, c.trust_score, c.valid_from, c.valid_to
+FROM claims c
+JOIN claim_evidence ce ON ce.claim_id = c.id
+WHERE ce.event_id IN (` + placeholders + `)
+ORDER BY c.created_at ASC`
+	rows, err := r.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list claims by event ids: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return collectClaimRows(rows)
+}
+
+// ListEvidenceByClaimIDs returns the (claim_id, event_id) link rows.
+func (r ClaimRepository) ListEvidenceByClaimIDs(ctx context.Context, claimIDs []string) ([]domain.ClaimEvidence, error) {
+	if len(claimIDs) == 0 {
+		return []domain.ClaimEvidence{}, nil
+	}
+	placeholders, args := inPlaceholders(claimIDs)
+	//nolint:gosec // G202: placeholders are literal "?" tokens, not user input
+	rows, err := r.db.QueryContext(ctx, `SELECT claim_id, event_id FROM claim_evidence WHERE claim_id IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list evidence by claim ids: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]domain.ClaimEvidence, 0)
+	for rows.Next() {
+		var ev domain.ClaimEvidence
+		if err := rows.Scan(&ev.ClaimID, &ev.EventID); err != nil {
+			return nil, fmt.Errorf("scan claim evidence row: %w", err)
+		}
+		out = append(out, ev)
+	}
+	return out, rows.Err()
+}
+
+// ListByIDs returns claims with the given ids.
+func (r ClaimRepository) ListByIDs(ctx context.Context, claimIDs []string) ([]domain.Claim, error) {
+	if len(claimIDs) == 0 {
+		return []domain.Claim{}, nil
+	}
+	placeholders, args := inPlaceholders(claimIDs)
+	//nolint:gosec // G202: placeholders are literal "?" tokens, not user input
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id, text, type, confidence, status, created_at, created_by, trust_score, valid_from, valid_to
+FROM claims WHERE id IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list claims by ids: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return collectClaimRows(rows)
+}
+
+// ListAll returns every claim ordered by created_at.
+func (r ClaimRepository) ListAll(ctx context.Context) ([]domain.Claim, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id, text, type, confidence, status, created_at, created_by, trust_score, valid_from, valid_to
+FROM claims ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list all claims: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return collectClaimRows(rows)
+}
+
+// ListStatusHistoryByClaimID returns the claim's transition rows.
+func (r ClaimRepository) ListStatusHistoryByClaimID(ctx context.Context, claimID string) ([]domain.ClaimStatusTransition, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT claim_id, from_status, to_status, changed_at, reason, changed_by
+FROM claim_status_history WHERE claim_id = ? ORDER BY id ASC`, claimID)
+	if err != nil {
+		return nil, fmt.Errorf("list status history for %s: %w", claimID, err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]domain.ClaimStatusTransition, 0)
+	for rows.Next() {
+		var t domain.ClaimStatusTransition
+		var from, to string
+		if err := rows.Scan(&t.ClaimID, &from, &to, &t.ChangedAt, &t.Reason, &t.ChangedBy); err != nil {
+			return nil, fmt.Errorf("scan status history row: %w", err)
+		}
+		t.FromStatus = domain.ClaimStatus(from)
+		t.ToStatus = domain.ClaimStatus(to)
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// SetValidity updates the claim's valid_to.
+func (r ClaimRepository) SetValidity(ctx context.Context, claimID string, validTo time.Time) error {
+	var args []any
+	var stmt string
+	if validTo.IsZero() {
+		stmt = `UPDATE claims SET valid_to = NULL WHERE id = ?`
+		args = []any{claimID}
+	} else {
+		stmt = `UPDATE claims SET valid_to = ? WHERE id = ?`
+		args = []any{validTo.UTC(), claimID}
+	}
+	res, err := r.db.ExecContext(ctx, stmt, args...)
+	if err != nil {
+		return fmt.Errorf("set validity for %s: %w", claimID, err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("claim %s: %w", claimID, sql.ErrNoRows)
+	}
+	return nil
+}
+
+// RecomputeTrust applies the supplied scoring function to every
+// claim. Returns the count touched. Implements ports.TrustScorer.
+func (r ClaimRepository) RecomputeTrust(ctx context.Context, score func(confidence float64, evidenceCount int, latestEvidence time.Time) float64) (int, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT c.id, c.confidence, COUNT(DISTINCT ce.event_id), MAX(e.timestamp)
+FROM claims c
+LEFT JOIN claim_evidence ce ON ce.claim_id = c.id
+LEFT JOIN events e ON e.id = ce.event_id
+GROUP BY c.id, c.confidence`)
+	if err != nil {
+		return 0, fmt.Errorf("list trust inputs: %w", err)
+	}
+	type input struct {
+		id         string
+		confidence float64
+		count      int
+		latest     time.Time
+	}
+	var inputs []input
+	for rows.Next() {
+		var in input
+		var latest sql.NullTime
+		if err := rows.Scan(&in.id, &in.confidence, &in.count, &latest); err != nil {
+			_ = rows.Close()
+			return 0, fmt.Errorf("scan trust input: %w", err)
+		}
+		if latest.Valid {
+			in.latest = latest.Time
+		}
+		inputs = append(inputs, in)
+	}
+	_ = rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterate trust inputs: %w", err)
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin trust tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, in := range inputs {
+		s := score(in.confidence, in.count, in.latest)
+		if _, err := tx.ExecContext(ctx, `UPDATE claims SET trust_score = ? WHERE id = ?`, s, in.id); err != nil {
+			return 0, fmt.Errorf("update trust for %s: %w", in.id, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit trust update: %w", err)
+	}
+	return len(inputs), nil
+}
+
+// AverageTrust returns the mean trust_score across every claim.
+func (r ClaimRepository) AverageTrust(ctx context.Context) (float64, error) {
+	var avg sql.NullFloat64
+	err := r.db.QueryRowContext(ctx, `SELECT AVG(trust_score) FROM claims`).Scan(&avg)
+	if err != nil {
+		return 0, fmt.Errorf("average trust: %w", err)
+	}
+	if !avg.Valid {
+		return 0, nil
+	}
+	return avg.Float64, nil
+}
+
+// CountClaimsBelowTrust returns how many claims fall below threshold.
+func (r ClaimRepository) CountClaimsBelowTrust(ctx context.Context, threshold float64) (int64, error) {
+	var n int64
+	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM claims WHERE trust_score < ?`, threshold).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count claims below trust: %w", err)
+	}
+	return n, nil
+}
+
+func collectClaimRows(rows *sql.Rows) ([]domain.Claim, error) {
+	out := make([]domain.Claim, 0)
+	for rows.Next() {
+		c, err := scanClaimRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func scanClaimRow(rows *sql.Rows) (domain.Claim, error) {
+	var c domain.Claim
+	var typ, status string
+	var validFrom sql.NullTime
+	var validTo sql.NullTime
+	if err := rows.Scan(
+		&c.ID, &c.Text, &typ, &c.Confidence, &status,
+		&c.CreatedAt, &c.CreatedBy, &c.TrustScore, &validFrom, &validTo,
+	); err != nil {
+		return domain.Claim{}, fmt.Errorf("scan claim row: %w", err)
+	}
+	c.Type = domain.ClaimType(typ)
+	c.Status = domain.ClaimStatus(status)
+	if validFrom.Valid {
+		c.ValidFrom = validFrom.Time
+	}
+	if validTo.Valid {
+		c.ValidTo = validTo.Time
+	}
+	if err := c.Validate(); err != nil {
+		return domain.Claim{}, fmt.Errorf("validate persisted claim %s: %w", c.ID, err)
+	}
+	return c, nil
+}

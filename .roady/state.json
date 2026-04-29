@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 106,
+  "version": 107,
   "task_states": {
     "task-append-only-event-store": {
       "status": "done",
@@ -267,11 +267,15 @@
       "elapsed_minutes": 9
     },
     "task-multi-backend-storage-everything-on-ports-legacy-cleanup": {
-      "status": "in_progress",
+      "status": "done",
       "path": "",
       "owner": "ai-agent",
+      "evidence": [
+        "Ported all remaining cmd/mnemos tests from sqlite.Open to openTestStore/store.Open; ported data/eval/retrieval_test.go to use store.Open and port methods; unexported sqlite.Open to internal open(); dropped all sqlite.Open call sites from production and test code; full test suite green"
+      ],
       "started_at": "2026-04-28T15:41:52.15506+02:00",
-      "elapsed_minutes": 0
+      "completed_at": "2026-04-29T15:50:56.984313+02:00",
+      "elapsed_minutes": 1449
     },
     "task-multi-backend-storage-foundation": {
       "status": "done",
@@ -483,5 +487,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-04-28T15:41:52.15506+02:00"
+  "updated_at": "2026-04-29T15:50:56.984313+02:00"
 }

@@ -2,12 +2,10 @@ package main
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
 // Note: the handleResolve wrapper calls os.Exit on error paths, so these
@@ -16,13 +14,9 @@ import (
 // call works.
 
 func TestResolve_ChangesStatusesAndRecordsTransitions(t *testing.T) {
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "resolve.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	_, conn := openTestStore(t)
 	ctx := context.Background()
-	repo := sqlite.NewClaimRepository(db)
+	repo := conn.Claims
 
 	now := time.Now().UTC()
 	winner := domain.Claim{

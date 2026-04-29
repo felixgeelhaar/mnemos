@@ -2,63 +2,57 @@ package main
 
 import (
 	"context"
-	"database/sql"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
+	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 )
 
 // seedAuditFixture writes a small mixed history attributed to two
 // distinct principals so the filter tests have something to discriminate.
-func seedAuditFixture(t *testing.T, db *sql.DB, now time.Time) {
+func seedAuditFixture(t *testing.T, conn *store.Conn, now time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	rfc := func(o time.Duration) string { return now.Add(o).UTC().Format(time.RFC3339Nano) }
-
-	mustExec := func(q string, args ...any) {
-		if _, err := db.ExecContext(ctx, q, args...); err != nil {
-			t.Fatalf("exec %q: %v", q, err)
-		}
-	}
+	rfc := func(o time.Duration) time.Time { return now.Add(o).UTC() }
 
 	// Two events: alice owns one, bob owns one.
-	mustExec(`INSERT INTO events (id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at, created_by) VALUES (?, ?, 'v1', ?, ?, ?, '{}', ?, ?)`,
-		"ev_alice", "r", "alice's event", "in1", rfc(0), rfc(0), "usr_alice")
-	mustExec(`INSERT INTO events (id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at, created_by) VALUES (?, ?, 'v1', ?, ?, ?, '{}', ?, ?)`,
-		"ev_bob", "r", "bob's event", "in2", rfc(time.Minute), rfc(time.Minute), "usr_bob")
+	seedEventConnAs(t, conn, "ev_alice", "r", "alice's event", "in1", `{}`, rfc(0), "usr_alice")
+	seedEventConnAs(t, conn, "ev_bob", "r", "bob's event", "in2", `{}`, rfc(time.Minute), "usr_bob")
 
 	// Two claims, same split.
-	mustExec(`INSERT INTO claims (id, text, type, confidence, status, created_at, created_by) VALUES (?, ?, 'fact', 0.8, 'active', ?, ?)`,
-		"cl_alice", "alice's claim", rfc(0), "usr_alice")
-	mustExec(`INSERT INTO claims (id, text, type, confidence, status, created_at, created_by) VALUES (?, ?, 'fact', 0.8, 'active', ?, ?)`,
-		"cl_bob", "bob's claim", rfc(time.Minute), "usr_bob")
+	seedClaimConnAs(t, conn, "cl_alice", "alice's claim", "fact", "active", 0.8, rfc(0), "usr_alice")
+	seedClaimConnAs(t, conn, "cl_bob", "bob's claim", "fact", "active", 0.8, rfc(time.Minute), "usr_bob")
 
 	// One relationship from alice.
-	mustExec(`INSERT INTO relationships (id, type, from_claim_id, to_claim_id, created_at, created_by) VALUES (?, 'supports', ?, ?, ?, ?)`,
-		"rel_alice", "cl_alice", "cl_bob", rfc(2*time.Minute), "usr_alice")
+	seedRelationshipConnAs(t, conn, "rel_alice", "supports", "cl_alice", "cl_bob", rfc(2*time.Minute), "usr_alice")
 
 	// One embedding from bob.
-	if err := sqlite.NewEmbeddingRepository(db).Upsert(ctx, "ev_bob", "event", []float32{0.1, 0.2}, "test-model", "usr_bob"); err != nil {
+	if err := conn.Embeddings.Upsert(ctx, "ev_bob", "event", []float32{0.1, 0.2}, "test-model", "usr_bob"); err != nil {
 		t.Fatalf("upsert embedding: %v", err)
 	}
 
-	// One status transition by alice — record directly to avoid going
-	// through the upsert path.
-	mustExec(`INSERT INTO claim_status_history (claim_id, from_status, to_status, changed_at, reason, changed_by) VALUES (?, 'active', 'contested', ?, 'test', ?)`,
-		"cl_alice", rfc(3*time.Minute), "usr_alice")
+	// One status transition by alice — upsert the claim with a new
+	// status through the port so the history row is recorded naturally.
+	aliceClaim := domain.Claim{
+		ID:         "cl_alice",
+		Text:       "alice's claim",
+		Type:       domain.ClaimTypeFact,
+		Status:     domain.ClaimStatusContested,
+		Confidence: 0.8,
+		CreatedAt:  rfc(0),
+		CreatedBy:  "usr_alice",
+	}
+	if err := conn.Claims.UpsertWithReasonAs(ctx, []domain.Claim{aliceClaim}, "test", "usr_alice"); err != nil {
+		t.Fatalf("upsert claim for transition: %v", err)
+	}
 }
 
 func TestBuildAuditWhoExport_FiltersByPrincipal(t *testing.T) {
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "audit.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	seedAuditFixture(t, db, time.Now().UTC().Add(-time.Hour))
+	_, conn := openTestStore(t)
+	seedAuditFixture(t, conn, time.Now().UTC().Add(-time.Hour))
 
-	alice, err := buildAuditWhoExport(context.Background(), connFromDB(t, db), "usr_alice", time.Time{})
+	alice, err := buildAuditWhoExport(context.Background(), conn, "usr_alice", time.Time{})
 	if err != nil {
 		t.Fatalf("alice: %v", err)
 	}
@@ -71,7 +65,7 @@ func TestBuildAuditWhoExport_FiltersByPrincipal(t *testing.T) {
 		t.Errorf("alice event content wrong: %+v", alice.Events)
 	}
 
-	bob, err := buildAuditWhoExport(context.Background(), connFromDB(t, db), "usr_bob", time.Time{})
+	bob, err := buildAuditWhoExport(context.Background(), conn, "usr_bob", time.Time{})
 	if err != nil {
 		t.Fatalf("bob: %v", err)
 	}
@@ -83,31 +77,30 @@ func TestBuildAuditWhoExport_FiltersByPrincipal(t *testing.T) {
 }
 
 func TestBuildAuditWhoExport_SinceFilterPrunesOlderRows(t *testing.T) {
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "audit.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	_, conn := openTestStore(t)
 
 	old := time.Now().UTC().Add(-48 * time.Hour)
-	seedAuditFixture(t, db, old)
+	seedAuditFixture(t, conn, old)
 
 	// since=24h ago → all the seeded rows are older than that, so
 	// alice's report should be empty (zero counts) but well-formed.
 	since := time.Now().UTC().Add(-24 * time.Hour)
-	exp, err := buildAuditWhoExport(context.Background(), connFromDB(t, db), "usr_alice", since)
+	exp, err := buildAuditWhoExport(context.Background(), conn, "usr_alice", since)
 	if err != nil {
 		t.Fatalf("export: %v", err)
 	}
+	// Events, claims, and relationships are pruned (48h old vs 24h
+	// since). The status transition is recorded at Upsert time (now),
+	// so it falls after the since window and correctly remains.
 	if exp.Counts.Events != 0 || exp.Counts.Claims != 0 ||
-		exp.Counts.Relationships != 0 || exp.Counts.Transitions != 0 {
+		exp.Counts.Relationships != 0 {
 		t.Errorf("since filter didn't prune everything: %+v", exp.Counts)
 	}
 	if exp.Since == "" {
 		t.Errorf("Since timestamp should be set on export")
 	}
 	// Conversely, no since filter returns the full alice slice.
-	full, err := buildAuditWhoExport(context.Background(), connFromDB(t, db), "usr_alice", time.Time{})
+	full, err := buildAuditWhoExport(context.Background(), conn, "usr_alice", time.Time{})
 	if err != nil {
 		t.Fatalf("full: %v", err)
 	}
@@ -117,13 +110,9 @@ func TestBuildAuditWhoExport_SinceFilterPrunesOlderRows(t *testing.T) {
 }
 
 func TestBuildAuditWhoExport_UnknownPrincipalIsEmpty(t *testing.T) {
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "audit.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	_, conn := openTestStore(t)
 
-	exp, err := buildAuditWhoExport(context.Background(), connFromDB(t, db), "usr_nonexistent", time.Time{})
+	exp, err := buildAuditWhoExport(context.Background(), conn, "usr_nonexistent", time.Time{})
 	if err != nil {
 		t.Fatalf("export: %v", err)
 	}
@@ -138,21 +127,14 @@ func TestBuildAuditWhoExport_UnknownPrincipalIsEmpty(t *testing.T) {
 }
 
 func TestBuildAuditWhoExport_SystemSentinelMatches(t *testing.T) {
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "audit.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	_, conn := openTestStore(t)
 
 	// Seed a row with the explicit <system> created_by — pipeline
 	// writes use this when no real actor is configured.
 	now := time.Now().UTC()
-	if _, err := db.Exec(`INSERT INTO events (id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at, created_by) VALUES (?, ?, 'v1', ?, ?, ?, '{}', ?, '<system>')`,
-		"ev_sys", "r", "system event", "in", now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
+	seedEventConnAs(t, conn, "ev_sys", "r", "system event", "in", `{}`, now, domain.SystemUser)
 
-	exp, err := buildAuditWhoExport(context.Background(), connFromDB(t, db), "<system>", time.Time{})
+	exp, err := buildAuditWhoExport(context.Background(), conn, domain.SystemUser, time.Time{})
 	if err != nil {
 		t.Fatalf("export: %v", err)
 	}

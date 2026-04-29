@@ -162,6 +162,16 @@ func (r RelationshipRepository) CountByType(ctx context.Context, relType string)
 	return n, nil
 }
 
+// DeleteAll satisfies the corresponding ports method.
+func (r RelationshipRepository) DeleteAll(ctx context.Context) error {
+	if _, err := r.db.ExecContext(ctx, fmt.Sprintf(
+		`DELETE FROM %s`, qualify(r.ns, "relationships"),
+	)); err != nil {
+		return fmt.Errorf("delete all relationships: %w", err)
+	}
+	return nil
+}
+
 // ListAll satisfies the corresponding ports method.
 func (r RelationshipRepository) ListAll(ctx context.Context) ([]domain.Relationship, error) {
 	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`

@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/store"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
@@ -42,10 +45,10 @@ func newServerTestStore_conn(t *testing.T) *store.Conn {
 }
 
 // connFromDB wraps an existing *sql.DB into a *store.Conn so tests
-// that opened raw SQLite (e.g. via sqlite.Open) and seeded fixtures
-// directly through the *sql.DB can still pass a Conn to handler
-// factories that take *store.Conn. Uses the sqlite repositories
-// directly — the underlying db is shared so seeded data is visible.
+// that seeded fixtures directly through the *sql.DB can still pass a
+// Conn to handler factories that take *store.Conn. Uses the sqlite
+// repositories directly — the underlying db is shared so seeded data
+// is visible.
 //
 // The returned Conn does not close the db; the caller (or the
 // helper that opened it) retains ownership.
@@ -62,5 +65,84 @@ func connFromDB(_ *testing.T, db *sql.DB) *store.Conn {
 		Jobs:          sqlite.NewCompilationJobRepository(db),
 		Raw:           db,
 		Closer:        func() error { return nil },
+	}
+}
+
+// seedEventConn inserts an event through the port interface.
+func seedEventConn(t *testing.T, conn *store.Conn, id, runID, content, srcInputID, metaJSON string, ts time.Time) {
+	t.Helper()
+	seedEventConnAs(t, conn, id, runID, content, srcInputID, metaJSON, ts, domain.SystemUser)
+}
+
+// seedEventConnAs inserts an event through the port interface with a
+// specific created_by actor.
+func seedEventConnAs(t *testing.T, conn *store.Conn, id, runID, content, srcInputID, metaJSON string, ts time.Time, createdBy string) {
+	t.Helper()
+	var meta map[string]string
+	if metaJSON != "" {
+		if err := json.Unmarshal([]byte(metaJSON), &meta); err != nil {
+			t.Fatalf("unmarshal metadata: %v", err)
+		}
+	}
+	evt := domain.Event{
+		ID:            id,
+		RunID:         runID,
+		SchemaVersion: "v1",
+		Content:       content,
+		SourceInputID: srcInputID,
+		Timestamp:     ts,
+		Metadata:      meta,
+		IngestedAt:    ts,
+		CreatedBy:     createdBy,
+	}
+	if err := conn.Events.Append(context.Background(), evt); err != nil {
+		t.Fatalf("append event: %v", err)
+	}
+}
+
+// seedClaimConn inserts a claim through the port interface.
+func seedClaimConn(t *testing.T, conn *store.Conn, id, text, ctype, status string, confidence float64, createdAt time.Time) {
+	t.Helper()
+	seedClaimConnAs(t, conn, id, text, ctype, status, confidence, createdAt, domain.SystemUser)
+}
+
+// seedClaimConnAs inserts a claim through the port interface with a
+// specific created_by actor.
+func seedClaimConnAs(t *testing.T, conn *store.Conn, id, text, ctype, status string, confidence float64, createdAt time.Time, createdBy string) {
+	t.Helper()
+	claim := domain.Claim{
+		ID:         id,
+		Text:       text,
+		Type:       domain.ClaimType(ctype),
+		Status:     domain.ClaimStatus(status),
+		Confidence: confidence,
+		CreatedAt:  createdAt,
+		CreatedBy:  createdBy,
+	}
+	if err := conn.Claims.Upsert(context.Background(), []domain.Claim{claim}); err != nil {
+		t.Fatalf("upsert claim: %v", err)
+	}
+}
+
+// seedRelationshipConn inserts a relationship through the port interface.
+func seedRelationshipConn(t *testing.T, conn *store.Conn, id, rtype, from, to string, createdAt time.Time) {
+	t.Helper()
+	seedRelationshipConnAs(t, conn, id, rtype, from, to, createdAt, domain.SystemUser)
+}
+
+// seedRelationshipConnAs inserts a relationship through the port
+// interface with a specific created_by actor.
+func seedRelationshipConnAs(t *testing.T, conn *store.Conn, id, rtype, from, to string, createdAt time.Time, createdBy string) {
+	t.Helper()
+	rel := domain.Relationship{
+		ID:          id,
+		Type:        domain.RelationshipType(rtype),
+		FromClaimID: from,
+		ToClaimID:   to,
+		CreatedAt:   createdAt,
+		CreatedBy:   createdBy,
+	}
+	if err := conn.Relationships.Upsert(context.Background(), []domain.Relationship{rel}); err != nil {
+		t.Fatalf("upsert relationship: %v", err)
 	}
 }

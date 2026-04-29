@@ -73,6 +73,16 @@ func (r EmbeddingRepository) CountAll(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
+// DeleteAll satisfies the corresponding ports method.
+func (r EmbeddingRepository) DeleteAll(ctx context.Context) error {
+	if _, err := r.db.ExecContext(ctx, fmt.Sprintf(
+		`DELETE FROM %s`, qualify(r.ns, "embeddings"),
+	)); err != nil {
+		return fmt.Errorf("delete all embeddings: %w", err)
+	}
+	return nil
+}
+
 // ListAll satisfies the corresponding ports method.
 func (r EmbeddingRepository) ListAll(ctx context.Context) ([]domain.EmbeddingRecord, error) {
 	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`

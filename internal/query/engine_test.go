@@ -24,6 +24,8 @@ func (f fakeEventRepo) ListAll(_ context.Context) ([]domain.Event, error) { retu
 func (f fakeEventRepo) CountAll(_ context.Context) (int64, error) {
 	return int64(len(f.events)), nil
 }
+func (f fakeEventRepo) DeleteByID(_ context.Context, _ string) error { return nil }
+func (f fakeEventRepo) DeleteAll(_ context.Context) error            { return nil }
 func (f fakeEventRepo) ListByRunID(_ context.Context, runID string) ([]domain.Event, error) {
 	filtered := make([]domain.Event, 0)
 	for _, event := range f.events {
@@ -98,6 +100,10 @@ func (f fakeClaimRepo) ListAllEvidence(_ context.Context) ([]domain.ClaimEvidenc
 func (f fakeClaimRepo) ListAllStatusHistory(_ context.Context) ([]domain.ClaimStatusTransition, error) {
 	return nil, nil
 }
+func (f fakeClaimRepo) DeleteAll(_ context.Context) error { return nil }
+func (f fakeClaimRepo) ListIDsMissingEmbedding(_ context.Context) ([]string, error) {
+	return nil, nil
+}
 
 type fakeRelationshipRepo struct {
 	rels map[string][]domain.Relationship
@@ -153,6 +159,7 @@ func (f fakeRelationshipRepo) CountByType(_ context.Context, relType string) (in
 	}
 	return n, nil
 }
+func (f fakeRelationshipRepo) DeleteAll(_ context.Context) error { return nil }
 func (f fakeRelationshipRepo) ListAll(_ context.Context) ([]domain.Relationship, error) {
 	seen := map[string]struct{}{}
 	out := make([]domain.Relationship, 0)

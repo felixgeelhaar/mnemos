@@ -134,9 +134,9 @@ func TestEventRepositoryListByRunID(t *testing.T) {
 func openTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "test.db")
-	db, err := Open(path)
+	db, err := open(path)
 	if err != nil {
-		t.Fatalf("Open() error = %v", err)
+		t.Fatalf("open() error = %v", err)
 	}
 	return db
 }

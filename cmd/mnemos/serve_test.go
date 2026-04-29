@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,37 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/felixgeelhaar/mnemos/internal/store"
 )
-
-// newServerTestDB returns the *sql.DB underlying a fresh test
-// store. Most callers want both the db (for raw seed inserts) and
-// the conn (for newServerMux); use newServerTestStore for that.
-func newServerTestDB(t *testing.T) *sql.DB {
-	t.Helper()
-	db, _ := newServerTestStore(t)
-	return db
-}
-
-// newServerTestStore opens a fresh SQLite-backed store at a temp
-// path and returns both handles. The conn is what newServerMux
-// expects; the *sql.DB is for raw fixtures like seedEvent.
-func newServerTestStore(t *testing.T) (*sql.DB, *store.Conn) {
-	t.Helper()
-	return openTestStore(t)
-}
-
-func seedEvent(t *testing.T, db *sql.DB, id, runID, content, srcInputID, metaJSON string, ts time.Time) {
-	t.Helper()
-	_, err := db.ExecContext(context.Background(),
-		`INSERT INTO events (id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at) VALUES (?, ?, 'v1', ?, ?, ?, ?, ?)`,
-		id, runID, content, srcInputID, ts.UTC().Format(time.RFC3339), metaJSON, ts.UTC().Format(time.RFC3339),
-	)
-	if err != nil {
-		t.Fatalf("insert event: %v", err)
-	}
-}
 
 func TestServe_WebRootReturnsHTML(t *testing.T) {
 	srv := httptest.NewServer(newServerMux(newServerTestStore_conn(t)))
@@ -107,13 +75,13 @@ func TestServe_HealthReturnsOK(t *testing.T) {
 }
 
 func TestServe_ListEventsReturnsAndPaginates(t *testing.T) {
-	db := newServerTestDB(t)
+	_, conn := openTestStore(t)
 	base := time.Now().UTC()
 	for i := 0; i < 5; i++ {
-		seedEvent(t, db, "e"+string(rune('1'+i)), "r1", "claim text "+string(rune('A'+i)), "in"+string(rune('1'+i)), `{"source":"file"}`, base.Add(time.Duration(i)*time.Minute))
+		seedEventConn(t, conn, "e"+string(rune('1'+i)), "r1", "claim text "+string(rune('A'+i)), "in"+string(rune('1'+i)), `{"source":"file"}`, base.Add(time.Duration(i)*time.Minute))
 	}
 
-	mux := newServerMux(connFromDB(t, db))
+	mux := newServerMux(conn)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -139,8 +107,8 @@ func TestServe_ListEventsReturnsAndPaginates(t *testing.T) {
 }
 
 func TestServe_ListEventsCapsAtMax(t *testing.T) {
-	db := newServerTestDB(t)
-	mux := newServerMux(connFromDB(t, db))
+	_, conn := openTestStore(t)
+	mux := newServerMux(conn)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -160,13 +128,13 @@ func TestServe_ListEventsCapsAtMax(t *testing.T) {
 }
 
 func TestServe_ListClaimsFiltersByType(t *testing.T) {
-	db := newServerTestDB(t)
+	_, conn := openTestStore(t)
 	now := time.Now().UTC()
-	seedClaim(t, db, "c1", "fact one", "fact", "active", 0.8, now)
-	seedClaim(t, db, "c2", "decision one", "decision", "active", 0.9, now)
-	seedClaim(t, db, "c3", "decision two", "decision", "active", 0.85, now)
+	seedClaimConn(t, conn, "c1", "fact one", "fact", "active", 0.8, now)
+	seedClaimConn(t, conn, "c2", "decision one", "decision", "active", 0.9, now)
+	seedClaimConn(t, conn, "c3", "decision two", "decision", "active", 0.85, now)
 
-	mux := newServerMux(connFromDB(t, db))
+	mux := newServerMux(conn)
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -205,15 +173,15 @@ func TestServe_ListClaimsRejectsInvalidType(t *testing.T) {
 }
 
 func TestServe_ListRelationshipsFiltersByType(t *testing.T) {
-	db := newServerTestDB(t)
+	_, conn := openTestStore(t)
 	now := time.Now().UTC()
-	seedClaim(t, db, "c1", "a", "fact", "active", 0.8, now)
-	seedClaim(t, db, "c2", "b", "fact", "active", 0.8, now)
-	seedClaim(t, db, "c3", "c", "fact", "active", 0.8, now)
-	seedRelationship(t, db, "r1", "supports", "c1", "c2", now)
-	seedRelationship(t, db, "r2", "contradicts", "c1", "c3", now)
+	seedClaimConn(t, conn, "c1", "a", "fact", "active", 0.8, now)
+	seedClaimConn(t, conn, "c2", "b", "fact", "active", 0.8, now)
+	seedClaimConn(t, conn, "c3", "c", "fact", "active", 0.8, now)
+	seedRelationshipConn(t, conn, "r1", "supports", "c1", "c2", now)
+	seedRelationshipConn(t, conn, "r2", "contradicts", "c1", "c3", now)
 
-	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
+	srv := httptest.NewServer(newServerMux(conn))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/v1/relationships?type=contradicts")
@@ -232,15 +200,15 @@ func TestServe_ListRelationshipsFiltersByType(t *testing.T) {
 }
 
 func TestServe_MetricsCountsSchemaCorrectly(t *testing.T) {
-	db := newServerTestDB(t)
+	_, conn := openTestStore(t)
 	now := time.Now().UTC()
-	seedEvent(t, db, "e1", "run-a", "x", "in1", `{}`, now)
-	seedEvent(t, db, "e2", "run-b", "y", "in2", `{}`, now)
-	seedClaim(t, db, "c1", "a", "fact", "active", 0.8, now)
-	seedClaim(t, db, "c2", "b", "fact", "contested", 0.8, now)
-	seedRelationship(t, db, "r1", "contradicts", "c1", "c2", now)
+	seedEventConn(t, conn, "e1", "run-a", "x", "in1", `{}`, now)
+	seedEventConn(t, conn, "e2", "run-b", "y", "in2", `{}`, now)
+	seedClaimConn(t, conn, "c1", "a", "fact", "active", 0.8, now)
+	seedClaimConn(t, conn, "c2", "b", "fact", "contested", 0.8, now)
+	seedRelationshipConn(t, conn, "r1", "contradicts", "c1", "c2", now)
 
-	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
+	srv := httptest.NewServer(newServerMux(conn))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/v1/metrics")

@@ -12,7 +12,8 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/ports"
 	"github.com/felixgeelhaar/mnemos/internal/query"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
+	"github.com/felixgeelhaar/mnemos/internal/store"
+	_ "github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 	"gopkg.in/yaml.v3"
 )
 
@@ -111,43 +112,47 @@ func loadRetrievalCases(t *testing.T) []retrievalCase {
 
 // seedCase materialises a retrievalCase into a fresh DB: one event
 // per seed, one claim per seed, an evidence link between them.
-// Returns the SQLite repos so each strategy can build its engine.
-func seedCase(t *testing.T, c retrievalCase) (*sqlite.EventRepository, *sqlite.ClaimRepository, *sqlite.RelationshipRepository, func()) {
+// Returns a store.Conn so each strategy can build its engine.
+func seedCase(t *testing.T, c retrievalCase) (*store.Conn, func()) {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, c.ID+".db")
-	db, err := sqlite.Open(dbPath)
+	conn, err := store.Open(context.Background(), "sqlite://"+dbPath)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	now := time.Now().UTC()
 	for _, s := range c.Seeds {
 		eventID := "ev_" + s.ClaimID
-		if _, err := db.Exec(
-			`INSERT INTO events (id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at)
-			 VALUES (?, 'r', 'v1', ?, 'src', ?, '{}', ?)`,
-			eventID, s.Text, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano),
-		); err != nil {
+		if err := conn.Events.Append(context.Background(), domain.Event{
+			ID:            eventID,
+			RunID:         "r",
+			SchemaVersion: "v1",
+			Content:       s.Text,
+			SourceInputID: "src",
+			Timestamp:     now,
+			IngestedAt:    now,
+		}); err != nil {
 			t.Fatalf("seed event %s: %v", eventID, err)
 		}
-		if _, err := db.Exec(
-			`INSERT INTO claims (id, text, type, confidence, status, created_at)
-			 VALUES (?, ?, 'fact', 0.85, 'active', ?)`,
-			s.ClaimID, s.Text, now.Format(time.RFC3339Nano),
-		); err != nil {
+		if err := conn.Claims.Upsert(context.Background(), []domain.Claim{{
+			ID:         s.ClaimID,
+			Text:       s.Text,
+			Type:       "fact",
+			Confidence: 0.85,
+			Status:     "active",
+			CreatedAt:  now,
+		}}); err != nil {
 			t.Fatalf("seed claim %s: %v", s.ClaimID, err)
 		}
-		if _, err := db.Exec(
-			`INSERT INTO claim_evidence (claim_id, event_id) VALUES (?, ?)`,
-			s.ClaimID, eventID,
-		); err != nil {
+		if err := conn.Claims.UpsertEvidence(context.Background(), []domain.ClaimEvidence{{
+			ClaimID: s.ClaimID,
+			EventID: eventID,
+		}}); err != nil {
 			t.Fatalf("seed evidence %s: %v", s.ClaimID, err)
 		}
 	}
-	er := sqlite.NewEventRepository(db)
-	cr := sqlite.NewClaimRepository(db)
-	rr := sqlite.NewRelationshipRepository(db)
-	return &er, &cr, &rr, func() { _ = db.Close() }
+	return conn, func() { _ = conn.Close() }
 }
 
 // rankOf returns the 1-based position of gold in claims, or 0 when
@@ -181,10 +186,20 @@ func TestRetrievalQuality(t *testing.T) {
 	}
 
 	for i, c := range cases {
-		eventRepo, claimRepo, relRepo, cleanup := seedCase(t, c)
+		conn, cleanup := seedCase(t, c)
+		defer cleanup()
+
+		eventTS, ok := conn.Events.(ports.TextSearcher)
+		if !ok {
+			t.Fatal("events repo does not implement TextSearcher")
+		}
+		claimTS, ok := conn.Claims.(ports.TextSearcher)
+		if !ok {
+			t.Fatal("claims repo does not implement TextSearcher")
+		}
 
 		// Strategy 1: token-overlap (legacy)
-		legacy := query.NewEngine(eventRepo, claimRepo, relRepo)
+		legacy := query.NewEngine(conn.Events, conn.Claims, conn.Relationships)
 		ans, err := legacy.Answer(c.Query)
 		if err != nil {
 			t.Fatalf("[%s] token-overlap answer: %v", c.ID, err)
@@ -192,8 +207,8 @@ func TestRetrievalQuality(t *testing.T) {
 		strategies[0].ranks[i] = rankOf(ans.Claims, c.GoldClaimID)
 
 		// Strategy 2: BM25-only
-		bm25Only := query.NewEngine(eventRepo, claimRepo, relRepo).
-			WithTextSearch(eventRepo, claimRepo)
+		bm25Only := query.NewEngine(conn.Events, conn.Claims, conn.Relationships).
+			WithTextSearch(eventTS, claimTS)
 		ans, err = bm25Only.Answer(c.Query)
 		if err != nil {
 			t.Fatalf("[%s] bm25 answer: %v", c.ID, err)
@@ -207,15 +222,13 @@ func TestRetrievalQuality(t *testing.T) {
 			textByID[s.ClaimID] = s.Text
 		}
 		stub := stubSemantic{textByID: textByID}
-		hybrid := query.NewEngine(eventRepo, claimRepo, relRepo).
-			WithTextSearch(eventRepo, stub)
+		hybrid := query.NewEngine(conn.Events, conn.Claims, conn.Relationships).
+			WithTextSearch(eventTS, stub)
 		ans, err = hybrid.Answer(c.Query)
 		if err != nil {
 			t.Fatalf("[%s] hybrid answer: %v", c.ID, err)
 		}
 		strategies[2].ranks[i] = rankOf(ans.Claims, c.GoldClaimID)
-
-		cleanup()
 	}
 
 	t.Log("\n=== RETRIEVAL QUALITY EVAL ===")

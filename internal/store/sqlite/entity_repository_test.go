@@ -9,7 +9,7 @@ import (
 )
 
 func TestFindOrCreate_DedupsByNormalizedName(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "ent.db"))
+	db, err := open(filepath.Join(t.TempDir(), "ent.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestFindOrCreate_DedupsByNormalizedName(t *testing.T) {
 }
 
 func TestLinkClaimAndListClaimsForEntity(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "ent.db"))
+	db, err := open(filepath.Join(t.TempDir(), "ent.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestLinkClaimAndListClaimsForEntity(t *testing.T) {
 }
 
 func TestMerge_RedirectsClaimEntities(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "ent.db"))
+	db, err := open(filepath.Join(t.TempDir(), "ent.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestMerge_RedirectsClaimEntities(t *testing.T) {
 }
 
 func TestMerge_RejectsSelfMerge(t *testing.T) {
-	db, _ := Open(filepath.Join(t.TempDir(), "ent.db"))
+	db, _ := open(filepath.Join(t.TempDir(), "ent.db"))
 	t.Cleanup(func() { _ = db.Close() })
 	repo := NewEntityRepository(db)
 	if err := repo.Merge(context.Background(), "x", "x"); err != ErrEntityMergeSelf {
@@ -132,7 +132,7 @@ func TestMerge_RejectsSelfMerge(t *testing.T) {
 }
 
 func TestClaimIDsMissingEntityLinks(t *testing.T) {
-	db, _ := Open(filepath.Join(t.TempDir(), "ent.db"))
+	db, _ := open(filepath.Join(t.TempDir(), "ent.db"))
 	t.Cleanup(func() { _ = db.Close() })
 	ctx := context.Background()
 	now := nowRFC()

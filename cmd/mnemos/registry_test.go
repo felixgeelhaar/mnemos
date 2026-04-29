@@ -6,13 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/auth"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
 func TestResolveRegistry_FlagWinsOverEnv(t *testing.T) {
@@ -99,10 +97,7 @@ func TestClaimsToBatches_AttachesEvidenceToFirstBatchOnly(t *testing.T) {
 // with production.
 func newFakeRegistry(t *testing.T) (url string, client *http.Client, token string, closer func()) {
 	t.Helper()
-	regDB, err := sqlite.Open(filepath.Join(t.TempDir(), "registry.db"))
-	if err != nil {
-		t.Fatalf("open registry db: %v", err)
-	}
+	_, regConn := openTestStore(t)
 
 	// Mint a token signed with the same secret TestMain pinned. Using
 	// the env-exposed secret avoids having to plumb bytes through two
@@ -116,7 +111,7 @@ func newFakeRegistry(t *testing.T) (url string, client *http.Client, token strin
 		ID: "usr_pushtest", Name: "push", Email: "push@test.local",
 		Status: domain.UserStatusActive, CreatedAt: time.Now().UTC(),
 	}
-	if err := sqlite.NewUserRepository(regDB).Create(context.Background(), user); err != nil {
+	if err := regConn.Users.Create(context.Background(), user); err != nil {
 		t.Fatalf("seed registry user: %v", err)
 	}
 	jwt, _, err := auth.NewIssuer(secret).IssueUserToken(user, time.Hour)
@@ -124,10 +119,9 @@ func newFakeRegistry(t *testing.T) (url string, client *http.Client, token strin
 		t.Fatalf("issue token: %v", err)
 	}
 
-	srv := httptest.NewServer(newServerMux(connFromDB(t, regDB)))
+	srv := httptest.NewServer(newServerMux(regConn))
 	closer = func() {
 		srv.Close()
-		_ = regDB.Close()
 	}
 	return srv.URL, srv.Client(), jwt, closer
 }
@@ -137,26 +131,23 @@ func TestPushPull_RoundTripsAllResources(t *testing.T) {
 	defer closeReg()
 
 	// Local DB seeded with 1 event, 1 claim, 1 evidence link, 1 relationship.
-	localDB, err := sqlite.Open(filepath.Join(t.TempDir(), "local.db"))
-	if err != nil {
-		t.Fatalf("open local: %v", err)
-	}
-	defer func() { _ = localDB.Close() }()
+	_, localConn := openTestStore(t)
 
 	now := time.Now().UTC()
-	seedEvent(t, localDB, "ev_1", "r1", "Local fact about caching.", "in_1", `{"source":"file"}`, now)
-	seedClaim(t, localDB, "cl_1", "Caching cuts latency by 40%.", "fact", "active", 0.85, now)
-	seedClaim(t, localDB, "cl_2", "We chose Redis over Memcached.", "decision", "active", 0.9, now)
-	if _, err := localDB.Exec(`INSERT INTO claim_evidence VALUES ('cl_1', 'ev_1')`); err != nil {
+	seedEventConn(t, localConn, "ev_1", "r1", "Local fact about caching.", "in_1", `{"source":"file"}`, now)
+	seedClaimConn(t, localConn, "cl_1", "Caching cuts latency by 40%.", "fact", "active", 0.85, now)
+	seedClaimConn(t, localConn, "cl_2", "We chose Redis over Memcached.", "decision", "active", 0.9, now)
+	if err := localConn.Claims.UpsertEvidence(context.Background(), []domain.ClaimEvidence{
+		{ClaimID: "cl_1", EventID: "ev_1"},
+	}); err != nil {
 		t.Fatalf("seed evidence: %v", err)
 	}
-	seedRelationship(t, localDB, "rel_1", "supports", "cl_2", "cl_1", now)
+	seedRelationshipConn(t, localConn, "rel_1", "supports", "cl_2", "cl_1", now)
 
 	ctx := context.Background()
 	client := &http.Client{Timeout: 10 * time.Second}
 
 	// === push ===
-	localConn := connFromDB(t, localDB)
 	events, _ := loadAllEventsForPush(ctx, localConn)
 	claims, evidence, _ := loadAllClaimsForPush(ctx, localConn)
 	rels, _ := loadAllRelationshipsForPush(ctx, localConn)
@@ -172,11 +163,7 @@ func TestPushPull_RoundTripsAllResources(t *testing.T) {
 	}
 
 	// === pull (into a fresh local DB to verify round-trip) ===
-	pullDB, err := sqlite.Open(filepath.Join(t.TempDir(), "pull.db"))
-	if err != nil {
-		t.Fatalf("open pull db: %v", err)
-	}
-	defer func() { _ = pullDB.Close() }()
+	_, pullConn := openTestStore(t)
 
 	pulledEvents, err := pullEvents(ctx, client, regURL, "")
 	if err != nil {
@@ -191,7 +178,6 @@ func TestPushPull_RoundTripsAllResources(t *testing.T) {
 		t.Fatalf("pull relationships: %v", err)
 	}
 
-	pullConn := connFromDB(t, pullDB)
 	if n, _ := persistPulledEvents(ctx, pullConn, pulledEvents); n != 1 {
 		t.Errorf("inserted events = %d, want 1", n)
 	}
@@ -277,31 +263,25 @@ func TestPushPull_EmbeddingsRoundTripBitExact(t *testing.T) {
 	regURL, _, regToken, closeReg := newFakeRegistry(t)
 	defer closeReg()
 
-	localDB, err := sqlite.Open(filepath.Join(t.TempDir(), "local.db"))
-	if err != nil {
-		t.Fatalf("open local: %v", err)
-	}
-	defer func() { _ = localDB.Close() }()
-
 	// Seed two embeddings — one event, one claim — with vectors that include
 	// edge cases: zero, negative, tiny fraction, a value that requires the
 	// full float32 mantissa for round-trip equality.
+	_, localConn := openTestStore(t)
 	now := time.Now().UTC()
-	seedEvent(t, localDB, "ev_emb", "r", "x", "in", `{}`, now)
-	seedClaim(t, localDB, "cl_emb", "x", "fact", "active", 0.7, now)
-	repo := sqlite.NewEmbeddingRepository(localDB)
+	seedEventConn(t, localConn, "ev_emb", "r", "x", "in", `{}`, now)
+	seedClaimConn(t, localConn, "cl_emb", "x", "fact", "active", 0.7, now)
 	ctx := context.Background()
 	v1 := []float32{0.0, -1.5, 0.123456789, 3.14159265, -0.0001}
 	v2 := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0}
-	if err := repo.Upsert(ctx, "ev_emb", "event", v1, "test-model", ""); err != nil {
+	if err := localConn.Embeddings.Upsert(ctx, "ev_emb", "event", v1, "test-model", ""); err != nil {
 		t.Fatalf("upsert v1: %v", err)
 	}
-	if err := repo.Upsert(ctx, "cl_emb", "claim", v2, "test-model", ""); err != nil {
+	if err := localConn.Embeddings.Upsert(ctx, "cl_emb", "claim", v2, "test-model", ""); err != nil {
 		t.Fatalf("upsert v2: %v", err)
 	}
 
 	// === push ===
-	embeddings, err := loadAllEmbeddingsForPush(ctx, connFromDB(t, localDB))
+	embeddings, err := loadAllEmbeddingsForPush(ctx, localConn)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -314,11 +294,7 @@ func TestPushPull_EmbeddingsRoundTripBitExact(t *testing.T) {
 	}
 
 	// === pull into a fresh DB ===
-	pullDB, err := sqlite.Open(filepath.Join(t.TempDir(), "pull.db"))
-	if err != nil {
-		t.Fatalf("open pull: %v", err)
-	}
-	defer func() { _ = pullDB.Close() }()
+	_, pullConn := openTestStore(t)
 
 	pulled, err := pullEmbeddings(ctx, client, regURL, "")
 	if err != nil {
@@ -327,19 +303,23 @@ func TestPushPull_EmbeddingsRoundTripBitExact(t *testing.T) {
 	if len(pulled) != 2 {
 		t.Fatalf("pulled %d, want 2", len(pulled))
 	}
-	if n, err := persistPulledEmbeddings(ctx, connFromDB(t, pullDB), pulled); err != nil || n != 2 {
+	if n, err := persistPulledEmbeddings(ctx, pullConn, pulled); err != nil || n != 2 {
 		t.Fatalf("persist n=%d err=%v", n, err)
 	}
 
 	// === verify bit-exact round trip via the pull DB ===
-	pullRepo := sqlite.NewEmbeddingRepository(pullDB)
-	gotV1, err := pullRepo.GetByEntityID(ctx, "ev_emb", "event")
+	all, err := pullConn.Embeddings.ListAll(ctx)
 	if err != nil {
-		t.Fatalf("get v1: %v", err)
+		t.Fatalf("list all: %v", err)
 	}
-	gotV2, err := pullRepo.GetByEntityID(ctx, "cl_emb", "claim")
-	if err != nil {
-		t.Fatalf("get v2: %v", err)
+	var gotV1, gotV2 domain.EmbeddingRecord
+	for _, e := range all {
+		if e.EntityID == "ev_emb" && e.EntityType == "event" {
+			gotV1 = e
+		}
+		if e.EntityID == "cl_emb" && e.EntityType == "claim" {
+			gotV2 = e
+		}
 	}
 	if !equalFloat32Slice(gotV1.Vector, v1) {
 		t.Errorf("v1 round-trip mismatch:\n  got:  %v\n  want: %v", gotV1.Vector, v1)
@@ -435,17 +415,13 @@ func TestStampPullProvenance_DoesNotOverwriteExistingOrigin(t *testing.T) {
 }
 
 func TestPullEvents_PaginatesUntilExhausted(t *testing.T) {
-	regDB, err := sqlite.Open(filepath.Join(t.TempDir(), "registry.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	defer func() { _ = regDB.Close() }()
+	_, regConn := openTestStore(t)
 	now := time.Now().UTC()
 	for i := 0; i < pullPageSize+30; i++ {
-		seedEvent(t, regDB, "e"+string(rune('a'+i%26))+string(rune('0'+i/26)), "r", "x", "in"+string(rune('a'+i%26)), `{}`, now)
+		seedEventConn(t, regConn, "e"+string(rune('a'+i%26))+string(rune('0'+i/26)), "r", "x", "in"+string(rune('a'+i%26)), `{}`, now)
 	}
 
-	srv := httptest.NewServer(newServerMux(connFromDB(t, regDB)))
+	srv := httptest.NewServer(newServerMux(regConn))
 	defer srv.Close()
 
 	got, err := pullEvents(context.Background(), srv.Client(), srv.URL, "")

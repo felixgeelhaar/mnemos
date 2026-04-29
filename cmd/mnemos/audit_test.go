@@ -2,30 +2,27 @@ package main
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
+	"github.com/felixgeelhaar/mnemos/internal/domain"
 )
 
 func TestBuildAuditExport_IncludesAllResourcesByDefault(t *testing.T) {
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "audit.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	_, conn := openTestStore(t)
 
 	now := time.Now().UTC()
-	seedEvent(t, db, "ev1", "r", "content", "in1", `{"source":"file"}`, now)
-	seedClaim(t, db, "cl1", "claim text", "fact", "active", 0.8, now)
-	if _, err := db.Exec(`INSERT INTO claim_evidence VALUES ('cl1', 'ev1')`); err != nil {
+	seedEventConn(t, conn, "ev1", "r", "content", "in1", `{"source":"file"}`, now)
+	seedClaimConn(t, conn, "cl1", "claim text", "fact", "active", 0.8, now)
+	if err := conn.Claims.UpsertEvidence(context.Background(), []domain.ClaimEvidence{
+		{ClaimID: "cl1", EventID: "ev1"},
+	}); err != nil {
 		t.Fatalf("seed evidence: %v", err)
 	}
-	seedClaim(t, db, "cl2", "another", "fact", "active", 0.7, now)
-	seedRelationship(t, db, "r1", "supports", "cl1", "cl2", now)
+	seedClaimConn(t, conn, "cl2", "another", "fact", "active", 0.7, now)
+	seedRelationshipConn(t, conn, "r1", "supports", "cl1", "cl2", now)
 
-	exp, err := buildAuditExport(context.Background(), connFromDB(t, db), "/tmp/test.db", false)
+	exp, err := buildAuditExport(context.Background(), conn, "/tmp/test.db", false)
 	if err != nil {
 		t.Fatalf("buildAuditExport: %v", err)
 	}
@@ -49,20 +46,15 @@ func TestBuildAuditExport_IncludesAllResourcesByDefault(t *testing.T) {
 }
 
 func TestBuildAuditExport_IncludesEmbeddingsOnRequest(t *testing.T) {
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "audit.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	_, conn := openTestStore(t)
 
 	now := time.Now().UTC()
-	seedEvent(t, db, "ev1", "r", "x", "in1", `{}`, now)
-	repo := sqlite.NewEmbeddingRepository(db)
-	if err := repo.Upsert(context.Background(), "ev1", "event", []float32{0.1, 0.2, 0.3}, "test-model", ""); err != nil {
+	seedEventConn(t, conn, "ev1", "r", "x", "in1", `{}`, now)
+	if err := conn.Embeddings.Upsert(context.Background(), "ev1", "event", []float32{0.1, 0.2, 0.3}, "test-model", ""); err != nil {
 		t.Fatalf("seed embedding: %v", err)
 	}
 
-	exp, err := buildAuditExport(context.Background(), connFromDB(t, db), "/tmp/test.db", true)
+	exp, err := buildAuditExport(context.Background(), conn, "/tmp/test.db", true)
 	if err != nil {
 		t.Fatalf("buildAuditExport: %v", err)
 	}
@@ -75,13 +67,9 @@ func TestBuildAuditExport_IncludesEmbeddingsOnRequest(t *testing.T) {
 }
 
 func TestBuildAuditExport_EmptyDBYieldsZeroCounts(t *testing.T) {
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "audit.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	_, conn := openTestStore(t)
 
-	exp, err := buildAuditExport(context.Background(), connFromDB(t, db), "/tmp/empty.db", false)
+	exp, err := buildAuditExport(context.Background(), conn, "/tmp/empty.db", false)
 	if err != nil {
 		t.Fatalf("buildAuditExport: %v", err)
 	}

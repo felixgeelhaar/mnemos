@@ -3,11 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
 func TestPRRecord_ParsesGhJsonShape(t *testing.T) {
@@ -88,11 +85,7 @@ func TestBuildPREvent_TitleOnlyWhenBodyEmpty(t *testing.T) {
 }
 
 func TestExistingGitPRNumbers_LoadsFromMetadata(t *testing.T) {
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db, _ := openTestStore(t)
 
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx,

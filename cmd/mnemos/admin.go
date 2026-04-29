@@ -3,19 +3,16 @@ package main
 import (
 	"bufio"
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
-	"strings"
-
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/embedding"
 	"github.com/felixgeelhaar/mnemos/internal/pipeline"
 	"github.com/felixgeelhaar/mnemos/internal/ports"
 	"github.com/felixgeelhaar/mnemos/internal/store"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
 	"github.com/felixgeelhaar/mnemos/internal/trust"
 	"github.com/felixgeelhaar/mnemos/internal/workflow"
 )
@@ -56,11 +53,7 @@ func handleReset(args []string, f Flags) {
 	}
 
 	err := runJob("reset", map[string]string{"keep_events": fmt.Sprintf("%t", keepEvents)}, f.Verbose, func(ctx context.Context, _ *workflow.Job, conn *store.Conn) error {
-		db, err := connDB(conn)
-		if err != nil {
-			return err
-		}
-		counts, err := resetDB(ctx, db, keepEvents)
+		counts, err := resetStore(ctx, conn, keepEvents)
 		if err != nil {
 			return NewSystemError(err, "reset failed")
 		}
@@ -78,40 +71,24 @@ func handleDeleteClaim(args []string, f Flags) {
 	}
 
 	err := runJob("delete-claim", map[string]string{"ids": strings.Join(args, ",")}, f.Verbose, func(ctx context.Context, _ *workflow.Job, conn *store.Conn) error {
-		db, err := connDB(conn)
-		if err != nil {
-			return err
-		}
-		var deletedClaims, deletedRels, deletedEvidence int64
-		err = withTx(ctx, db, func(q *sqlcgen.Queries) error {
-			for _, id := range args {
-				if err := q.DeleteRelationshipsByClaimID(ctx, sqlcgen.DeleteRelationshipsByClaimIDParams{
-					FromClaimID: id, ToClaimID: id,
-				}); err != nil {
-					return fmt.Errorf("delete relationships for %s: %w", id, err)
-				}
-				deletedRels++
-				if err := q.DeleteClaimEvidenceByClaimID(ctx, id); err != nil {
-					return fmt.Errorf("delete evidence for %s: %w", id, err)
-				}
-				deletedEvidence++
-				if err := q.DeleteClaimStatusHistoryByClaimID(ctx, id); err != nil {
-					return fmt.Errorf("delete status history for %s: %w", id, err)
-				}
-				if err := q.DeleteEmbeddingByEntity(ctx, sqlcgen.DeleteEmbeddingByEntityParams{
-					EntityID: id, EntityType: "claim",
-				}); err != nil {
-					return fmt.Errorf("delete embedding for %s: %w", id, err)
-				}
-				if err := q.DeleteClaimByID(ctx, id); err != nil {
-					return fmt.Errorf("delete claim %s: %w", id, err)
-				}
-				deletedClaims++
+		var deletedClaims int64
+		// Per-claim orchestration through ports: drop the touching
+		// relationships first, then the claim's embedding, then
+		// cascade the claim itself (which removes claim_evidence
+		// and claim_status_history). Cross-repo atomicity is
+		// best-effort; a partial failure leaves the store in a
+		// recoverable state and surfaces via `mnemos doctor`.
+		for _, id := range args {
+			if err := conn.Relationships.DeleteByClaim(ctx, id); err != nil {
+				return NewSystemError(err, "delete relationships for %s", id)
 			}
-			return nil
-		})
-		if err != nil {
-			return NewSystemError(err, "delete-claim failed")
+			if err := conn.Embeddings.Delete(ctx, id, "claim"); err != nil {
+				return NewSystemError(err, "delete embedding for %s", id)
+			}
+			if err := conn.Claims.DeleteCascade(ctx, id); err != nil {
+				return NewSystemError(err, "delete claim %s", id)
+			}
+			deletedClaims++
 		}
 		fmt.Printf("Deleted %d claim(s) and their evidence/embeddings/relationships.\n", deletedClaims)
 		return nil
@@ -127,55 +104,32 @@ func handleDeleteEvent(args []string, f Flags) {
 	}
 
 	err := runJob("delete-event", map[string]string{"ids": strings.Join(args, ",")}, f.Verbose, func(ctx context.Context, _ *workflow.Job, conn *store.Conn) error {
-		db, err := connDB(conn)
-		if err != nil {
-			return err
-		}
-		var deletedEvents int64
-		var cascadedClaims int64
-		err = withTx(ctx, db, func(q *sqlcgen.Queries) error {
-			for _, id := range args {
-				// Cascade through dependent claims first.
-				claimIDs, err := q.ListClaimsByEventID(ctx, id)
-				if err != nil {
-					return fmt.Errorf("list claims for event %s: %w", id, err)
-				}
-				for _, cid := range claimIDs {
-					if err := q.DeleteRelationshipsByClaimID(ctx, sqlcgen.DeleteRelationshipsByClaimIDParams{
-						FromClaimID: cid, ToClaimID: cid,
-					}); err != nil {
-						return err
-					}
-					if err := q.DeleteClaimEvidenceByClaimID(ctx, cid); err != nil {
-						return err
-					}
-					if err := q.DeleteClaimStatusHistoryByClaimID(ctx, cid); err != nil {
-						return err
-					}
-					if err := q.DeleteEmbeddingByEntity(ctx, sqlcgen.DeleteEmbeddingByEntityParams{
-						EntityID: cid, EntityType: "claim",
-					}); err != nil {
-						return err
-					}
-					if err := q.DeleteClaimByID(ctx, cid); err != nil {
-						return err
-					}
-					cascadedClaims++
-				}
-				if err := q.DeleteEmbeddingByEntity(ctx, sqlcgen.DeleteEmbeddingByEntityParams{
-					EntityID: id, EntityType: "event",
-				}); err != nil {
-					return err
-				}
-				if err := q.DeleteEventByID(ctx, id); err != nil {
-					return fmt.Errorf("delete event %s: %w", id, err)
-				}
-				deletedEvents++
+		var deletedEvents, cascadedClaims int64
+		for _, id := range args {
+			// Cascade through dependent claims first.
+			dependent, err := conn.Claims.ListByEventIDs(ctx, []string{id})
+			if err != nil {
+				return NewSystemError(err, "list dependent claims for %s", id)
 			}
-			return nil
-		})
-		if err != nil {
-			return NewSystemError(err, "delete-event failed")
+			for _, c := range dependent {
+				if err := conn.Relationships.DeleteByClaim(ctx, c.ID); err != nil {
+					return NewSystemError(err, "delete relationships for %s", c.ID)
+				}
+				if err := conn.Embeddings.Delete(ctx, c.ID, "claim"); err != nil {
+					return NewSystemError(err, "delete claim embedding %s", c.ID)
+				}
+				if err := conn.Claims.DeleteCascade(ctx, c.ID); err != nil {
+					return NewSystemError(err, "delete claim %s", c.ID)
+				}
+				cascadedClaims++
+			}
+			if err := conn.Embeddings.Delete(ctx, id, "event"); err != nil {
+				return NewSystemError(err, "delete event embedding %s", id)
+			}
+			if err := conn.Events.DeleteByID(ctx, id); err != nil {
+				return NewSystemError(err, "delete event %s", id)
+			}
+			deletedEvents++
 		}
 		fmt.Printf("Deleted %d event(s); cascaded %d claim(s).\n", deletedEvents, cascadedClaims)
 		return nil
@@ -314,24 +268,21 @@ func handleReembed(args []string, f Flags) {
 	}
 
 	err := runJob("reembed", map[string]string{"force": fmt.Sprintf("%t", f.Force), "dry_run": fmt.Sprintf("%t", f.DryRun)}, f.Verbose, func(ctx context.Context, _ *workflow.Job, conn *store.Conn) error {
-		db, err := connDB(conn)
-		if err != nil {
-			return err
-		}
-		q := sqlcgen.New(db)
-
-		// Determine which claim ids need (re-)embedding.
+		// Determine which claim ids need (re-)embedding through
+		// ports — Claims.ListAll for --force, the dedicated
+		// ListIDsMissingEmbedding anti-join otherwise.
 		var ids []string
+		allClaims, err := conn.Claims.ListAll(ctx)
+		if err != nil {
+			return NewSystemError(err, "list claims")
+		}
 		if f.Force {
-			rows, err := q.ListAllClaims(ctx)
-			if err != nil {
-				return NewSystemError(err, "list claims")
-			}
-			for _, r := range rows {
-				ids = append(ids, r.ID)
+			ids = make([]string, 0, len(allClaims))
+			for _, c := range allClaims {
+				ids = append(ids, c.ID)
 			}
 		} else {
-			missing, err := q.ListEntityIDsMissingEmbedding(ctx)
+			missing, err := conn.Claims.ListIDsMissingEmbedding(ctx)
 			if err != nil {
 				return NewSystemError(err, "list missing embeddings")
 			}
@@ -348,11 +299,6 @@ func handleReembed(args []string, f Flags) {
 			return nil
 		}
 
-		// Build the text-by-id map.
-		allClaims, err := q.ListAllClaims(ctx)
-		if err != nil {
-			return NewSystemError(err, "load claim text")
-		}
 		text := make(map[string]string, len(allClaims))
 		for _, c := range allClaims {
 			text[c.ID] = c.Text
@@ -399,57 +345,64 @@ func handleReembed(args []string, f Flags) {
 	exitWithMnemosError(f.Verbose, err)
 }
 
-// resetDB deletes all derived state (and optionally events) inside a single
-// transaction. Returns row counts via a separate read pass before deleting
-// so the user-facing summary is accurate.
-func resetDB(ctx context.Context, db *sql.DB, keepEvents bool) (resetCounts, error) {
+// resetStore deletes all derived state (and optionally events) through
+// port-typed repositories. The underlying providers each implement
+// DeleteAll atomically within their own table; cross-repository
+// atomicity is best-effort — a partial failure is recoverable via
+// `mnemos doctor` and a re-run.
+//
+// Counts are read before the deletes so the user-facing summary
+// reflects what was actually removed. ListAllEvidence /
+// ListAllStatusHistory are used for evidence + status_history counts
+// because the port surface doesn't expose dedicated counters for
+// those tables and the cardinality is bounded by the claim count.
+func resetStore(ctx context.Context, conn *store.Conn, keepEvents bool) (resetCounts, error) {
 	var counts resetCounts
+	var err error
 
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM claims").Scan(&counts.Claims); err != nil {
+	if counts.Claims, err = conn.Claims.CountAll(ctx); err != nil {
 		return counts, fmt.Errorf("count claims: %w", err)
 	}
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM claim_evidence").Scan(&counts.Evidence); err != nil {
-		return counts, fmt.Errorf("count evidence: %w", err)
+	evidence, err := conn.Claims.ListAllEvidence(ctx)
+	if err != nil {
+		return counts, fmt.Errorf("list claim evidence: %w", err)
 	}
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM claim_status_history").Scan(&counts.StatusHistory); err != nil {
-		return counts, fmt.Errorf("count status history: %w", err)
+	counts.Evidence = int64(len(evidence))
+	history, err := conn.Claims.ListAllStatusHistory(ctx)
+	if err != nil {
+		return counts, fmt.Errorf("list status history: %w", err)
 	}
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM relationships").Scan(&counts.Relationships); err != nil {
+	counts.StatusHistory = int64(len(history))
+	if counts.Relationships, err = conn.Relationships.CountAll(ctx); err != nil {
 		return counts, fmt.Errorf("count relationships: %w", err)
 	}
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM embeddings").Scan(&counts.Embeddings); err != nil {
+	if counts.Embeddings, err = conn.Embeddings.CountAll(ctx); err != nil {
 		return counts, fmt.Errorf("count embeddings: %w", err)
 	}
 	if !keepEvents {
-		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM events").Scan(&counts.Events); err != nil {
+		if counts.Events, err = conn.Events.CountAll(ctx); err != nil {
 			return counts, fmt.Errorf("count events: %w", err)
 		}
 	}
 
-	err := withTx(ctx, db, func(q *sqlcgen.Queries) error {
-		if err := q.DeleteAllRelationships(ctx); err != nil {
-			return err
+	// Order matters under FK enforcement: relationships and
+	// embeddings (which reference claims/events) go first; claims
+	// (which include claim_evidence) next; events last.
+	if err := conn.Relationships.DeleteAll(ctx); err != nil {
+		return counts, fmt.Errorf("delete relationships: %w", err)
+	}
+	if err := conn.Embeddings.DeleteAll(ctx); err != nil {
+		return counts, fmt.Errorf("delete embeddings: %w", err)
+	}
+	if err := conn.Claims.DeleteAll(ctx); err != nil {
+		return counts, fmt.Errorf("delete claims: %w", err)
+	}
+	if !keepEvents {
+		if err := conn.Events.DeleteAll(ctx); err != nil {
+			return counts, fmt.Errorf("delete events: %w", err)
 		}
-		if err := q.DeleteAllClaimEvidence(ctx); err != nil {
-			return err
-		}
-		if err := q.DeleteAllClaimStatusHistory(ctx); err != nil {
-			return err
-		}
-		if err := q.DeleteAllEmbeddings(ctx); err != nil {
-			return err
-		}
-		if err := q.DeleteAllClaims(ctx); err != nil {
-			return err
-		}
-		if !keepEvents {
-			if err := q.DeleteAllEvents(ctx); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	return counts, err
+	}
+	return counts, nil
 }
 
 func printResetSummary(c resetCounts, keepEvents bool) {
@@ -466,22 +419,6 @@ func printResetSummary(c resetCounts, keepEvents bool) {
 	}
 }
 
-// withTx runs fn inside a transaction. Commits on success, rolls back on
-// any error. Caller passes a sqlcgen.Queries bound to the tx.
-func withTx(ctx context.Context, db *sql.DB, fn func(*sqlcgen.Queries) error) error {
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	q := sqlcgen.New(tx)
-	if err := fn(q); err != nil {
-		if rbErr := tx.Rollback(); rbErr != nil {
-			return fmt.Errorf("%w (rollback also failed: %v)", err, rbErr)
-		}
-		return err
-	}
-	return tx.Commit()
-}
 
 func confirm(prompt string) bool {
 	fmt.Printf("%s [y/N]: ", prompt)

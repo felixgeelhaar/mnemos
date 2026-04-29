@@ -119,6 +119,26 @@ func (r EventRepository) CountAll(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
+// DeleteByID removes the event with the given id. Idempotent.
+func (r EventRepository) DeleteByID(ctx context.Context, id string) error {
+	if _, err := r.db.ExecContext(ctx, fmt.Sprintf(
+		`DELETE FROM %s WHERE id = $1`, qualify(r.ns, "events"),
+	), id); err != nil {
+		return fmt.Errorf("delete event %s: %w", id, err)
+	}
+	return nil
+}
+
+// DeleteAll wipes the events table.
+func (r EventRepository) DeleteAll(ctx context.Context) error {
+	if _, err := r.db.ExecContext(ctx, fmt.Sprintf(
+		`DELETE FROM %s`, qualify(r.ns, "events"),
+	)); err != nil {
+		return fmt.Errorf("delete all events: %w", err)
+	}
+	return nil
+}
+
 // ListByRunID returns every event tagged with the given run id.
 func (r EventRepository) ListByRunID(ctx context.Context, runID string) ([]domain.Event, error) {
 	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`

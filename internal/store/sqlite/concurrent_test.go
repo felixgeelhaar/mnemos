@@ -17,7 +17,7 @@ import (
 // busy_timeout PRAGMA is doing its job and that the schema's
 // constraint enforcement is per-row, not per-table-lock.
 func TestConcurrentUserCreation(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "concurrent.db"))
+	db, err := open(filepath.Join(t.TempDir(), "concurrent.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestConcurrentUserCreation(t *testing.T) {
 // race to insert the same email, exactly one wins, regardless of
 // which user id wins.
 func TestConcurrentDuplicateEmailRejected(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "dup.db"))
+	db, err := open(filepath.Join(t.TempDir(), "dup.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestConcurrentDuplicateEmailRejected(t *testing.T) {
 // repository's ON CONFLICT semantics should make this safe and
 // idempotent rather than failing the second writer.
 func TestConcurrentRevokedTokenAdd(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "rev.db"))
+	db, err := open(filepath.Join(t.TempDir(), "rev.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

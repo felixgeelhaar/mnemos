@@ -7,13 +7,11 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
-
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
 func TestHealth_DefaultIsShallow(t *testing.T) {
-	db := newServerTestDB(t)
-	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
+	_, conn := openTestStore(t)
+	srv := httptest.NewServer(newServerMux(conn))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/health")
@@ -42,8 +40,8 @@ func TestHealth_DeepIncludesDBProbe(t *testing.T) {
 	t.Setenv("MNEMOS_LLM_PROVIDER", "")
 	t.Setenv("MNEMOS_EMBED_PROVIDER", "")
 
-	db := newServerTestDB(t)
-	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
+	_, conn := openTestStore(t)
+	srv := httptest.NewServer(newServerMux(conn))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/health?deep=true")
@@ -74,10 +72,7 @@ func TestHealth_DeepIncludesDBProbe(t *testing.T) {
 }
 
 func TestRunHealthChecks_DBFailureReportsAsFailed(t *testing.T) {
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "h.db"))
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
+	db, _ := openTestStore(t)
 	// Close the DB so the probe transaction fails.
 	_ = db.Close()
 

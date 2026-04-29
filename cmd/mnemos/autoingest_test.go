@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
-
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
 func writeFile(t *testing.T, path, content string) {
@@ -98,12 +96,7 @@ func TestDiscoverProjectDocs_EmptyRoot(t *testing.T) {
 }
 
 func TestExistingSourcePaths_LoadsFromMetadata(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "mnemos.db")
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db, _ := openTestStore(t)
 
 	ctx := context.Background()
 	if _, err := db.ExecContext(ctx,

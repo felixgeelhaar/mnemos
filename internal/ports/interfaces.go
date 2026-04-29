@@ -19,6 +19,19 @@ type EventRepository interface {
 	// federation push/pull path to compute "newly inserted" deltas
 	// without a per-row RowsAffected probe.
 	CountAll(ctx context.Context) (int64, error)
+
+	// DeleteByID removes the event with the given id. Idempotent —
+	// deleting a non-existent event is a no-op. The caller is
+	// responsible for cleaning up dependent rows (claim_evidence
+	// links, claim cascade, embeddings) — DeleteByID does not
+	// reach across repository boundaries.
+	DeleteByID(ctx context.Context, id string) error
+
+	// DeleteAll wipes every event row. Used by `mnemos reset`.
+	// Foreign-key-dependent rows (claim_evidence) must be cleaned
+	// up by the caller first; on backends that enforce FKs this
+	// will error otherwise.
+	DeleteAll(ctx context.Context) error
 }
 
 // ClaimRepository persists and retrieves extracted claims.
@@ -68,6 +81,18 @@ type ClaimRepository interface {
 	// Used by `mnemos audit who` to attribute transitions to a
 	// principal — filtering happens in the caller.
 	ListAllStatusHistory(ctx context.Context) ([]domain.ClaimStatusTransition, error)
+
+	// DeleteAll wipes claims plus their dependent rows (claim_evidence,
+	// claim_status_history). The caller is responsible for clearing
+	// rows owned by other repositories (relationships pointing at
+	// claims, embeddings keyed on claim id) — DeleteAll does not
+	// reach across repository boundaries.
+	DeleteAll(ctx context.Context) error
+
+	// ListIDsMissingEmbedding returns the claim ids that have no
+	// row in the embeddings table for entity_type='claim'. Used by
+	// `mnemos reembed` to scope the work to claims that need it.
+	ListIDsMissingEmbedding(ctx context.Context) ([]string, error)
 }
 
 // TrustScorer is the optional capability to recompute and aggregate
@@ -109,6 +134,9 @@ type RelationshipRepository interface {
 	// ListAll returns every relationship stored, ordered by
 	// created_at ascending.
 	ListAll(ctx context.Context) ([]domain.Relationship, error)
+
+	// DeleteAll wipes every relationship row.
+	DeleteAll(ctx context.Context) error
 }
 
 // ExtractionEngine extracts structured claims from domain events.
@@ -142,6 +170,9 @@ type EmbeddingRepository interface {
 	// ascending. Used by the federation push path to dump the
 	// embedding table without per-type query plumbing.
 	ListAll(ctx context.Context) ([]domain.EmbeddingRecord, error)
+
+	// DeleteAll wipes every embedding row.
+	DeleteAll(ctx context.Context) error
 }
 
 // TextHit is one row of a keyword search: the matched row's id and a

@@ -258,6 +258,31 @@ func (r ClaimRepository) ListAllEvidence(_ context.Context) ([]domain.ClaimEvide
 	return out, nil
 }
 
+// DeleteAll wipes claims plus their owned dependent rows.
+func (r ClaimRepository) DeleteAll(_ context.Context) error {
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	r.state.claims = map[string]storedClaim{}
+	r.state.claimOrder = nil
+	r.state.evidence = map[string]map[string]struct{}{}
+	r.state.statusHistory = map[string][]storedTransition{}
+	return nil
+}
+
+// ListIDsMissingEmbedding returns claim ids without an embedding row.
+func (r ClaimRepository) ListIDsMissingEmbedding(_ context.Context) ([]string, error) {
+	r.state.mu.RLock()
+	defer r.state.mu.RUnlock()
+	out := make([]string, 0)
+	for _, id := range r.state.claimOrder {
+		key := embeddingKey{EntityID: id, EntityType: "claim"}
+		if _, ok := r.state.embeddings[key]; !ok {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
 // ListAllStatusHistory returns every status transition across all
 // claims. Order: per-claim insertion order, claims interleaved by
 // transition timestamp.

@@ -21,14 +21,14 @@ func init() {
 }
 
 // openProvider parses a sqlite[3]:// DSN, opens the underlying database
-// via the existing [Open] function, and bundles every port-typed
+// via the existing [open] function, and bundles every port-typed
 // repository into a [store.Conn].
 func openProvider(_ context.Context, dsn string) (*store.Conn, error) {
 	path, err := pathFromDSN(dsn)
 	if err != nil {
 		return nil, err
 	}
-	db, err := Open(path)
+	db, err := open(path)
 	if err != nil {
 		return nil, err
 	}

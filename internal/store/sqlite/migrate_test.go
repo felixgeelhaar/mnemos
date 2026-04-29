@@ -11,7 +11,7 @@ import (
 // TestMigrate_AddsCreatedByOnLegacyV05Schema reproduces the v0.5.1 →
 // v0.6.0 upgrade path that issue #20 surfaced: an existing DB whose
 // events/claims/relationships/embeddings tables predate the auth
-// columns. After Open() runs migrate(), every previously-missing
+// columns. After open() runs migrate(), every previously-missing
 // column should be present and an INSERT exercising created_by must
 // succeed.
 func TestMigrate_AddsCreatedByOnLegacyV05Schema(t *testing.T) {
@@ -75,7 +75,7 @@ CREATE TABLE claim_status_history (
 	}
 
 	// Open via the production path, which should migrate.
-	db, err := Open(path)
+	db, err := open(path)
 	if err != nil {
 		t.Fatalf("Open after legacy seed: %v", err)
 	}
@@ -111,7 +111,7 @@ CREATE TABLE claim_status_history (
 }
 
 func TestMigrate_IsIdempotentOnFreshDB(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "fresh.db"))
+	db, err := open(filepath.Join(t.TempDir(), "fresh.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}

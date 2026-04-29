@@ -146,6 +146,14 @@ func (r RelationshipRepository) CountByType(_ context.Context, relType string) (
 	return n, nil
 }
 
+// DeleteAll wipes the relationships map.
+func (r RelationshipRepository) DeleteAll(_ context.Context) error {
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	r.state.relationships = map[string]storedRelationship{}
+	return nil
+}
+
 // ListAll returns every relationship stored, ordered by created_at
 // ascending (matching SQLite).
 func (r RelationshipRepository) ListAll(_ context.Context) ([]domain.Relationship, error) {

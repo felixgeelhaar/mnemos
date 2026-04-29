@@ -69,6 +69,14 @@ func (r EmbeddingRepository) CountAll(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
+// DeleteAll wipes the embeddings table.
+func (r EmbeddingRepository) DeleteAll(ctx context.Context) error {
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM embeddings`); err != nil {
+		return fmt.Errorf("delete all embeddings: %w", err)
+	}
+	return nil
+}
+
 // ListAll returns every embedding row ordered by created_at ascending.
 func (r EmbeddingRepository) ListAll(ctx context.Context) ([]domain.EmbeddingRecord, error) {
 	rows, err := r.db.QueryContext(ctx, `

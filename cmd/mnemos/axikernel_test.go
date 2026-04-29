@@ -9,8 +9,6 @@ import (
 	"github.com/felixgeelhaar/axi-go"
 	"github.com/felixgeelhaar/axi-go/domain"
 	"github.com/felixgeelhaar/bolt"
-
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
 func TestBuildMCPKernel_RegistersAllMCPTools(t *testing.T) {
@@ -89,14 +87,8 @@ func TestKernel_KnowledgeMetricsThroughKernel(t *testing.T) {
 // action through the kernel and verifies the resulting session's
 // evidence chain hashes are populated and consistent.
 func TestKernel_ProcessTextEvidenceChainIntact(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "mnemos.db")
-	t.Setenv("MNEMOS_DB_URL", "sqlite://"+dbPath)
-	// Open the DB once so the schema is created before the kernel runs.
-	db, err := sqlite.Open(dbPath)
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	// Ensure the DB schema exists before the kernel lazily opens it.
+	openTestStore(t)
 
 	logger := bolt.New(bolt.NewJSONHandler(os.Stderr))
 	kernel, err := buildMCPKernel(logger, mcpExecutorMap("", func() (*Watcher, error) { return nil, nil }))

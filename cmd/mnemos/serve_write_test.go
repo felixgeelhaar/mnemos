@@ -8,13 +8,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/auth"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 )
 
 // setupJWTTestEnv wires a per-test JWT secret so newServerMux boots a
@@ -50,9 +49,9 @@ func issueTestToken(t *testing.T, secret []byte, userID string) string {
 }
 
 // seedUser persists a user so tests can verify user_id → created_by.
-func seedUser(t *testing.T, db *sql.DB, id string) {
+func seedUser(t *testing.T, conn *store.Conn, id string) {
 	t.Helper()
-	err := sqlite.NewUserRepository(db).Create(context.Background(), domain.User{
+	err := conn.Users.Create(context.Background(), domain.User{
 		ID:        id,
 		Name:      id,
 		Email:     id + "@test.local",
@@ -68,6 +67,7 @@ func seedUser(t *testing.T, db *sql.DB, id string) {
 // per-test JWT secret wired in, and a ready Authorization header.
 type serveJWTBase struct {
 	DB    *sql.DB
+	Conn  *store.Conn
 	Srv   *httptest.Server
 	Auth  map[string]string
 	Actor string
@@ -76,16 +76,13 @@ type serveJWTBase struct {
 func newServeJWTTest(t *testing.T) serveJWTBase {
 	t.Helper()
 	secret, _ := setupJWTTestEnv(t)
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	seedUser(t, db, "usr_writer")
-	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
+	db, conn := openTestStore(t)
+	seedUser(t, conn, "usr_writer")
+	srv := httptest.NewServer(newServerMux(conn))
 	t.Cleanup(srv.Close)
 	return serveJWTBase{
 		DB:    db,
+		Conn:  conn,
 		Srv:   srv,
 		Auth:  map[string]string{"Authorization": issueTestToken(t, secret, "usr_writer")},
 		Actor: "usr_writer",
@@ -221,7 +218,7 @@ func TestServe_AppendClaims_PersistsAndCanBeListed(t *testing.T) {
 
 	now := time.Now().UTC()
 	// Need an event for the evidence link FK to resolve.
-	seedEvent(t, st.DB, "ev_for_claim", "r1", "context", "in_e", `{}`, now)
+	seedEventConn(t, st.Conn, "ev_for_claim", "r1", "context", "in_e", `{}`, now)
 
 	body := map[string]any{
 		"claims": []map[string]any{
@@ -283,8 +280,8 @@ func TestServe_AppendRelationships_PersistsCorrectly(t *testing.T) {
 	st := newServeJWTTest(t)
 
 	now := time.Now().UTC()
-	seedClaim(t, st.DB, "c-from", "a", "fact", "active", 0.8, now)
-	seedClaim(t, st.DB, "c-to", "b", "fact", "active", 0.8, now)
+	seedClaimConn(t, st.Conn, "c-from", "a", "fact", "active", 0.8, now)
+	seedClaimConn(t, st.Conn, "c-to", "b", "fact", "active", 0.8, now)
 
 	body := map[string]any{
 		"relationships": []map[string]any{
@@ -353,12 +350,8 @@ func TestServe_Auth_RejectsBadSignature(t *testing.T) {
 
 func TestServe_Auth_RejectsRevokedJTI(t *testing.T) {
 	secret, _ := setupJWTTestEnv(t)
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	seedUser(t, db, "usr_revoked")
+	_, conn := openTestStore(t)
+	seedUser(t, conn, "usr_revoked")
 
 	user := domain.User{ID: "usr_revoked", Name: "r", Email: "r@test.local", Status: domain.UserStatusActive, CreatedAt: time.Now().UTC()}
 	tok, jti, err := auth.NewIssuer(secret).IssueUserToken(user, time.Hour)
@@ -366,13 +359,13 @@ func TestServe_Auth_RejectsRevokedJTI(t *testing.T) {
 		t.Fatalf("issue: %v", err)
 	}
 	// Drop the JTI on the denylist before the mux consults it.
-	if err := sqlite.NewRevokedTokenRepository(db).Add(context.Background(), domain.RevokedToken{
+	if err := conn.RevokedTokens.Add(context.Background(), domain.RevokedToken{
 		JTI: jti, RevokedAt: time.Now().UTC(), ExpiresAt: time.Now().Add(24 * time.Hour),
 	}); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 
-	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
+	srv := httptest.NewServer(newServerMux(conn))
 	defer srv.Close()
 
 	resp := postJSON(t, srv.URL+"/v1/events",
@@ -403,12 +396,8 @@ func TestServe_Auth_ReadsAlwaysAllowed(t *testing.T) {
 // relationships, or embeddings — that's the whole point of governance.
 func TestServe_Auth_AgentScopeEnforcement(t *testing.T) {
 	secret, _ := setupJWTTestEnv(t)
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
+	_, conn := openTestStore(t)
+	srv := httptest.NewServer(newServerMux(conn))
 	defer srv.Close()
 
 	// Mint a narrow agent token (events:write only).
@@ -459,12 +448,8 @@ func TestServe_Auth_AgentScopeEnforcement(t *testing.T) {
 // with empty Runs (the legacy default) writes every run.
 func TestServe_Auth_AgentRunWhitelist(t *testing.T) {
 	secret, _ := setupJWTTestEnv(t)
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
+	_, conn := openTestStore(t)
+	srv := httptest.NewServer(newServerMux(conn))
 	defer srv.Close()
 
 	// Agent restricted to one run.
@@ -526,12 +511,8 @@ func TestServe_Auth_AgentRunWhitelist(t *testing.T) {
 // the whole batch fail before any row lands in the DB.
 func TestServe_Auth_AgentRunWhitelist_BatchAllOrNothing(t *testing.T) {
 	secret, _ := setupJWTTestEnv(t)
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
+	db, conn := openTestStore(t)
+	srv := httptest.NewServer(newServerMux(conn))
 	defer srv.Close()
 
 	tok, _, err := auth.NewIssuer(secret).IssueAgentTokenWithScopesAndRuns(
@@ -570,17 +551,13 @@ func TestServe_Auth_AgentRunWhitelist_BatchAllOrNothing(t *testing.T) {
 // pre-check happens before any DB write.
 func TestServe_Auth_AgentRunWhitelist_BlocksClaimsWithCrossRunEvidence(t *testing.T) {
 	secret, _ := setupJWTTestEnv(t)
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
+	db, conn := openTestStore(t)
+	srv := httptest.NewServer(newServerMux(conn))
 	defer srv.Close()
 
 	// Seed an event in a run the agent shouldn't be able to touch.
 	now := time.Now().UTC()
-	seedEvent(t, db, "ev_other", "run-other", "x", "in", `{}`, now)
+	seedEventConn(t, conn, "ev_other", "run-other", "x", "in", `{}`, now)
 
 	tok, _, err := auth.NewIssuer(secret).IssueAgentTokenWithScopesAndRuns(
 		"agt_scoped",
@@ -622,20 +599,16 @@ func TestServe_Auth_AgentRunWhitelist_BlocksClaimsWithCrossRunEvidence(t *testin
 // from events in allowed runs.
 func TestServe_Auth_AgentRunWhitelist_BlocksRelationshipWithCrossRunClaim(t *testing.T) {
 	secret, _ := setupJWTTestEnv(t)
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
+	db, conn := openTestStore(t)
+	srv := httptest.NewServer(newServerMux(conn))
 	defer srv.Close()
 
 	now := time.Now().UTC()
 	// Two events, two runs.
-	seedEvent(t, db, "ev_mine", "run-mine", "x", "i1", `{}`, now)
-	seedEvent(t, db, "ev_other", "run-other", "x", "i2", `{}`, now)
-	seedClaim(t, db, "cl_mine", "x", "fact", "active", 0.8, now)
-	seedClaim(t, db, "cl_other", "x", "fact", "active", 0.8, now)
+	seedEventConn(t, conn, "ev_mine", "run-mine", "x", "i1", `{}`, now)
+	seedEventConn(t, conn, "ev_other", "run-other", "x", "i2", `{}`, now)
+	seedClaimConn(t, conn, "cl_mine", "x", "fact", "active", 0.8, now)
+	seedClaimConn(t, conn, "cl_other", "x", "fact", "active", 0.8, now)
 	if _, err := db.Exec(`INSERT INTO claim_evidence VALUES ('cl_mine','ev_mine'), ('cl_other','ev_other')`); err != nil {
 		t.Fatalf("seed evidence: %v", err)
 	}
@@ -666,16 +639,12 @@ func TestServe_Auth_AgentRunWhitelist_BlocksRelationshipWithCrossRunClaim(t *tes
 // event is forbidden.
 func TestServe_Auth_AgentRunWhitelist_BlocksEmbeddingForCrossRunEvent(t *testing.T) {
 	secret, _ := setupJWTTestEnv(t)
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
+	_, conn := openTestStore(t)
+	srv := httptest.NewServer(newServerMux(conn))
 	defer srv.Close()
 
 	now := time.Now().UTC()
-	seedEvent(t, db, "ev_other", "run-other", "x", "in", `{}`, now)
+	seedEventConn(t, conn, "ev_other", "run-other", "x", "in", `{}`, now)
 
 	tok, _, err := auth.NewIssuer(secret).IssueAgentTokenWithScopesAndRuns(
 		"agt_scoped", []string{"embeddings:write"}, []string{"run-mine"}, time.Hour,
@@ -702,16 +671,12 @@ func TestServe_Auth_AgentRunWhitelist_BlocksEmbeddingForCrossRunEvent(t *testing
 // the gate doesn't over-block: same-run evidence still works.
 func TestServe_Auth_AgentRunWhitelist_AllowsClaimsInOwnRun(t *testing.T) {
 	secret, _ := setupJWTTestEnv(t)
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
+	_, conn := openTestStore(t)
+	srv := httptest.NewServer(newServerMux(conn))
 	defer srv.Close()
 
 	now := time.Now().UTC()
-	seedEvent(t, db, "ev_mine", "run-mine", "x", "in", `{}`, now)
+	seedEventConn(t, conn, "ev_mine", "run-mine", "x", "in", `{}`, now)
 
 	tok, _, err := auth.NewIssuer(secret).IssueAgentTokenWithScopesAndRuns(
 		"agt_scoped", []string{"claims:write"}, []string{"run-mine"}, time.Hour,
@@ -745,11 +710,7 @@ func TestServe_Auth_AgentRunWhitelist_AllowsClaimsInOwnRun(t *testing.T) {
 // allowed at /v1/events but forbidden everywhere else.
 func TestServe_Auth_NarrowUserScopeRejectsOtherEndpoints(t *testing.T) {
 	secret, _ := setupJWTTestEnv(t)
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	_, conn := openTestStore(t)
 
 	user := domain.User{
 		ID: "usr_narrow", Name: "n", Email: "n@test.local",
@@ -757,7 +718,7 @@ func TestServe_Auth_NarrowUserScopeRejectsOtherEndpoints(t *testing.T) {
 		Scopes:    []string{"events:write"},
 		CreatedAt: time.Now().UTC(),
 	}
-	if err := sqlite.NewUserRepository(db).Create(context.Background(), user); err != nil {
+	if err := conn.Users.Create(context.Background(), user); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
 	tok, _, err := auth.NewIssuer(secret).IssueUserToken(user, time.Hour)
@@ -766,7 +727,7 @@ func TestServe_Auth_NarrowUserScopeRejectsOtherEndpoints(t *testing.T) {
 	}
 	hdrs := map[string]string{"Authorization": "Bearer " + tok}
 
-	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
+	srv := httptest.NewServer(newServerMux(conn))
 	defer srv.Close()
 
 	// Allowed: events.
@@ -806,20 +767,16 @@ func TestServe_Auth_NarrowUserScopeRejectsOtherEndpoints(t *testing.T) {
 // explicit scope list.
 func TestServe_Auth_UserTokenGetsAllScopes(t *testing.T) {
 	secret, _ := setupJWTTestEnv(t)
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	seedUser(t, db, "usr_full")
-	srv := httptest.NewServer(newServerMux(connFromDB(t, db)))
+	_, conn := openTestStore(t)
+	seedUser(t, conn, "usr_full")
+	srv := httptest.NewServer(newServerMux(conn))
 	defer srv.Close()
 
 	hdrs := map[string]string{"Authorization": issueTestToken(t, secret, "usr_full")}
 	now := time.Now().UTC()
-	seedEvent(t, db, "ev_for_full", "r", "x", "in", `{}`, now)
-	seedClaim(t, db, "cl_a", "a", "fact", "active", 0.8, now)
-	seedClaim(t, db, "cl_b", "b", "fact", "active", 0.8, now)
+	seedEventConn(t, conn, "ev_for_full", "r", "x", "in", `{}`, now)
+	seedClaimConn(t, conn, "cl_a", "a", "fact", "active", 0.8, now)
+	seedClaimConn(t, conn, "cl_b", "b", "fact", "active", 0.8, now)
 
 	for _, c := range []struct {
 		name string

@@ -164,6 +164,14 @@ func (r RelationshipRepository) CountByType(ctx context.Context, relType string)
 	return n, nil
 }
 
+// DeleteAll wipes the relationships table.
+func (r RelationshipRepository) DeleteAll(ctx context.Context) error {
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM relationships`); err != nil {
+		return fmt.Errorf("delete all relationships: %w", err)
+	}
+	return nil
+}
+
 // ListAll returns every relationship stored, ordered by created_at
 // ascending.
 func (r RelationshipRepository) ListAll(ctx context.Context) ([]domain.Relationship, error) {

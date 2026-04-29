@@ -148,6 +148,16 @@ func (r EventRepository) CountAll(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
+// DeleteByID removes the event with the given id. Idempotent.
+func (r EventRepository) DeleteByID(ctx context.Context, id string) error {
+	return r.q.DeleteEventByID(ctx, id)
+}
+
+// DeleteAll wipes the events table. Used by `mnemos reset`.
+func (r EventRepository) DeleteAll(ctx context.Context) error {
+	return r.q.DeleteAllEvents(ctx)
+}
+
 // ListByRunID returns all events that belong to the specified run.
 func (r EventRepository) ListByRunID(ctx context.Context, runID string) ([]domain.Event, error) {
 	rows, err := r.q.ListEventsByRunID(ctx, runID)

@@ -9,9 +9,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Open creates or opens a SQLite database at the given path, ensuring the
+// open creates or opens a SQLite database at the given path, ensuring the
 // parent directory and schema exist.
-func Open(path string) (*sql.DB, error) {
+func open(path string) (*sql.DB, error) {
 	if path == "" {
 		return nil, fmt.Errorf("database path is required")
 	}

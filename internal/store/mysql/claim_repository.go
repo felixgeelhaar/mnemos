@@ -270,6 +270,51 @@ func (r ClaimRepository) ListAllEvidence(ctx context.Context) ([]domain.ClaimEvi
 	return out, rows.Err()
 }
 
+// DeleteAll wipes claims plus the rows owned by claims (claim_evidence,
+// claim_status_history) inside a single transaction.
+func (r ClaimRepository) DeleteAll(ctx context.Context) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin claims delete-all tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM claim_evidence`); err != nil {
+		return fmt.Errorf("delete claim_evidence: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM claim_status_history`); err != nil {
+		return fmt.Errorf("delete claim_status_history: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM claims`); err != nil {
+		return fmt.Errorf("delete claims: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit claims delete-all tx: %w", err)
+	}
+	return nil
+}
+
+// ListIDsMissingEmbedding returns claim ids without an embedding row.
+func (r ClaimRepository) ListIDsMissingEmbedding(ctx context.Context) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT c.id FROM claims c
+LEFT JOIN embeddings e ON e.entity_id = c.id AND e.entity_type = 'claim'
+WHERE e.entity_id IS NULL
+ORDER BY c.created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list ids missing embedding: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan id: %w", err)
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // ListAllStatusHistory returns every claim_status_history row.
 func (r ClaimRepository) ListAllStatusHistory(ctx context.Context) ([]domain.ClaimStatusTransition, error) {
 	rows, err := r.db.QueryContext(ctx, `

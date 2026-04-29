@@ -28,7 +28,7 @@ func TestSanitizeFTSQuery(t *testing.T) {
 }
 
 func TestSearchByText_ReturnsRelevantEvents(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "fts.db"))
+	db, err := open(filepath.Join(t.TempDir(), "fts.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestSearchByText_ReturnsRelevantEvents(t *testing.T) {
 }
 
 func TestSearchByText_ToleratesMessyInput(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "fts.db"))
+	db, err := open(filepath.Join(t.TempDir(), "fts.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestSearchByText_BackfillsLegacyEventsViaMigration(t *testing.T) {
 
 	// Seed a v4-shaped DB: events table without an FTS counterpart.
 	{
-		raw, err := Open(path)
+		raw, err := open(path)
 		if err != nil {
 			t.Fatalf("open: %v", err)
 		}
@@ -123,7 +123,7 @@ func TestSearchByText_BackfillsLegacyEventsViaMigration(t *testing.T) {
 	}
 
 	// Re-open: migrate should backfill events_fts.
-	db, err := Open(path)
+	db, err := open(path)
 	if err != nil {
 		t.Fatalf("re-open: %v", err)
 	}

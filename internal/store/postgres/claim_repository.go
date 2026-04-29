@@ -275,6 +275,52 @@ func (r ClaimRepository) ListAllEvidence(ctx context.Context) ([]domain.ClaimEvi
 	return out, rows.Err()
 }
 
+// DeleteAll satisfies the corresponding ports method. Wipes claims
+// and the rows owned by claims (claim_evidence, claim_status_history)
+// in a single transaction.
+func (r ClaimRepository) DeleteAll(ctx context.Context) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin claims delete-all tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s`, qualify(r.ns, "claim_evidence"))); err != nil {
+		return fmt.Errorf("delete claim_evidence: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s`, qualify(r.ns, "claim_status_history"))); err != nil {
+		return fmt.Errorf("delete claim_status_history: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s`, qualify(r.ns, "claims"))); err != nil {
+		return fmt.Errorf("delete claims: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit claims delete-all tx: %w", err)
+	}
+	return nil
+}
+
+// ListIDsMissingEmbedding satisfies the corresponding ports method.
+func (r ClaimRepository) ListIDsMissingEmbedding(ctx context.Context) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+SELECT c.id FROM %s c
+LEFT JOIN %s e ON e.entity_id = c.id AND e.entity_type = 'claim'
+WHERE e.entity_id IS NULL
+ORDER BY c.created_at ASC`, qualify(r.ns, "claims"), qualify(r.ns, "embeddings")))
+	if err != nil {
+		return nil, fmt.Errorf("list ids missing embedding: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan id: %w", err)
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // ListAllStatusHistory satisfies the corresponding ports method.
 func (r ClaimRepository) ListAllStatusHistory(ctx context.Context) ([]domain.ClaimStatusTransition, error) {
 	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(

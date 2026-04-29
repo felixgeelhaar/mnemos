@@ -83,6 +83,27 @@ func (r EventRepository) CountAll(_ context.Context) (int64, error) {
 	return int64(len(r.state.events)), nil
 }
 
+// DeleteByID removes the event with the given id. Idempotent.
+func (r EventRepository) DeleteByID(_ context.Context, id string) error {
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	if _, ok := r.state.events[id]; !ok {
+		return nil
+	}
+	delete(r.state.events, id)
+	r.state.eventOrder = removeStringFromSlice(r.state.eventOrder, id)
+	return nil
+}
+
+// DeleteAll wipes the events map.
+func (r EventRepository) DeleteAll(_ context.Context) error {
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	r.state.events = map[string]storedEvent{}
+	r.state.eventOrder = nil
+	return nil
+}
+
 // ListByRunID returns every event tagged with the given run id, in
 // insertion order.
 func (r EventRepository) ListByRunID(_ context.Context, runID string) ([]domain.Event, error) {

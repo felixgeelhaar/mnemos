@@ -2,45 +2,9 @@ package main
 
 import (
 	"context"
-	"database/sql"
-	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
-
-func newTestBrowseDB(t *testing.T) *sql.DB {
-	t.Helper()
-	db, err := sqlite.Open(filepath.Join(t.TempDir(), "mnemos.db"))
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db
-}
-
-func seedClaim(t *testing.T, db *sql.DB, id, text, ctype, status string, confidence float64, createdAt time.Time) {
-	t.Helper()
-	_, err := db.Exec(
-		`INSERT INTO claims (id, text, type, confidence, status, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		id, text, ctype, confidence, status, createdAt.UTC().Format(time.RFC3339),
-	)
-	if err != nil {
-		t.Fatalf("insert claim: %v", err)
-	}
-}
-
-func seedRelationship(t *testing.T, db *sql.DB, id, rtype, from, to string, createdAt time.Time) {
-	t.Helper()
-	_, err := db.Exec(
-		`INSERT INTO relationships (id, type, from_claim_id, to_claim_id, created_at) VALUES (?, ?, ?, ?, ?)`,
-		id, rtype, from, to, createdAt.UTC().Format(time.RFC3339),
-	)
-	if err != nil {
-		t.Fatalf("insert relationship: %v", err)
-	}
-}
 
 func TestNormalizePagination(t *testing.T) {
 	cases := []struct {
@@ -62,12 +26,12 @@ func TestNormalizePagination(t *testing.T) {
 }
 
 func TestListClaimsFiltered_NoFiltersReturnsAllOrderedByCreatedDesc(t *testing.T) {
-	db := newTestBrowseDB(t)
+	_, conn := openTestStore(t)
 	now := time.Now()
-	seedClaim(t, db, "c1", "older", "fact", "active", 0.7, now.Add(-2*time.Hour))
-	seedClaim(t, db, "c2", "newer", "decision", "active", 0.9, now)
+	seedClaimConn(t, conn, "c1", "older", "fact", "active", 0.7, now.Add(-2*time.Hour))
+	seedClaimConn(t, conn, "c2", "newer", "decision", "active", 0.9, now)
 
-	claims, total, err := listClaimsFiltered(context.Background(), connFromDB(t, db), "", "", 50, 0)
+	claims, total, err := listClaimsFiltered(context.Background(), conn, "", "", 50, 0)
 	if err != nil {
 		t.Fatalf("listClaimsFiltered: %v", err)
 	}
@@ -80,13 +44,13 @@ func TestListClaimsFiltered_NoFiltersReturnsAllOrderedByCreatedDesc(t *testing.T
 }
 
 func TestListClaimsFiltered_TypeFilter(t *testing.T) {
-	db := newTestBrowseDB(t)
+	_, conn := openTestStore(t)
 	now := time.Now()
-	seedClaim(t, db, "c1", "fact 1", "fact", "active", 0.7, now)
-	seedClaim(t, db, "c2", "decision 1", "decision", "active", 0.9, now)
-	seedClaim(t, db, "c3", "decision 2", "decision", "active", 0.8, now)
+	seedClaimConn(t, conn, "c1", "fact 1", "fact", "active", 0.7, now)
+	seedClaimConn(t, conn, "c2", "decision 1", "decision", "active", 0.9, now)
+	seedClaimConn(t, conn, "c3", "decision 2", "decision", "active", 0.8, now)
 
-	claims, total, err := listClaimsFiltered(context.Background(), connFromDB(t, db), "decision", "", 50, 0)
+	claims, total, err := listClaimsFiltered(context.Background(), conn, "decision", "", 50, 0)
 	if err != nil {
 		t.Fatalf("listClaimsFiltered: %v", err)
 	}
@@ -101,12 +65,12 @@ func TestListClaimsFiltered_TypeFilter(t *testing.T) {
 }
 
 func TestListClaimsFiltered_StatusFilter(t *testing.T) {
-	db := newTestBrowseDB(t)
+	_, conn := openTestStore(t)
 	now := time.Now()
-	seedClaim(t, db, "c1", "active claim", "fact", "active", 0.7, now)
-	seedClaim(t, db, "c2", "contested claim", "fact", "contested", 0.5, now)
+	seedClaimConn(t, conn, "c1", "active claim", "fact", "active", 0.7, now)
+	seedClaimConn(t, conn, "c2", "contested claim", "fact", "contested", 0.5, now)
 
-	claims, total, err := listClaimsFiltered(context.Background(), connFromDB(t, db), "", "contested", 50, 0)
+	claims, total, err := listClaimsFiltered(context.Background(), conn, "", "contested", 50, 0)
 	if err != nil {
 		t.Fatalf("listClaimsFiltered: %v", err)
 	}
@@ -116,13 +80,13 @@ func TestListClaimsFiltered_StatusFilter(t *testing.T) {
 }
 
 func TestListClaimsFiltered_Pagination(t *testing.T) {
-	db := newTestBrowseDB(t)
+	_, conn := openTestStore(t)
 	base := time.Now()
 	for i := 0; i < 5; i++ {
-		seedClaim(t, db, "c"+string(rune('1'+i)), "claim", "fact", "active", 0.5, base.Add(time.Duration(i)*time.Minute))
+		seedClaimConn(t, conn, "c"+string(rune('1'+i)), "claim", "fact", "active", 0.5, base.Add(time.Duration(i)*time.Minute))
 	}
 
-	page1, total, err := listClaimsFiltered(context.Background(), connFromDB(t, db), "", "", 2, 0)
+	page1, total, err := listClaimsFiltered(context.Background(), conn, "", "", 2, 0)
 	if err != nil {
 		t.Fatalf("page1: %v", err)
 	}
@@ -133,7 +97,7 @@ func TestListClaimsFiltered_Pagination(t *testing.T) {
 		t.Fatalf("page1 len = %d, want 2", len(page1))
 	}
 
-	page2, _, err := listClaimsFiltered(context.Background(), connFromDB(t, db), "", "", 2, 2)
+	page2, _, err := listClaimsFiltered(context.Background(), conn, "", "", 2, 2)
 	if err != nil {
 		t.Fatalf("page2: %v", err)
 	}
@@ -146,15 +110,15 @@ func TestListClaimsFiltered_Pagination(t *testing.T) {
 }
 
 func TestListContradictionPairs_HydratesClaimText(t *testing.T) {
-	db := newTestBrowseDB(t)
+	_, conn := openTestStore(t)
 	now := time.Now()
-	seedClaim(t, db, "c1", "Use SQLite", "decision", "active", 0.9, now)
-	seedClaim(t, db, "c2", "Use PostgreSQL", "decision", "active", 0.9, now)
-	seedClaim(t, db, "c3", "Use embeddings", "fact", "active", 0.8, now)
-	seedRelationship(t, db, "r1", "contradicts", "c1", "c2", now)
-	seedRelationship(t, db, "r2", "supports", "c1", "c3", now) // not a contradiction
+	seedClaimConn(t, conn, "c1", "Use SQLite", "decision", "active", 0.9, now)
+	seedClaimConn(t, conn, "c2", "Use PostgreSQL", "decision", "active", 0.9, now)
+	seedClaimConn(t, conn, "c3", "Use embeddings", "fact", "active", 0.8, now)
+	seedRelationshipConn(t, conn, "r1", "contradicts", "c1", "c2", now)
+	seedRelationshipConn(t, conn, "r2", "supports", "c1", "c3", now) // not a contradiction
 
-	pairs, total, err := listContradictionPairs(context.Background(), connFromDB(t, db), 50, 0)
+	pairs, total, err := listContradictionPairs(context.Background(), conn, 50, 0)
 	if err != nil {
 		t.Fatalf("listContradictionPairs: %v", err)
 	}
@@ -167,17 +131,13 @@ func TestListContradictionPairs_HydratesClaimText(t *testing.T) {
 }
 
 func TestListContradictionPairs_HandlesMissingClaimGracefully(t *testing.T) {
-	db := newTestBrowseDB(t)
+	_, conn := openTestStore(t)
 	now := time.Now()
-	// Insert a relationship pointing at a claim that exists, plus deliberately
-	// skip foreign key enforcement by inserting before the referenced claim.
-	// Foreign keys are enforced, so insert claim first then orphan via rel.
-	seedClaim(t, db, "c1", "lonely claim", "fact", "active", 0.5, now)
-	// Insert a contradiction between two real claims to verify happy path.
-	seedClaim(t, db, "c2", "other claim", "fact", "active", 0.5, now)
-	seedRelationship(t, db, "r1", "contradicts", "c1", "c2", now)
+	seedClaimConn(t, conn, "c1", "lonely claim", "fact", "active", 0.5, now)
+	seedClaimConn(t, conn, "c2", "other claim", "fact", "active", 0.5, now)
+	seedRelationshipConn(t, conn, "r1", "contradicts", "c1", "c2", now)
 
-	pairs, _, err := listContradictionPairs(context.Background(), connFromDB(t, db), 50, 0)
+	pairs, _, err := listContradictionPairs(context.Background(), conn, 50, 0)
 	if err != nil {
 		t.Fatalf("listContradictionPairs: %v", err)
 	}

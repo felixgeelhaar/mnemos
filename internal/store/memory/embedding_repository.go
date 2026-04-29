@@ -71,6 +71,14 @@ func (r EmbeddingRepository) CountAll(_ context.Context) (int64, error) {
 	return int64(len(r.state.embeddings)), nil
 }
 
+// DeleteAll wipes the embeddings map.
+func (r EmbeddingRepository) DeleteAll(_ context.Context) error {
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	r.state.embeddings = map[embeddingKey]storedEmbedding{}
+	return nil
+}
+
 // ListAll returns every embedding row, ordered by created_at
 // ascending (matching SQLite).
 func (r EmbeddingRepository) ListAll(_ context.Context) ([]domain.EmbeddingRecord, error) {

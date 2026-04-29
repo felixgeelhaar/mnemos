@@ -10,7 +10,7 @@ import (
 )
 
 func TestSetValidity_RoundTripsThroughLoad(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "v.db"))
+	db, err := open(filepath.Join(t.TempDir(), "v.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestSetValidity_RoundTripsThroughLoad(t *testing.T) {
 }
 
 func TestUpsert_DefaultsValidFromToCreatedAt(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "v.db"))
+	db, err := open(filepath.Join(t.TempDir(), "v.db"))
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestMigrate_BackfillsValidFromOnLegacyV2Schema(t *testing.T) {
 	// valid_from / valid_to (v0.8 columns). Mirrors the upgrade
 	// path real users will hit going from v0.7.x to v0.8.0.
 	if err := func() error {
-		raw, err := Open(path)
+		raw, err := open(path)
 		if err != nil {
 			return err
 		}
@@ -125,7 +125,7 @@ func TestMigrate_BackfillsValidFromOnLegacyV2Schema(t *testing.T) {
 
 	// Re-open: migrate() should add the columns and backfill
 	// valid_from from created_at.
-	db, err := Open(path)
+	db, err := open(path)
 	if err != nil {
 		t.Fatalf("re-open: %v", err)
 	}

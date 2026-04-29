@@ -1,6 +1,7 @@
 # ADR 0001: Multi-Backend Storage with Pluggable Providers
 
-- **Status:** Proposed
+- **Status:** Accepted
+- **Implemented:** 2026-04-29 (v0.11.0)
 - **Date:** 2026-04-27
 - **Deciders:** Felix Geelhaar
 - **Scope:** Mnemos primarily; contract intended to be mirrored across the

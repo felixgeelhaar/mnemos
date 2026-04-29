@@ -139,6 +139,15 @@ func (r EventRepository) ListAll(ctx context.Context) ([]domain.Event, error) {
 	return events, nil
 }
 
+// CountAll returns the total number of events stored.
+func (r EventRepository) CountAll(ctx context.Context) (int64, error) {
+	var n int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count events: %w", err)
+	}
+	return n, nil
+}
+
 // ListByRunID returns all events that belong to the specified run.
 func (r EventRepository) ListByRunID(ctx context.Context, runID string) ([]domain.Event, error) {
 	rows, err := r.q.ListEventsByRunID(ctx, runID)

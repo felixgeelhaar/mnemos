@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log"
@@ -666,27 +665,49 @@ func mcpRunProcessText(ctx context.Context, actor string, input mcpProcessTextIn
 }
 
 func mcpRunMetrics() (mcpMetricsOutput, error) {
-	db, conn, err := openDB(context.Background())
+	ctx := context.Background()
+	conn, err := openConn(ctx)
 	if err != nil {
 		return mcpMetricsOutput{}, err
 	}
 	defer closeConn(conn)
 
-	return mcpMetricsOutput{
-		Runs:            mcpCountRows(db, `SELECT COUNT(DISTINCT run_id) FROM events WHERE run_id <> ''`),
-		Events:          mcpCountRows(db, `SELECT COUNT(*) FROM events`),
-		Claims:          mcpCountRows(db, `SELECT COUNT(*) FROM claims`),
-		ContestedClaims: mcpCountRows(db, `SELECT COUNT(*) FROM claims WHERE status = 'contested'`),
-		Relationships:   mcpCountRows(db, `SELECT COUNT(*) FROM relationships`),
-		Contradictions:  mcpCountRows(db, `SELECT COUNT(*) FROM relationships WHERE type = 'contradicts'`),
-		Embeddings:      mcpCountRows(db, `SELECT COUNT(*) FROM embeddings`),
-	}, nil
-}
-
-func mcpCountRows(db *sql.DB, q string) int64 {
-	var n int64
-	if err := db.QueryRow(q).Scan(&n); err != nil {
-		return 0
+	// Each port-typed CountAll/CountByType replaces a hand-written
+	// COUNT query. Distinct-run-id is computed in-memory from
+	// ListAll because adding a CountDistinctRunID port method just
+	// for the metrics surface isn't worth the surface bloat.
+	allEvents, _ := conn.Events.ListAll(ctx)
+	runIDs := map[string]struct{}{}
+	for _, e := range allEvents {
+		if e.RunID != "" {
+			runIDs[e.RunID] = struct{}{}
+		}
 	}
-	return n
+
+	eventsCount, _ := conn.Events.CountAll(ctx)
+	claimsCount, _ := conn.Claims.CountAll(ctx)
+	relsCount, _ := conn.Relationships.CountAll(ctx)
+	contradictionsCount, _ := conn.Relationships.CountByType(ctx, "contradicts")
+	embeddingsCount, _ := conn.Embeddings.CountAll(ctx)
+
+	// Contested claims: count from the in-memory listing — same
+	// reasoning as runs, the surface payoff doesn't justify a
+	// CountByStatus port method.
+	allClaims, _ := conn.Claims.ListAll(ctx)
+	var contested int64
+	for _, c := range allClaims {
+		if string(c.Status) == "contested" {
+			contested++
+		}
+	}
+
+	return mcpMetricsOutput{
+		Runs:            int64(len(runIDs)),
+		Events:          eventsCount,
+		Claims:          claimsCount,
+		ContestedClaims: contested,
+		Relationships:   relsCount,
+		Contradictions:  contradictionsCount,
+		Embeddings:      embeddingsCount,
+	}, nil
 }

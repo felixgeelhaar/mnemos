@@ -140,6 +140,40 @@ func (r RelationshipRepository) DeleteByClaim(ctx context.Context, claimID strin
 	return nil
 }
 
+// CountAll satisfies the corresponding ports method.
+func (r RelationshipRepository) CountAll(ctx context.Context) (int64, error) {
+	var n int64
+	if err := r.db.QueryRowContext(ctx, fmt.Sprintf(
+		`SELECT COUNT(*) FROM %s`, qualify(r.ns, "relationships"),
+	)).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count relationships: %w", err)
+	}
+	return n, nil
+}
+
+// CountByType satisfies the corresponding ports method.
+func (r RelationshipRepository) CountByType(ctx context.Context, relType string) (int64, error) {
+	var n int64
+	if err := r.db.QueryRowContext(ctx, fmt.Sprintf(
+		`SELECT COUNT(*) FROM %s WHERE type = $1`, qualify(r.ns, "relationships"),
+	), relType).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count relationships by type: %w", err)
+	}
+	return n, nil
+}
+
+// ListAll satisfies the corresponding ports method.
+func (r RelationshipRepository) ListAll(ctx context.Context) ([]domain.Relationship, error) {
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+SELECT id, type, from_claim_id, to_claim_id, created_at, created_by
+FROM %s ORDER BY created_at ASC`, qualify(r.ns, "relationships")))
+	if err != nil {
+		return nil, fmt.Errorf("list all relationships: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return collectRelationshipRows(rows)
+}
+
 // ListByClaimIDs satisfies the corresponding ports method.
 func (r RelationshipRepository) ListByClaimIDs(ctx context.Context, claimIDs []string) ([]domain.Relationship, error) {
 	if len(claimIDs) == 0 {

@@ -25,7 +25,7 @@ func TestBuildAuditExport_IncludesAllResourcesByDefault(t *testing.T) {
 	seedClaim(t, db, "cl2", "another", "fact", "active", 0.7, now)
 	seedRelationship(t, db, "r1", "supports", "cl1", "cl2", now)
 
-	exp, err := buildAuditExport(context.Background(), db, "/tmp/test.db", false)
+	exp, err := buildAuditExport(context.Background(), connFromDB(t, db), "/tmp/test.db", false)
 	if err != nil {
 		t.Fatalf("buildAuditExport: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestBuildAuditExport_IncludesEmbeddingsOnRequest(t *testing.T) {
 		t.Fatalf("seed embedding: %v", err)
 	}
 
-	exp, err := buildAuditExport(context.Background(), db, "/tmp/test.db", true)
+	exp, err := buildAuditExport(context.Background(), connFromDB(t, db), "/tmp/test.db", true)
 	if err != nil {
 		t.Fatalf("buildAuditExport: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestBuildAuditExport_EmptyDBYieldsZeroCounts(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	exp, err := buildAuditExport(context.Background(), db, "/tmp/empty.db", false)
+	exp, err := buildAuditExport(context.Background(), connFromDB(t, db), "/tmp/empty.db", false)
 	if err != nil {
 		t.Fatalf("buildAuditExport: %v", err)
 	}

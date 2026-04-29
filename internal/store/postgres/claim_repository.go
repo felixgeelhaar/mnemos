@@ -244,6 +244,61 @@ FROM %s ORDER BY created_at ASC`, qualify(r.ns, "claims")))
 	return collectClaimRows(rows)
 }
 
+// CountAll satisfies the corresponding ports method.
+func (r ClaimRepository) CountAll(ctx context.Context) (int64, error) {
+	var n int64
+	if err := r.db.QueryRowContext(ctx, fmt.Sprintf(
+		`SELECT COUNT(*) FROM %s`, qualify(r.ns, "claims"),
+	)).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count claims: %w", err)
+	}
+	return n, nil
+}
+
+// ListAllEvidence satisfies the corresponding ports method.
+func (r ClaimRepository) ListAllEvidence(ctx context.Context) ([]domain.ClaimEvidence, error) {
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(
+		`SELECT claim_id, event_id FROM %s`, qualify(r.ns, "claim_evidence"),
+	))
+	if err != nil {
+		return nil, fmt.Errorf("list all claim evidence: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]domain.ClaimEvidence, 0)
+	for rows.Next() {
+		var ev domain.ClaimEvidence
+		if err := rows.Scan(&ev.ClaimID, &ev.EventID); err != nil {
+			return nil, fmt.Errorf("scan claim_evidence row: %w", err)
+		}
+		out = append(out, ev)
+	}
+	return out, rows.Err()
+}
+
+// ListAllStatusHistory satisfies the corresponding ports method.
+func (r ClaimRepository) ListAllStatusHistory(ctx context.Context) ([]domain.ClaimStatusTransition, error) {
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(
+		`SELECT claim_id, from_status, to_status, changed_at, reason, changed_by
+		 FROM %s ORDER BY id ASC`, qualify(r.ns, "claim_status_history"),
+	))
+	if err != nil {
+		return nil, fmt.Errorf("list all status history: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]domain.ClaimStatusTransition, 0)
+	for rows.Next() {
+		var t domain.ClaimStatusTransition
+		var from, to string
+		if err := rows.Scan(&t.ClaimID, &from, &to, &t.ChangedAt, &t.Reason, &t.ChangedBy); err != nil {
+			return nil, fmt.Errorf("scan status_history row: %w", err)
+		}
+		t.FromStatus = domain.ClaimStatus(from)
+		t.ToStatus = domain.ClaimStatus(to)
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 // ListStatusHistoryByClaimID satisfies the corresponding ports method.
 func (r ClaimRepository) ListStatusHistoryByClaimID(ctx context.Context, claimID string) ([]domain.ClaimStatusTransition, error) {
 	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`

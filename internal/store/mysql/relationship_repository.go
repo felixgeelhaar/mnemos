@@ -126,6 +126,38 @@ func (r RelationshipRepository) DeleteByClaim(ctx context.Context, claimID strin
 	return nil
 }
 
+// CountAll returns the total number of relationships stored.
+func (r RelationshipRepository) CountAll(ctx context.Context) (int64, error) {
+	var n int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM relationships`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count relationships: %w", err)
+	}
+	return n, nil
+}
+
+// CountByType returns the number of relationships with the given type.
+func (r RelationshipRepository) CountByType(ctx context.Context, relType string) (int64, error) {
+	var n int64
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM relationships WHERE type = ?`, relType,
+	).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count relationships by type: %w", err)
+	}
+	return n, nil
+}
+
+// ListAll returns every relationship ordered by created_at ascending.
+func (r RelationshipRepository) ListAll(ctx context.Context) ([]domain.Relationship, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id, type, from_claim_id, to_claim_id, created_at, created_by
+FROM relationships ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list all relationships: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return collectRelationshipRows(rows)
+}
+
 // ListByClaimIDs returns relationships touching any of the given claims.
 func (r RelationshipRepository) ListByClaimIDs(ctx context.Context, claimIDs []string) ([]domain.Relationship, error) {
 	if len(claimIDs) == 0 {

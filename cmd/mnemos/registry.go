@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/felixgeelhaar/mnemos/internal/embedding"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
+	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 )
 
 const (
@@ -180,7 +179,7 @@ func handlePush(args []string, _ Flags) {
 	ctx, cancel := context.WithTimeout(context.Background(), registryHTTPTimeout*5)
 	defer cancel()
 
-	db, conn, err := openDB(ctx)
+	conn, err := openConn(ctx)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
@@ -189,17 +188,17 @@ func handlePush(args []string, _ Flags) {
 
 	client := &http.Client{Timeout: registryHTTPTimeout}
 
-	events, err := loadAllEventsForPush(ctx, db)
+	events, err := loadAllEventsForPush(ctx, conn)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "load events"))
 		return
 	}
-	claims, evidence, err := loadAllClaimsForPush(ctx, db)
+	claims, evidence, err := loadAllClaimsForPush(ctx, conn)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "load claims"))
 		return
 	}
-	rels, err := loadAllRelationshipsForPush(ctx, db)
+	rels, err := loadAllRelationshipsForPush(ctx, conn)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "load relationships"))
 		return
@@ -220,7 +219,7 @@ func handlePush(args []string, _ Flags) {
 		exitWithMnemosError(false, NewSystemError(err, "push relationships"))
 		return
 	}
-	embeddings, err := loadAllEmbeddingsForPush(ctx, db)
+	embeddings, err := loadAllEmbeddingsForPush(ctx, conn)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "load embeddings"))
 		return
@@ -252,7 +251,7 @@ func handlePull(args []string, _ Flags) {
 	ctx, cancel := context.WithTimeout(context.Background(), registryHTTPTimeout*5)
 	defer cancel()
 
-	db, conn, err := openDB(ctx)
+	conn, err := openConn(ctx)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
@@ -278,17 +277,17 @@ func handlePull(args []string, _ Flags) {
 		return
 	}
 
-	insertedEvents, err := persistPulledEvents(ctx, db, events)
+	insertedEvents, err := persistPulledEvents(ctx, conn, events)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "persist events"))
 		return
 	}
-	insertedClaims, err := persistPulledClaims(ctx, db, claims, evidence)
+	insertedClaims, err := persistPulledClaims(ctx, conn, claims, evidence)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "persist claims"))
 		return
 	}
-	insertedRels, err := persistPulledRelationships(ctx, db, rels)
+	insertedRels, err := persistPulledRelationships(ctx, conn, rels)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "persist relationships"))
 		return
@@ -298,7 +297,7 @@ func handlePull(args []string, _ Flags) {
 		exitWithMnemosError(false, NewSystemError(err, "pull embeddings"))
 		return
 	}
-	insertedEmbeddings, err := persistPulledEmbeddings(ctx, db, embeddings)
+	insertedEmbeddings, err := persistPulledEmbeddings(ctx, conn, embeddings)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "persist embeddings"))
 		return
@@ -331,77 +330,70 @@ func parseRegistryFlags(args []string) (string, string) {
 	return regURL, token
 }
 
-func loadAllEventsForPush(ctx context.Context, db *sql.DB) ([]eventDTO, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at FROM events`)
+func loadAllEventsForPush(ctx context.Context, conn *store.Conn) ([]eventDTO, error) {
+	all, err := conn.Events.ListAll(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	var events []eventDTO
-	for rows.Next() {
-		var (
-			e        eventDTO
-			metaJSON string
-		)
-		if err := rows.Scan(&e.ID, &e.RunID, &e.SchemaVersion, &e.Content, &e.SourceInputID, &e.Timestamp, &metaJSON, &e.IngestedAt); err != nil {
-			return nil, err
-		}
-		e.Metadata = map[string]string{}
-		_ = json.Unmarshal([]byte(metaJSON), &e.Metadata)
-		events = append(events, e)
+	out := make([]eventDTO, 0, len(all))
+	for _, e := range all {
+		out = append(out, eventDTO{
+			ID:            e.ID,
+			RunID:         e.RunID,
+			SchemaVersion: e.SchemaVersion,
+			Content:       e.Content,
+			SourceInputID: e.SourceInputID,
+			Timestamp:     e.Timestamp.UTC().Format(time.RFC3339),
+			Metadata:      e.Metadata,
+			IngestedAt:    e.IngestedAt.UTC().Format(time.RFC3339),
+		})
 	}
-	return events, rows.Err()
+	return out, nil
 }
 
-func loadAllClaimsForPush(ctx context.Context, db *sql.DB) ([]claimDTO, []claimEvidenceItem, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, text, type, confidence, status, created_at FROM claims`)
+func loadAllClaimsForPush(ctx context.Context, conn *store.Conn) ([]claimDTO, []claimEvidenceItem, error) {
+	allClaims, err := conn.Claims.ListAll(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	var claims []claimDTO
-	for rows.Next() {
-		var c claimDTO
-		if err := rows.Scan(&c.ID, &c.Text, &c.Type, &c.Confidence, &c.Status, &c.CreatedAt); err != nil {
-			return nil, nil, err
-		}
-		claims = append(claims, c)
+	claims := make([]claimDTO, 0, len(allClaims))
+	for _, c := range allClaims {
+		claims = append(claims, claimDTO{
+			ID:         c.ID,
+			Text:       c.Text,
+			Type:       string(c.Type),
+			Confidence: c.Confidence,
+			Status:     string(c.Status),
+			CreatedAt:  c.CreatedAt.UTC().Format(time.RFC3339),
+		})
 	}
-	if err := rows.Err(); err != nil {
-		return nil, nil, err
-	}
-
-	evRows, err := db.QueryContext(ctx, `SELECT claim_id, event_id FROM claim_evidence`)
+	allEvidence, err := conn.Claims.ListAllEvidence(ctx)
 	if err != nil {
 		return claims, nil, err
 	}
-	defer func() { _ = evRows.Close() }()
-	var evidence []claimEvidenceItem
-	for evRows.Next() {
-		var item claimEvidenceItem
-		if err := evRows.Scan(&item.ClaimID, &item.EventID); err != nil {
-			return claims, nil, err
-		}
-		evidence = append(evidence, item)
+	evidence := make([]claimEvidenceItem, 0, len(allEvidence))
+	for _, ev := range allEvidence {
+		evidence = append(evidence, claimEvidenceItem{ClaimID: ev.ClaimID, EventID: ev.EventID})
 	}
-	return claims, evidence, evRows.Err()
+	return claims, evidence, nil
 }
 
-func loadAllRelationshipsForPush(ctx context.Context, db *sql.DB) ([]relationshipDTO, error) {
-	rows, err := db.QueryContext(ctx, `SELECT id, type, from_claim_id, to_claim_id, created_at FROM relationships`)
+func loadAllRelationshipsForPush(ctx context.Context, conn *store.Conn) ([]relationshipDTO, error) {
+	all, err := conn.Relationships.ListAll(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	var rels []relationshipDTO
-	for rows.Next() {
-		var r relationshipDTO
-		if err := rows.Scan(&r.ID, &r.Type, &r.FromClaimID, &r.ToClaimID, &r.CreatedAt); err != nil {
-			return nil, err
-		}
-		rels = append(rels, r)
+	rels := make([]relationshipDTO, 0, len(all))
+	for _, r := range all {
+		rels = append(rels, relationshipDTO{
+			ID:          r.ID,
+			Type:        string(r.Type),
+			FromClaimID: r.FromClaimID,
+			ToClaimID:   r.ToClaimID,
+			CreatedAt:   r.CreatedAt.UTC().Format(time.RFC3339),
+		})
 	}
-	return rels, rows.Err()
+	return rels, nil
 }
 
 // eventsToBatches splits events into JSON-serializable request bodies of at
@@ -580,53 +572,83 @@ func fetchPage(ctx context.Context, client *http.Client, endpoint, token string)
 	return body, nil
 }
 
-// persistPulledEvents inserts events that don't already exist locally.
-// Returns the number of newly inserted rows.
-func persistPulledEvents(ctx context.Context, db *sql.DB, events []eventDTO) (int, error) {
-	inserted := 0
+// persistPulledEvents persists events that don't already exist
+// locally. Append on every backend is idempotent on (id), so we
+// take a CountAll snapshot before and after to derive the
+// "newly inserted" delta. Backend-agnostic.
+func persistPulledEvents(ctx context.Context, conn *store.Conn, events []eventDTO) (int, error) {
+	before, err := conn.Events.CountAll(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("count events before pull: %w", err)
+	}
 	for _, e := range events {
-		metaJSON, _ := json.Marshal(e.Metadata)
-		res, err := db.ExecContext(ctx,
-			`INSERT INTO events (id, run_id, schema_version, content, source_input_id, timestamp, metadata_json, ingested_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(id) DO NOTHING`,
-			e.ID, e.RunID, e.SchemaVersion, e.Content, e.SourceInputID, e.Timestamp, string(metaJSON), e.IngestedAt,
-		)
+		ts, err := time.Parse(time.RFC3339, e.Timestamp)
 		if err != nil {
-			return inserted, fmt.Errorf("insert event %s: %w", e.ID, err)
+			return 0, fmt.Errorf("parse event timestamp %s: %w", e.ID, err)
 		}
-		if n, _ := res.RowsAffected(); n > 0 {
-			inserted++
+		ingested, err := time.Parse(time.RFC3339, e.IngestedAt)
+		if err != nil {
+			return 0, fmt.Errorf("parse event ingested_at %s: %w", e.ID, err)
+		}
+		ev := domain.Event{
+			ID:            e.ID,
+			RunID:         e.RunID,
+			SchemaVersion: e.SchemaVersion,
+			Content:       e.Content,
+			SourceInputID: e.SourceInputID,
+			Timestamp:     ts,
+			Metadata:      e.Metadata,
+			IngestedAt:    ingested,
+		}
+		if err := conn.Events.Append(ctx, ev); err != nil {
+			return 0, fmt.Errorf("insert event %s: %w", e.ID, err)
 		}
 	}
-	return inserted, nil
+	after, err := conn.Events.CountAll(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("count events after pull: %w", err)
+	}
+	return int(after - before), nil
 }
 
-func persistPulledClaims(ctx context.Context, db *sql.DB, claims []claimDTO, evidence []claimEvidenceItem) (int, error) {
-	inserted := 0
+// persistPulledClaims is the analogous backend-agnostic path for
+// claims and their evidence links. As above, the "inserted" count
+// is the CountAll delta — Upsert collapses duplicates silently.
+func persistPulledClaims(ctx context.Context, conn *store.Conn, claims []claimDTO, evidence []claimEvidenceItem) (int, error) {
+	before, err := conn.Claims.CountAll(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("count claims before pull: %w", err)
+	}
+	domClaims := make([]domain.Claim, 0, len(claims))
 	for _, c := range claims {
-		res, err := db.ExecContext(ctx,
-			`INSERT INTO claims (id, text, type, confidence, status, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(id) DO NOTHING`,
-			c.ID, c.Text, c.Type, c.Confidence, c.Status, c.CreatedAt,
-		)
+		ts, err := time.Parse(time.RFC3339, c.CreatedAt)
 		if err != nil {
-			return inserted, fmt.Errorf("insert claim %s: %w", c.ID, err)
+			return 0, fmt.Errorf("parse claim created_at %s: %w", c.ID, err)
 		}
-		if n, _ := res.RowsAffected(); n > 0 {
-			inserted++
-		}
+		domClaims = append(domClaims, domain.Claim{
+			ID:         c.ID,
+			Text:       c.Text,
+			Type:       domain.ClaimType(c.Type),
+			Confidence: c.Confidence,
+			Status:     domain.ClaimStatus(c.Status),
+			CreatedAt:  ts,
+		})
 	}
-	for _, link := range evidence {
-		if _, err := db.ExecContext(ctx,
-			`INSERT INTO claim_evidence (claim_id, event_id) VALUES (?, ?) ON CONFLICT DO NOTHING`,
-			link.ClaimID, link.EventID,
-		); err != nil {
-			return inserted, fmt.Errorf("insert evidence (%s, %s): %w", link.ClaimID, link.EventID, err)
-		}
+	if err := conn.Claims.Upsert(ctx, domClaims); err != nil {
+		return 0, fmt.Errorf("upsert claims: %w", err)
 	}
-	return inserted, nil
+	links := make([]domain.ClaimEvidence, 0, len(evidence))
+	for _, e := range evidence {
+		links = append(links, domain.ClaimEvidence{ClaimID: e.ClaimID, EventID: e.EventID})
+	}
+	if err := conn.Claims.UpsertEvidence(ctx, links); err != nil {
+		return 0, fmt.Errorf("upsert claim evidence: %w", err)
+	}
+	after, err := conn.Claims.CountAll(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("count claims after pull: %w", err)
+	}
+	return int(after - before), nil
 }
 
 // stampPullProvenance mutates each pulled event so its metadata records
@@ -650,32 +672,22 @@ func stampPullProvenance(events []eventDTO, regURL string, at time.Time) {
 	}
 }
 
-func loadAllEmbeddingsForPush(ctx context.Context, db *sql.DB) ([]embeddingDTO, error) {
-	rows, err := db.QueryContext(ctx, `SELECT entity_id, entity_type, vector, model, dimensions FROM embeddings`)
+func loadAllEmbeddingsForPush(ctx context.Context, conn *store.Conn) ([]embeddingDTO, error) {
+	all, err := conn.Embeddings.ListAll(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-
-	var out []embeddingDTO
-	for rows.Next() {
-		var (
-			e    embeddingDTO
-			blob []byte
-			dims int64
-		)
-		if err := rows.Scan(&e.EntityID, &e.EntityType, &blob, &e.Model, &dims); err != nil {
-			return nil, err
-		}
-		vec, err := embedding.DecodeVector(blob)
-		if err != nil {
-			return nil, fmt.Errorf("decode embedding %s/%s: %w", e.EntityID, e.EntityType, err)
-		}
-		e.Vector = vec
-		e.Dimensions = int(dims)
-		out = append(out, e)
+	out := make([]embeddingDTO, 0, len(all))
+	for _, e := range all {
+		out = append(out, embeddingDTO{
+			EntityID:   e.EntityID,
+			EntityType: e.EntityType,
+			Vector:     e.Vector,
+			Model:      e.Model,
+			Dimensions: e.Dimensions,
+		})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func embeddingsToBatches(records []embeddingDTO) []map[string]any {
@@ -711,37 +723,43 @@ func pullEmbeddings(ctx context.Context, client *http.Client, regURL, token stri
 	return out, nil
 }
 
-// persistPulledEmbeddings upserts pulled embeddings via the existing repo,
-// which encodes the vector back to a binary BLOB. We don't track "newly
-// inserted vs updated" separately — embeddings are derived data, last
-// write wins is the right semantic.
-func persistPulledEmbeddings(ctx context.Context, db *sql.DB, records []embeddingDTO) (int, error) {
-	repo := sqlite.NewEmbeddingRepository(db)
-	persisted := 0
+// persistPulledEmbeddings upserts pulled embeddings via the port
+// repo. Embeddings are derived data — last write wins is the right
+// semantic, so the count is just len(records).
+func persistPulledEmbeddings(ctx context.Context, conn *store.Conn, records []embeddingDTO) (int, error) {
 	for _, e := range records {
-		if err := repo.Upsert(ctx, e.EntityID, e.EntityType, e.Vector, e.Model, ""); err != nil {
-			return persisted, fmt.Errorf("upsert embedding %s/%s: %w", e.EntityID, e.EntityType, err)
+		if err := conn.Embeddings.Upsert(ctx, e.EntityID, e.EntityType, e.Vector, e.Model, ""); err != nil {
+			return 0, fmt.Errorf("upsert embedding %s/%s: %w", e.EntityID, e.EntityType, err)
 		}
-		persisted++
 	}
-	return persisted, nil
+	return len(records), nil
 }
 
-func persistPulledRelationships(ctx context.Context, db *sql.DB, rels []relationshipDTO) (int, error) {
-	inserted := 0
-	for _, r := range rels {
-		res, err := db.ExecContext(ctx,
-			`INSERT INTO relationships (id, type, from_claim_id, to_claim_id, created_at)
-			 VALUES (?, ?, ?, ?, ?)
-			 ON CONFLICT(id) DO NOTHING`,
-			r.ID, r.Type, r.FromClaimID, r.ToClaimID, r.CreatedAt,
-		)
-		if err != nil {
-			return inserted, fmt.Errorf("insert relationship %s: %w", r.ID, err)
-		}
-		if n, _ := res.RowsAffected(); n > 0 {
-			inserted++
-		}
+func persistPulledRelationships(ctx context.Context, conn *store.Conn, rels []relationshipDTO) (int, error) {
+	before, err := conn.Relationships.CountAll(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("count relationships before pull: %w", err)
 	}
-	return inserted, nil
+	domRels := make([]domain.Relationship, 0, len(rels))
+	for _, r := range rels {
+		ts, err := time.Parse(time.RFC3339, r.CreatedAt)
+		if err != nil {
+			return 0, fmt.Errorf("parse relationship created_at %s: %w", r.ID, err)
+		}
+		domRels = append(domRels, domain.Relationship{
+			ID:          r.ID,
+			Type:        domain.RelationshipType(r.Type),
+			FromClaimID: r.FromClaimID,
+			ToClaimID:   r.ToClaimID,
+			CreatedAt:   ts,
+		})
+	}
+	if err := conn.Relationships.Upsert(ctx, domRels); err != nil {
+		return 0, fmt.Errorf("upsert relationships: %w", err)
+	}
+	after, err := conn.Relationships.CountAll(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("count relationships after pull: %w", err)
+	}
+	return int(after - before), nil
 }

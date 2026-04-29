@@ -448,6 +448,79 @@ func (r ClaimRepository) DeleteCascade(ctx context.Context, claimID string) erro
 	return nil
 }
 
+// CountAll returns the total number of claims stored.
+func (r ClaimRepository) CountAll(ctx context.Context) (int64, error) {
+	var n int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM claims`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count claims: %w", err)
+	}
+	return n, nil
+}
+
+// ListAllEvidence returns every (claim_id, event_id) link in
+// claim_evidence. Order is undefined.
+func (r ClaimRepository) ListAllEvidence(ctx context.Context) ([]domain.ClaimEvidence, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT claim_id, event_id FROM claim_evidence`)
+	if err != nil {
+		return nil, fmt.Errorf("list all claim evidence: %w", err)
+	}
+	defer closeRows(rows)
+
+	out := make([]domain.ClaimEvidence, 0)
+	for rows.Next() {
+		var ev domain.ClaimEvidence
+		if err := rows.Scan(&ev.ClaimID, &ev.EventID); err != nil {
+			return nil, fmt.Errorf("scan claim_evidence row: %w", err)
+		}
+		out = append(out, ev)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate claim_evidence rows: %w", err)
+	}
+	return out, nil
+}
+
+// ListAllStatusHistory returns every claim_status_history row in
+// chronological order. Used by `mnemos audit who` to filter by
+// ChangedBy in-process — we keep the filter caller-side so the
+// port surface stays small.
+func (r ClaimRepository) ListAllStatusHistory(ctx context.Context) ([]domain.ClaimStatusTransition, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT claim_id, from_status, to_status, changed_at, reason, changed_by
+		 FROM claim_status_history
+		 ORDER BY id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list all status history: %w", err)
+	}
+	defer closeRows(rows)
+
+	out := make([]domain.ClaimStatusTransition, 0)
+	for rows.Next() {
+		var (
+			cid, from, to, changedAt, reason, changedBy string
+		)
+		if err := rows.Scan(&cid, &from, &to, &changedAt, &reason, &changedBy); err != nil {
+			return nil, fmt.Errorf("scan status_history row: %w", err)
+		}
+		t, err := time.Parse(time.RFC3339Nano, changedAt)
+		if err != nil {
+			return nil, fmt.Errorf("parse changed_at: %w", err)
+		}
+		out = append(out, domain.ClaimStatusTransition{
+			ClaimID:    cid,
+			FromStatus: domain.ClaimStatus(from),
+			ToStatus:   domain.ClaimStatus(to),
+			ChangedAt:  t,
+			Reason:     reason,
+			ChangedBy:  changedBy,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate status_history rows: %w", err)
+	}
+	return out, nil
+}
+
 // ListAll returns every claim stored in the database.
 func (r ClaimRepository) ListAll(ctx context.Context) ([]domain.Claim, error) {
 	rows, err := r.q.ListAllClaims(ctx)

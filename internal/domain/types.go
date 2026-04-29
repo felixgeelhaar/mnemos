@@ -372,7 +372,8 @@ type EmbeddingRecord struct {
 	Vector     []float32
 	Model      string
 	Dimensions int
-	CreatedBy  string // user id of the actor that generated this embedding
+	CreatedAt  time.Time // when this vector was last (re)written; used by audit-who principal scans
+	CreatedBy  string    // user id of the actor that generated this embedding
 }
 
 // Answer holds the result of a query, including supporting claims and contradictions.

@@ -2,11 +2,11 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
-	"strings"
+	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 )
 
 const (
@@ -59,13 +59,13 @@ func mcpRunListClaims(ctx context.Context, input mcpListClaimsInput) (mcpListCla
 		return mcpListClaimsOutput{}, fmt.Errorf("invalid status %q (want active, contested, or deprecated)", input.Status)
 	}
 
-	db, conn, err := openDB(ctx)
+	conn, err := openConn(ctx)
 	if err != nil {
 		return mcpListClaimsOutput{}, err
 	}
 	defer closeConn(conn)
 
-	claims, total, err := listClaimsFiltered(ctx, db, input.Type, input.Status, limit, offset)
+	claims, total, err := listClaimsFiltered(ctx, conn, input.Type, input.Status, limit, offset)
 	if err != nil {
 		return mcpListClaimsOutput{}, err
 	}
@@ -80,13 +80,13 @@ func mcpRunListClaims(ctx context.Context, input mcpListClaimsInput) (mcpListCla
 func mcpRunListContradictions(ctx context.Context, input mcpListContradictionsInput) (mcpListContradictionsOutput, error) {
 	limit, offset := normalizePagination(input.Limit, input.Offset)
 
-	db, conn, err := openDB(ctx)
+	conn, err := openConn(ctx)
 	if err != nil {
 		return mcpListContradictionsOutput{}, err
 	}
 	defer closeConn(conn)
 
-	pairs, total, err := listContradictionPairs(ctx, db, limit, offset)
+	pairs, total, err := listContradictionPairs(ctx, conn, limit, offset)
 	if err != nil {
 		return mcpListContradictionsOutput{}, err
 	}
@@ -98,93 +98,86 @@ func mcpRunListContradictions(ctx context.Context, input mcpListContradictionsIn
 	}, nil
 }
 
-func listClaimsFiltered(ctx context.Context, db *sql.DB, claimType, status string, limit, offset int) ([]domain.Claim, int, error) {
-	var (
-		where []string
-		args  []any
-	)
-	if claimType != "" {
-		where = append(where, "type = ?")
-		args = append(args, claimType)
-	}
-	if status != "" {
-		where = append(where, "status = ?")
-		args = append(args, status)
-	}
-	whereClause := ""
-	if len(where) > 0 {
-		whereClause = " WHERE " + strings.Join(where, " AND ")
-	}
-
-	var total int
-	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM claims"+whereClause, args...).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count claims: %w", err)
-	}
-
-	rowsArgs := append(append([]any{}, args...), limit, offset)
-	rows, err := db.QueryContext(ctx,
-		"SELECT id, text, type, confidence, status, created_at FROM claims"+whereClause+" ORDER BY created_at DESC LIMIT ? OFFSET ?",
-		rowsArgs...,
-	)
+// listClaimsFiltered loads every claim and filters/paginates in
+// memory. The CLI scale (≤ 100k claims) makes a full ListAll cheap
+// and keeps the port surface free of bespoke filter parameters.
+func listClaimsFiltered(ctx context.Context, conn *store.Conn, claimType, status string, limit, offset int) ([]domain.Claim, int, error) {
+	all, err := conn.Claims.ListAll(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list claims: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
-
-	var claims []domain.Claim
-	for rows.Next() {
-		var (
-			c          domain.Claim
-			typeStr    string
-			statusStr  string
-			createdStr string
-		)
-		if err := rows.Scan(&c.ID, &c.Text, &typeStr, &c.Confidence, &statusStr, &createdStr); err != nil {
-			return nil, 0, fmt.Errorf("scan claim: %w", err)
+	filtered := make([]domain.Claim, 0, len(all))
+	for _, c := range all {
+		if claimType != "" && string(c.Type) != claimType {
+			continue
 		}
-		c.Type = domain.ClaimType(typeStr)
-		c.Status = domain.ClaimStatus(statusStr)
-		// Timestamps stay as strings on the wire — domain.Claim's CreatedAt
-		// type isn't worth round-tripping for browse output.
-		_ = createdStr
-		claims = append(claims, c)
+		if status != "" && string(c.Status) != status {
+			continue
+		}
+		filtered = append(filtered, c)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("iterate claims: %w", err)
+	// Sort by created_at descending for the most-recent-first browse
+	// experience. ListAll returns ascending; reverse before slicing.
+	for i, j := 0, len(filtered)-1; i < j; i, j = i+1, j-1 {
+		filtered[i], filtered[j] = filtered[j], filtered[i]
 	}
-	return claims, total, nil
+	total := len(filtered)
+	page := paginate(filtered, limit, offset)
+	return page, total, nil
 }
 
-func listContradictionPairs(ctx context.Context, db *sql.DB, limit, offset int) ([]mcpContradictionPair, int, error) {
-	var total int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM relationships WHERE type = 'contradicts'`).Scan(&total); err != nil {
-		return nil, 0, fmt.Errorf("count contradictions: %w", err)
-	}
-
-	rows, err := db.QueryContext(ctx, `
-		SELECT r.id, r.from_claim_id, COALESCE(cf.text, ''), r.to_claim_id, COALESCE(ct.text, ''), r.created_at
-		FROM relationships r
-		LEFT JOIN claims cf ON cf.id = r.from_claim_id
-		LEFT JOIN claims ct ON ct.id = r.to_claim_id
-		WHERE r.type = 'contradicts'
-		ORDER BY r.created_at DESC
-		LIMIT ? OFFSET ?
-	`, limit, offset)
+// listContradictionPairs assembles every contradicts edge with the
+// surrounding claim text using ports — Relationships.ListAll +
+// Claims.ListByIDs for the hop, then in-memory pagination.
+func listContradictionPairs(ctx context.Context, conn *store.Conn, limit, offset int) ([]mcpContradictionPair, int, error) {
+	allRels, err := conn.Relationships.ListAll(ctx)
 	if err != nil {
-		return nil, 0, fmt.Errorf("list contradictions: %w", err)
+		return nil, 0, fmt.Errorf("list relationships: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
-
-	var pairs []mcpContradictionPair
-	for rows.Next() {
-		var p mcpContradictionPair
-		if err := rows.Scan(&p.RelationshipID, &p.FromClaimID, &p.FromClaimText, &p.ToClaimID, &p.ToClaimText, &p.CreatedAt); err != nil {
-			return nil, 0, fmt.Errorf("scan contradiction: %w", err)
+	contradictions := make([]domain.Relationship, 0)
+	for _, r := range allRels {
+		if string(r.Type) == "contradicts" {
+			contradictions = append(contradictions, r)
 		}
-		pairs = append(pairs, p)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("iterate contradictions: %w", err)
+	// most-recent-first
+	for i, j := 0, len(contradictions)-1; i < j; i, j = i+1, j-1 {
+		contradictions[i], contradictions[j] = contradictions[j], contradictions[i]
+	}
+	total := len(contradictions)
+	page := paginate(contradictions, limit, offset)
+
+	// Resolve claim text for the page only — saves materialising
+	// every claim row when the operator only asked for one screen.
+	claimIDSet := map[string]struct{}{}
+	for _, r := range page {
+		claimIDSet[r.FromClaimID] = struct{}{}
+		claimIDSet[r.ToClaimID] = struct{}{}
+	}
+	claimIDs := make([]string, 0, len(claimIDSet))
+	for id := range claimIDSet {
+		claimIDs = append(claimIDs, id)
+	}
+	textByID := map[string]string{}
+	if len(claimIDs) > 0 {
+		claims, err := conn.Claims.ListByIDs(ctx, claimIDs)
+		if err != nil {
+			return nil, 0, fmt.Errorf("resolve claim texts: %w", err)
+		}
+		for _, c := range claims {
+			textByID[c.ID] = c.Text
+		}
+	}
+	pairs := make([]mcpContradictionPair, 0, len(page))
+	for _, r := range page {
+		pairs = append(pairs, mcpContradictionPair{
+			RelationshipID: r.ID,
+			FromClaimID:    r.FromClaimID,
+			FromClaimText:  textByID[r.FromClaimID],
+			ToClaimID:      r.ToClaimID,
+			ToClaimText:    textByID[r.ToClaimID],
+			CreatedAt:      r.CreatedAt.UTC().Format(time.RFC3339Nano),
+		})
 	}
 	return pairs, total, nil
 }

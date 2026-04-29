@@ -76,6 +76,13 @@ func (r EventRepository) ListAll(_ context.Context) ([]domain.Event, error) {
 	return out, nil
 }
 
+// CountAll returns the total number of events stored.
+func (r EventRepository) CountAll(_ context.Context) (int64, error) {
+	r.state.mu.RLock()
+	defer r.state.mu.RUnlock()
+	return int64(len(r.state.events)), nil
+}
+
 // ListByRunID returns every event tagged with the given run id, in
 // insertion order.
 func (r EventRepository) ListByRunID(_ context.Context, runID string) ([]domain.Event, error) {

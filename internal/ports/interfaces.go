@@ -14,6 +14,11 @@ type EventRepository interface {
 	ListByIDs(ctx context.Context, ids []string) ([]domain.Event, error)
 	ListAll(ctx context.Context) ([]domain.Event, error)
 	ListByRunID(ctx context.Context, runID string) ([]domain.Event, error)
+
+	// CountAll returns the total number of events stored. Used by the
+	// federation push/pull path to compute "newly inserted" deltas
+	// without a per-row RowsAffected probe.
+	CountAll(ctx context.Context) (int64, error)
 }
 
 // ClaimRepository persists and retrieves extracted claims.
@@ -49,6 +54,20 @@ type ClaimRepository interface {
 	// relevant repositories — DeleteCascade does not reach across
 	// repository boundaries.
 	DeleteCascade(ctx context.Context, claimID string) error
+
+	// CountAll returns the total number of claims stored. Used by
+	// federation pull (delta tracking) and metrics surfaces.
+	CountAll(ctx context.Context) (int64, error)
+
+	// ListAllEvidence returns every (claim_id, event_id) link in the
+	// store. Used by federation push to dump the link table without
+	// walking claims one at a time.
+	ListAllEvidence(ctx context.Context) ([]domain.ClaimEvidence, error)
+
+	// ListAllStatusHistory returns every claim_status_history row.
+	// Used by `mnemos audit who` to attribute transitions to a
+	// principal — filtering happens in the caller.
+	ListAllStatusHistory(ctx context.Context) ([]domain.ClaimStatusTransition, error)
 }
 
 // TrustScorer is the optional capability to recompute and aggregate
@@ -79,6 +98,17 @@ type RelationshipRepository interface {
 	// given claim (as source OR target). Used to clean up a claim's
 	// edges before the claim itself is deleted.
 	DeleteByClaim(ctx context.Context, claimID string) error
+
+	// CountAll returns the total number of relationships stored.
+	CountAll(ctx context.Context) (int64, error)
+
+	// CountByType returns the total number of relationships with the
+	// given type. Used by metrics + browse contradiction listing.
+	CountByType(ctx context.Context, relType string) (int64, error)
+
+	// ListAll returns every relationship stored, ordered by
+	// created_at ascending.
+	ListAll(ctx context.Context) ([]domain.Relationship, error)
 }
 
 // ExtractionEngine extracts structured claims from domain events.
@@ -104,6 +134,14 @@ type EmbeddingRepository interface {
 	// pipeline.ApplySemanticDedupe to drop a duplicate claim's
 	// vector before deleting the claim itself.
 	Delete(ctx context.Context, entityID, entityType string) error
+
+	// CountAll returns the total number of embedding rows.
+	CountAll(ctx context.Context) (int64, error)
+
+	// ListAll returns every embedding row, ordered by created_at
+	// ascending. Used by the federation push path to dump the
+	// embedding table without per-type query plumbing.
+	ListAll(ctx context.Context) ([]domain.EmbeddingRecord, error)
 }
 
 // TextHit is one row of a keyword search: the matched row's id and a

@@ -108,6 +108,17 @@ FROM %s ORDER BY timestamp ASC`, qualify(r.ns, "events")))
 	return collectEventRows(rows)
 }
 
+// CountAll returns the total number of events stored.
+func (r EventRepository) CountAll(ctx context.Context) (int64, error) {
+	var n int64
+	if err := r.db.QueryRowContext(ctx, fmt.Sprintf(
+		`SELECT COUNT(*) FROM %s`, qualify(r.ns, "events"),
+	)).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count events: %w", err)
+	}
+	return n, nil
+}
+
 // ListByRunID returns every event tagged with the given run id.
 func (r EventRepository) ListByRunID(ctx context.Context, runID string) ([]domain.Event, error) {
 	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`

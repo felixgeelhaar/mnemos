@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
@@ -234,6 +235,51 @@ func (r ClaimRepository) ListAll(_ context.Context) ([]domain.Claim, error) {
 			out = append(out, c.toDomain())
 		}
 	}
+	return out, nil
+}
+
+// CountAll returns the total number of claims stored.
+func (r ClaimRepository) CountAll(_ context.Context) (int64, error) {
+	r.state.mu.RLock()
+	defer r.state.mu.RUnlock()
+	return int64(len(r.state.claims)), nil
+}
+
+// ListAllEvidence returns every (claim_id, event_id) link.
+func (r ClaimRepository) ListAllEvidence(_ context.Context) ([]domain.ClaimEvidence, error) {
+	r.state.mu.RLock()
+	defer r.state.mu.RUnlock()
+	out := make([]domain.ClaimEvidence, 0)
+	for cid, set := range r.state.evidence {
+		for evID := range set {
+			out = append(out, domain.ClaimEvidence{ClaimID: cid, EventID: evID})
+		}
+	}
+	return out, nil
+}
+
+// ListAllStatusHistory returns every status transition across all
+// claims. Order: per-claim insertion order, claims interleaved by
+// transition timestamp.
+func (r ClaimRepository) ListAllStatusHistory(_ context.Context) ([]domain.ClaimStatusTransition, error) {
+	r.state.mu.RLock()
+	defer r.state.mu.RUnlock()
+	out := make([]domain.ClaimStatusTransition, 0)
+	for _, transitions := range r.state.statusHistory {
+		for _, t := range transitions {
+			out = append(out, domain.ClaimStatusTransition{
+				ClaimID:    t.ClaimID,
+				FromStatus: t.FromStatus,
+				ToStatus:   t.ToStatus,
+				ChangedAt:  t.ChangedAt,
+				Reason:     t.Reason,
+				ChangedBy:  t.ChangedBy,
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ChangedAt.Before(out[j].ChangedAt)
+	})
 	return out, nil
 }
 

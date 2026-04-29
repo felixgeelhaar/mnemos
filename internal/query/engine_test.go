@@ -21,6 +21,9 @@ func (f fakeEventRepo) ListByIDs(_ context.Context, _ []string) ([]domain.Event,
 	return nil, nil
 }
 func (f fakeEventRepo) ListAll(_ context.Context) ([]domain.Event, error) { return f.events, nil }
+func (f fakeEventRepo) CountAll(_ context.Context) (int64, error) {
+	return int64(len(f.events)), nil
+}
 func (f fakeEventRepo) ListByRunID(_ context.Context, runID string) ([]domain.Event, error) {
 	filtered := make([]domain.Event, 0)
 	for _, event := range f.events {
@@ -84,6 +87,17 @@ func (f fakeClaimRepo) ListByIDs(_ context.Context, claimIDs []string) ([]domain
 	}
 	return out, nil
 }
+func (f fakeClaimRepo) CountAll(_ context.Context) (int64, error) {
+	return int64(len(f.claims)), nil
+}
+func (f fakeClaimRepo) ListAllEvidence(_ context.Context) ([]domain.ClaimEvidence, error) {
+	out := make([]domain.ClaimEvidence, len(f.evidence))
+	copy(out, f.evidence)
+	return out, nil
+}
+func (f fakeClaimRepo) ListAllStatusHistory(_ context.Context) ([]domain.ClaimStatusTransition, error) {
+	return nil, nil
+}
 
 type fakeRelationshipRepo struct {
 	rels map[string][]domain.Relationship
@@ -100,6 +114,50 @@ func (f fakeRelationshipRepo) ListByClaimIDs(_ context.Context, claimIDs []strin
 	out := make([]domain.Relationship, 0)
 	for _, id := range claimIDs {
 		for _, rel := range f.rels[id] {
+			if _, dup := seen[rel.ID]; dup {
+				continue
+			}
+			seen[rel.ID] = struct{}{}
+			out = append(out, rel)
+		}
+	}
+	return out, nil
+}
+func (f fakeRelationshipRepo) CountAll(_ context.Context) (int64, error) {
+	var n int64
+	seen := map[string]struct{}{}
+	for _, list := range f.rels {
+		for _, rel := range list {
+			if _, dup := seen[rel.ID]; dup {
+				continue
+			}
+			seen[rel.ID] = struct{}{}
+			n++
+		}
+	}
+	return n, nil
+}
+func (f fakeRelationshipRepo) CountByType(_ context.Context, relType string) (int64, error) {
+	var n int64
+	seen := map[string]struct{}{}
+	for _, list := range f.rels {
+		for _, rel := range list {
+			if _, dup := seen[rel.ID]; dup {
+				continue
+			}
+			seen[rel.ID] = struct{}{}
+			if string(rel.Type) == relType {
+				n++
+			}
+		}
+	}
+	return n, nil
+}
+func (f fakeRelationshipRepo) ListAll(_ context.Context) ([]domain.Relationship, error) {
+	seen := map[string]struct{}{}
+	out := make([]domain.Relationship, 0)
+	for _, list := range f.rels {
+		for _, rel := range list {
 			if _, dup := seen[rel.ID]; dup {
 				continue
 			}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -255,7 +254,7 @@ func handleIngest(args []string, f Flags) {
 		}
 
 		contentArg := strings.Join(args[1:], " ")
-		err := runJob("ingest", map[string]string{"source": "raw_text"}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB, conn *store.Conn) error {
+		err := runJob("ingest", map[string]string{"source": "raw_text"}, f.Verbose, func(ctx context.Context, job *workflow.Job, conn *store.Conn) error {
 			actor, err := resolveActor(ctx, conn.Users, f.Actor)
 			if err != nil {
 				return err
@@ -302,7 +301,7 @@ func handleIngest(args []string, f Flags) {
 	}
 
 	path := args[0]
-	err := runJob("ingest", map[string]string{"path": path}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB, conn *store.Conn) error {
+	err := runJob("ingest", map[string]string{"path": path}, f.Verbose, func(ctx context.Context, job *workflow.Job, conn *store.Conn) error {
 		actor, err := resolveActor(ctx, conn.Users, f.Actor)
 		if err != nil {
 			return err
@@ -366,7 +365,7 @@ func handleQuery(args []string, f Flags) {
 		scope["include_history"] = "true"
 	}
 
-	err = runJob("query", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB, conn *store.Conn) error {
+	err = runJob("query", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, conn *store.Conn) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -624,7 +623,7 @@ func handleExtract(args []string, f Flags) {
 		scope["event_ids"] = strings.Join(eventIDs, ",")
 	}
 
-	err := runJob("extract", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB, conn *store.Conn) error {
+	err := runJob("extract", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, conn *store.Conn) error {
 		actor, actorErr := resolveActor(ctx, conn.Users, f.Actor)
 		if actorErr != nil {
 			return actorErr
@@ -699,7 +698,7 @@ func handleExtract(args []string, f Flags) {
 }
 
 func handleRelate(args []string, f Flags) {
-	err := runJob("relate", map[string]string{"event_ids": strings.Join(args, ",")}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB, conn *store.Conn) error {
+	err := runJob("relate", map[string]string{"event_ids": strings.Join(args, ",")}, f.Verbose, func(ctx context.Context, job *workflow.Job, conn *store.Conn) error {
 		actor, actorErr := resolveActor(ctx, conn.Users, f.Actor)
 		if actorErr != nil {
 			return actorErr
@@ -766,7 +765,7 @@ func handleProcess(args []string, f Flags) {
 		scope = map[string]string{"source": "raw_text"}
 	}
 
-	err := runJob("process", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB, conn *store.Conn) error {
+	err := runJob("process", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, conn *store.Conn) error {
 		actor, actorErr := resolveActor(ctx, conn.Users, f.Actor)
 		if actorErr != nil {
 			return actorErr
@@ -928,7 +927,7 @@ func handleProcess(args []string, f Flags) {
 }
 
 func handleMetrics(f Flags) {
-	err := runJob("metrics", map[string]string{}, f.Verbose, func(ctx context.Context, job *workflow.Job, db *sql.DB, conn *store.Conn) error {
+	err := runJob("metrics", map[string]string{}, f.Verbose, func(ctx context.Context, job *workflow.Job, conn *store.Conn) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err
 		}
@@ -946,14 +945,39 @@ func handleMetrics(f Flags) {
 		}
 		entityCount, _ := conn.Entities.Count(ctx)
 
+		// Distinct run-ids and contested counts are computed in
+		// memory from ListAll instead of bespoke ports — the metrics
+		// surface doesn't justify a CountDistinctRunID +
+		// CountByStatus port pair.
+		allEvents, _ := conn.Events.ListAll(ctx)
+		runIDs := map[string]struct{}{}
+		for _, e := range allEvents {
+			if e.RunID != "" {
+				runIDs[e.RunID] = struct{}{}
+			}
+		}
+		eventsCount, _ := conn.Events.CountAll(ctx)
+		claimsCount, _ := conn.Claims.CountAll(ctx)
+		relsCount, _ := conn.Relationships.CountAll(ctx)
+		contradictionsCount, _ := conn.Relationships.CountByType(ctx, "contradicts")
+		embeddingsCount, _ := conn.Embeddings.CountAll(ctx)
+
+		allClaims, _ := conn.Claims.ListAll(ctx)
+		var contestedCount int64
+		for _, c := range allClaims {
+			if string(c.Status) == "contested" {
+				contestedCount++
+			}
+		}
+
 		metrics := map[string]any{
-			"runs":                countValue(db, `SELECT COUNT(DISTINCT run_id) FROM events WHERE run_id <> ''`),
-			"events":              countValue(db, `SELECT COUNT(*) FROM events`),
-			"claims":              countValue(db, `SELECT COUNT(*) FROM claims`),
-			"contested_claims":    countValue(db, `SELECT COUNT(*) FROM claims WHERE status = 'contested'`),
-			"relationships":       countValue(db, `SELECT COUNT(*) FROM relationships`),
-			"contradictions":      countValue(db, `SELECT COUNT(*) FROM relationships WHERE type = 'contradicts'`),
-			"embeddings":          countValue(db, `SELECT COUNT(*) FROM embeddings`),
+			"runs":                int64(len(runIDs)),
+			"events":              eventsCount,
+			"claims":              claimsCount,
+			"contested_claims":    contestedCount,
+			"relationships":       relsCount,
+			"contradictions":      contradictionsCount,
+			"embeddings":          embeddingsCount,
 			"avg_trust":           roundTo(avgTrust, 3),
 			"low_trust_count":     lowTrust,
 			"low_trust_threshold": lowTrustThreshold,
@@ -1000,14 +1024,6 @@ func roundTo(f float64, n int) float64 {
 		shift *= 10
 	}
 	return float64(int64(f*shift+0.5)) / shift
-}
-
-func countValue(db *sql.DB, query string) int64 {
-	var value int64
-	if err := db.QueryRow(query).Scan(&value); err != nil {
-		return 0
-	}
-	return value
 }
 
 func cacheEntryCount() int {
@@ -1284,11 +1300,11 @@ func jobTimeout() time.Duration {
 	return d
 }
 
-func runJob(kind string, scope map[string]string, verbose bool, fn func(context.Context, *workflow.Job, *sql.DB, *store.Conn) error) error {
-	// First-run detection still uses the resolved file path (it's a
-	// SQLite-only concept — checking whether the DB file is newly
-	// created). When MNEMOS_DB_URL points at a non-SQLite backend
-	// openDB would error first anyway.
+func runJob(kind string, scope map[string]string, verbose bool, fn func(context.Context, *workflow.Job, *store.Conn) error) error {
+	// First-run detection still uses the resolved file path (a
+	// SQLite-only convenience — checking whether the DB file is
+	// newly created on disk). With non-SQLite DSNs the path is
+	// just a fallback default and isFirstRun is harmless.
 	dbPath := resolveDBPath()
 	if isFirstRun(dbPath) && kind != "ingest" && kind != "process" {
 		printWelcome()
@@ -1296,7 +1312,7 @@ func runJob(kind string, scope map[string]string, verbose bool, fn func(context.
 		printFirstRunHints()
 	}
 
-	db, conn, err := openDB(context.Background())
+	conn, err := openConn(context.Background())
 	if err != nil {
 		return NewSystemError(err, "failed to open database at %q", resolveDSN())
 	}
@@ -1308,7 +1324,7 @@ func runJob(kind string, scope map[string]string, verbose bool, fn func(context.
 	runner.Verbose = verbose
 
 	jobErr := runner.Run(kind, scope, func(ctx context.Context, job *workflow.Job) error {
-		return fn(ctx, job, db, conn)
+		return fn(ctx, job, conn)
 	})
 	return jobErr
 }

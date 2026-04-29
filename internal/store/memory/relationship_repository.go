@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 )
@@ -122,6 +123,41 @@ func (r RelationshipRepository) ListByClaimIDs(_ context.Context, claimIDs []str
 			out = append(out, rel.toDomain())
 		}
 	}
+	return out, nil
+}
+
+// CountAll returns the total number of relationships stored.
+func (r RelationshipRepository) CountAll(_ context.Context) (int64, error) {
+	r.state.mu.RLock()
+	defer r.state.mu.RUnlock()
+	return int64(len(r.state.relationships)), nil
+}
+
+// CountByType returns the number of relationships with the given type.
+func (r RelationshipRepository) CountByType(_ context.Context, relType string) (int64, error) {
+	r.state.mu.RLock()
+	defer r.state.mu.RUnlock()
+	var n int64
+	for _, rel := range r.state.relationships {
+		if string(rel.Type) == relType {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// ListAll returns every relationship stored, ordered by created_at
+// ascending (matching SQLite).
+func (r RelationshipRepository) ListAll(_ context.Context) ([]domain.Relationship, error) {
+	r.state.mu.RLock()
+	defer r.state.mu.RUnlock()
+	out := make([]domain.Relationship, 0, len(r.state.relationships))
+	for _, rel := range r.state.relationships {
+		out = append(out, rel.toDomain())
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
 	return out, nil
 }
 

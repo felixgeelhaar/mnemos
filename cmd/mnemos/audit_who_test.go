@@ -58,7 +58,7 @@ func TestBuildAuditWhoExport_FiltersByPrincipal(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	seedAuditFixture(t, db, time.Now().UTC().Add(-time.Hour))
 
-	alice, err := buildAuditWhoExport(context.Background(), db, "usr_alice", time.Time{})
+	alice, err := buildAuditWhoExport(context.Background(), connFromDB(t, db), "usr_alice", time.Time{})
 	if err != nil {
 		t.Fatalf("alice: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestBuildAuditWhoExport_FiltersByPrincipal(t *testing.T) {
 		t.Errorf("alice event content wrong: %+v", alice.Events)
 	}
 
-	bob, err := buildAuditWhoExport(context.Background(), db, "usr_bob", time.Time{})
+	bob, err := buildAuditWhoExport(context.Background(), connFromDB(t, db), "usr_bob", time.Time{})
 	if err != nil {
 		t.Fatalf("bob: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestBuildAuditWhoExport_SinceFilterPrunesOlderRows(t *testing.T) {
 	// since=24h ago → all the seeded rows are older than that, so
 	// alice's report should be empty (zero counts) but well-formed.
 	since := time.Now().UTC().Add(-24 * time.Hour)
-	exp, err := buildAuditWhoExport(context.Background(), db, "usr_alice", since)
+	exp, err := buildAuditWhoExport(context.Background(), connFromDB(t, db), "usr_alice", since)
 	if err != nil {
 		t.Fatalf("export: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestBuildAuditWhoExport_SinceFilterPrunesOlderRows(t *testing.T) {
 		t.Errorf("Since timestamp should be set on export")
 	}
 	// Conversely, no since filter returns the full alice slice.
-	full, err := buildAuditWhoExport(context.Background(), db, "usr_alice", time.Time{})
+	full, err := buildAuditWhoExport(context.Background(), connFromDB(t, db), "usr_alice", time.Time{})
 	if err != nil {
 		t.Fatalf("full: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestBuildAuditWhoExport_UnknownPrincipalIsEmpty(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 
-	exp, err := buildAuditWhoExport(context.Background(), db, "usr_nonexistent", time.Time{})
+	exp, err := buildAuditWhoExport(context.Background(), connFromDB(t, db), "usr_nonexistent", time.Time{})
 	if err != nil {
 		t.Fatalf("export: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestBuildAuditWhoExport_SystemSentinelMatches(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	exp, err := buildAuditWhoExport(context.Background(), db, "<system>", time.Time{})
+	exp, err := buildAuditWhoExport(context.Background(), connFromDB(t, db), "<system>", time.Time{})
 	if err != nil {
 		t.Fatalf("export: %v", err)
 	}

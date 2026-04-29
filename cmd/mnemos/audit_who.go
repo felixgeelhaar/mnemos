@@ -2,13 +2,14 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/felixgeelhaar/mnemos/internal/store"
 )
 
 // auditWhoExport is the on-the-wire shape of `mnemos audit who`.
@@ -113,14 +114,14 @@ func handleAuditWho(args []string, f Flags) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	db, conn, err := openDB(ctx)
+	conn, err := openConn(ctx)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
 	defer closeConn(conn)
 
-	export, err := buildAuditWhoExport(ctx, db, principal, since)
+	export, err := buildAuditWhoExport(ctx, conn, principal, since)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "build audit-who export"))
 		return
@@ -138,11 +139,11 @@ func handleAuditWho(args []string, f Flags) {
 	}
 }
 
-// buildAuditWhoExport runs five small SELECTs (one per write surface)
-// rather than a UNION because the column shapes differ enough that
-// a UNION would force lossy projections. The query count is bounded
-// by table count, not row count, so this scales fine.
-func buildAuditWhoExport(ctx context.Context, db *sql.DB, principal string, since time.Time) (auditWhoExport, error) {
+// buildAuditWhoExport pulls every write-attributed table through
+// ports and filters by principal (and optional since) in-process.
+// In-memory filtering is fine at CLI scale and keeps the port
+// surface small — every backend already implements ListAll.
+func buildAuditWhoExport(ctx context.Context, conn *store.Conn, principal string, since time.Time) (auditWhoExport, error) {
 	export := auditWhoExport{
 		SchemaVersion: auditWhoSchemaVersion,
 		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
@@ -157,20 +158,104 @@ func buildAuditWhoExport(ctx context.Context, db *sql.DB, principal string, sinc
 		export.Since = since.Format(time.RFC3339)
 	}
 
-	if err := loadAuditWhoEvents(ctx, db, principal, since, &export); err != nil {
-		return export, err
+	allEvents, err := conn.Events.ListAll(ctx)
+	if err != nil {
+		return export, fmt.Errorf("list events: %w", err)
 	}
-	if err := loadAuditWhoClaims(ctx, db, principal, since, &export); err != nil {
-		return export, err
+	for _, e := range allEvents {
+		if e.CreatedBy != principal {
+			continue
+		}
+		if !since.IsZero() && e.Timestamp.Before(since) {
+			continue
+		}
+		export.Events = append(export.Events, auditWhoEvent{
+			ID:        e.ID,
+			RunID:     e.RunID,
+			Content:   e.Content,
+			Timestamp: e.Timestamp.UTC().Format(time.RFC3339Nano),
+		})
 	}
-	if err := loadAuditWhoRelationships(ctx, db, principal, since, &export); err != nil {
-		return export, err
+
+	allClaims, err := conn.Claims.ListAll(ctx)
+	if err != nil {
+		return export, fmt.Errorf("list claims: %w", err)
 	}
-	if err := loadAuditWhoEmbeddings(ctx, db, principal, since, &export); err != nil {
-		return export, err
+	for _, c := range allClaims {
+		if c.CreatedBy != principal {
+			continue
+		}
+		if !since.IsZero() && c.CreatedAt.Before(since) {
+			continue
+		}
+		export.Claims = append(export.Claims, auditWhoClaim{
+			ID:         c.ID,
+			Text:       c.Text,
+			Type:       string(c.Type),
+			Status:     string(c.Status),
+			Confidence: c.Confidence,
+			CreatedAt:  c.CreatedAt.UTC().Format(time.RFC3339Nano),
+		})
 	}
-	if err := loadAuditWhoTransitions(ctx, db, principal, since, &export); err != nil {
-		return export, err
+
+	allRels, err := conn.Relationships.ListAll(ctx)
+	if err != nil {
+		return export, fmt.Errorf("list relationships: %w", err)
+	}
+	for _, r := range allRels {
+		if r.CreatedBy != principal {
+			continue
+		}
+		if !since.IsZero() && r.CreatedAt.Before(since) {
+			continue
+		}
+		export.Relationships = append(export.Relationships, auditWhoRelationship{
+			ID:          r.ID,
+			Type:        string(r.Type),
+			FromClaimID: r.FromClaimID,
+			ToClaimID:   r.ToClaimID,
+			CreatedAt:   r.CreatedAt.UTC().Format(time.RFC3339Nano),
+		})
+	}
+
+	allEmbeddings, err := conn.Embeddings.ListAll(ctx)
+	if err != nil {
+		return export, fmt.Errorf("list embeddings: %w", err)
+	}
+	for _, e := range allEmbeddings {
+		if e.CreatedBy != principal {
+			continue
+		}
+		if !since.IsZero() && e.CreatedAt.Before(since) {
+			continue
+		}
+		export.Embeddings = append(export.Embeddings, auditWhoEmbedding{
+			EntityID:   e.EntityID,
+			EntityType: e.EntityType,
+			Model:      e.Model,
+			Dimensions: e.Dimensions,
+			CreatedAt:  e.CreatedAt.UTC().Format(time.RFC3339Nano),
+		})
+	}
+
+	allHistory, err := conn.Claims.ListAllStatusHistory(ctx)
+	if err != nil {
+		return export, fmt.Errorf("list status history: %w", err)
+	}
+	for _, t := range allHistory {
+		if t.ChangedBy != principal {
+			continue
+		}
+		if !since.IsZero() && t.ChangedAt.Before(since) {
+			continue
+		}
+		export.Transitions = append(export.Transitions, auditWhoTransition{
+			ClaimID:    t.ClaimID,
+			FromStatus: string(t.FromStatus),
+			ToStatus:   string(t.ToStatus),
+			ChangedAt:  t.ChangedAt.UTC().Format(time.RFC3339Nano),
+			Reason:     t.Reason,
+		})
 	}
 
 	export.Counts = auditWhoCounts{
@@ -181,118 +266,6 @@ func buildAuditWhoExport(ctx context.Context, db *sql.DB, principal string, sinc
 		Transitions:   len(export.Transitions),
 	}
 	return export, nil
-}
-
-// sinceClause returns ("" or " AND <col> >= ?", arg) for an optional
-// timestamp filter. Centralised so each loader can prepend its own
-// principal predicate without re-implementing the conditional.
-func sinceClause(col string, since time.Time) (string, []any) {
-	if since.IsZero() {
-		return "", nil
-	}
-	return fmt.Sprintf(" AND %s >= ?", col), []any{since.UTC().Format(time.RFC3339Nano)}
-}
-
-func loadAuditWhoEvents(ctx context.Context, db *sql.DB, principal string, since time.Time, out *auditWhoExport) error {
-	clause, extra := sinceClause("timestamp", since)
-	args := append([]any{principal}, extra...)
-	//nolint:gosec // G202: clause is a literal " AND <col> >= ?" returned by sinceClause; values pass through ? bindings
-	q := `SELECT id, run_id, content, timestamp FROM events WHERE created_by = ?` + clause + ` ORDER BY timestamp ASC`
-	rows, err := db.QueryContext(ctx, q, args...)
-	if err != nil {
-		return fmt.Errorf("query events: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var e auditWhoEvent
-		if err := rows.Scan(&e.ID, &e.RunID, &e.Content, &e.Timestamp); err != nil {
-			return fmt.Errorf("scan event: %w", err)
-		}
-		out.Events = append(out.Events, e)
-	}
-	return rows.Err()
-}
-
-func loadAuditWhoClaims(ctx context.Context, db *sql.DB, principal string, since time.Time, out *auditWhoExport) error {
-	clause, extra := sinceClause("created_at", since)
-	args := append([]any{principal}, extra...)
-	//nolint:gosec // G202: clause is a literal " AND <col> >= ?" returned by sinceClause; values pass through ? bindings
-	q := `SELECT id, text, type, status, confidence, created_at FROM claims WHERE created_by = ?` + clause + ` ORDER BY created_at ASC`
-	rows, err := db.QueryContext(ctx, q, args...)
-	if err != nil {
-		return fmt.Errorf("query claims: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var c auditWhoClaim
-		if err := rows.Scan(&c.ID, &c.Text, &c.Type, &c.Status, &c.Confidence, &c.CreatedAt); err != nil {
-			return fmt.Errorf("scan claim: %w", err)
-		}
-		out.Claims = append(out.Claims, c)
-	}
-	return rows.Err()
-}
-
-func loadAuditWhoRelationships(ctx context.Context, db *sql.DB, principal string, since time.Time, out *auditWhoExport) error {
-	clause, extra := sinceClause("created_at", since)
-	args := append([]any{principal}, extra...)
-	//nolint:gosec // G202: clause is a literal " AND <col> >= ?" returned by sinceClause; values pass through ? bindings
-	q := `SELECT id, type, from_claim_id, to_claim_id, created_at FROM relationships WHERE created_by = ?` + clause + ` ORDER BY created_at ASC`
-	rows, err := db.QueryContext(ctx, q, args...)
-	if err != nil {
-		return fmt.Errorf("query relationships: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var r auditWhoRelationship
-		if err := rows.Scan(&r.ID, &r.Type, &r.FromClaimID, &r.ToClaimID, &r.CreatedAt); err != nil {
-			return fmt.Errorf("scan relationship: %w", err)
-		}
-		out.Relationships = append(out.Relationships, r)
-	}
-	return rows.Err()
-}
-
-func loadAuditWhoEmbeddings(ctx context.Context, db *sql.DB, principal string, since time.Time, out *auditWhoExport) error {
-	clause, extra := sinceClause("created_at", since)
-	args := append([]any{principal}, extra...)
-	//nolint:gosec // G202: clause is a literal " AND <col> >= ?" returned by sinceClause; values pass through ? bindings
-	q := `SELECT entity_id, entity_type, model, dimensions, created_at FROM embeddings WHERE created_by = ?` + clause + ` ORDER BY created_at ASC`
-	rows, err := db.QueryContext(ctx, q, args...)
-	if err != nil {
-		return fmt.Errorf("query embeddings: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var e auditWhoEmbedding
-		var dims int64
-		if err := rows.Scan(&e.EntityID, &e.EntityType, &e.Model, &dims, &e.CreatedAt); err != nil {
-			return fmt.Errorf("scan embedding: %w", err)
-		}
-		e.Dimensions = int(dims)
-		out.Embeddings = append(out.Embeddings, e)
-	}
-	return rows.Err()
-}
-
-func loadAuditWhoTransitions(ctx context.Context, db *sql.DB, principal string, since time.Time, out *auditWhoExport) error {
-	clause, extra := sinceClause("changed_at", since)
-	args := append([]any{principal}, extra...)
-	//nolint:gosec // G202: clause is a literal " AND <col> >= ?" returned by sinceClause; values pass through ? bindings
-	q := `SELECT claim_id, from_status, to_status, changed_at, reason FROM claim_status_history WHERE changed_by = ?` + clause + ` ORDER BY changed_at ASC`
-	rows, err := db.QueryContext(ctx, q, args...)
-	if err != nil {
-		return fmt.Errorf("query transitions: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var t auditWhoTransition
-		if err := rows.Scan(&t.ClaimID, &t.FromStatus, &t.ToStatus, &t.ChangedAt, &t.Reason); err != nil {
-			return fmt.Errorf("scan transition: %w", err)
-		}
-		out.Transitions = append(out.Transitions, t)
-	}
-	return rows.Err()
 }
 
 // printAuditWhoHuman renders the export as a chronological table.

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -56,7 +55,7 @@ func handleEntitiesList(args []string, f Flags) {
 		}
 	}
 
-	err := runJob("entities-list", map[string]string{"type": typeFilter}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, conn *store.Conn) error {
+	err := runJob("entities-list", map[string]string{"type": typeFilter}, f.Verbose, func(ctx context.Context, _ *workflow.Job, conn *store.Conn) error {
 		repo := conn.Entities
 		var (
 			ents []domain.Entity
@@ -92,7 +91,7 @@ func handleEntitiesShow(args []string, f Flags) {
 	}
 	target := strings.Join(args, " ")
 
-	err := runJob("entities-show", map[string]string{"target": target}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, conn *store.Conn) error {
+	err := runJob("entities-show", map[string]string{"target": target}, f.Verbose, func(ctx context.Context, _ *workflow.Job, conn *store.Conn) error {
 		repo := conn.Entities
 		entity, ok, err := resolveEntity(ctx, repo, target)
 		if err != nil {
@@ -129,7 +128,7 @@ func handleEntitiesMerge(args []string, f Flags) {
 	}
 	winnerID, loserID := args[0], args[1]
 
-	err := runJob("entities-merge", map[string]string{"winner": winnerID, "loser": loserID}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, conn *store.Conn) error {
+	err := runJob("entities-merge", map[string]string{"winner": winnerID, "loser": loserID}, f.Verbose, func(ctx context.Context, _ *workflow.Job, conn *store.Conn) error {
 		repo := conn.Entities
 		if err := repo.Merge(ctx, winnerID, loserID); err != nil {
 			return NewSystemError(err, "merge entities")
@@ -156,7 +155,7 @@ func handleExtractEntities(args []string, f Flags) {
 		}
 	}
 
-	err := runJob("extract-entities", map[string]string{"all": fmt.Sprintf("%t", all)}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, conn *store.Conn) error {
+	err := runJob("extract-entities", map[string]string{"all": fmt.Sprintf("%t", all)}, f.Verbose, func(ctx context.Context, _ *workflow.Job, conn *store.Conn) error {
 		repo := conn.Entities
 		var ids []string
 		if all {

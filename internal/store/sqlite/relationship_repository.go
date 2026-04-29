@@ -144,6 +144,65 @@ func (r RelationshipRepository) DeleteByClaim(ctx context.Context, claimID strin
 	return nil
 }
 
+// CountAll returns the total number of relationships stored.
+func (r RelationshipRepository) CountAll(ctx context.Context) (int64, error) {
+	var n int64
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM relationships`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count relationships: %w", err)
+	}
+	return n, nil
+}
+
+// CountByType returns the number of relationships with the given type.
+func (r RelationshipRepository) CountByType(ctx context.Context, relType string) (int64, error) {
+	var n int64
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM relationships WHERE type = ?`, relType,
+	).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count relationships by type: %w", err)
+	}
+	return n, nil
+}
+
+// ListAll returns every relationship stored, ordered by created_at
+// ascending.
+func (r RelationshipRepository) ListAll(ctx context.Context) ([]domain.Relationship, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, type, from_claim_id, to_claim_id, created_at, created_by
+		 FROM relationships
+		 ORDER BY created_at ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list all relationships: %w", err)
+	}
+	defer closeRows(rows)
+
+	out := make([]domain.Relationship, 0)
+	for rows.Next() {
+		var (
+			id, typ, from, to, createdStr, createdBy string
+		)
+		if err := rows.Scan(&id, &typ, &from, &to, &createdStr, &createdBy); err != nil {
+			return nil, fmt.Errorf("scan relationship row: %w", err)
+		}
+		t, err := time.Parse(time.RFC3339Nano, createdStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse relationship created_at: %w", err)
+		}
+		out = append(out, domain.Relationship{
+			ID:          id,
+			Type:        domain.RelationshipType(typ),
+			FromClaimID: from,
+			ToClaimID:   to,
+			CreatedAt:   t,
+			CreatedBy:   createdBy,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate relationship rows: %w", err)
+	}
+	return out, nil
+}
+
 // ListByClaimIDs returns every relationship that touches any of the given
 // claim IDs (as source OR target). Used by hop-expansion in the query
 // engine — N IDs in one round trip rather than N round trips.

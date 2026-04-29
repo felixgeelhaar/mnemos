@@ -53,19 +53,45 @@ func (r EmbeddingRepository) Delete(ctx context.Context, entityID, entityType st
 // ListByEntityType satisfies the corresponding ports method.
 func (r EmbeddingRepository) ListByEntityType(ctx context.Context, entityType string) ([]domain.EmbeddingRecord, error) {
 	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
-SELECT entity_id, entity_type, vector, model, dimensions, created_by
+SELECT entity_id, entity_type, vector, model, dimensions, created_at, created_by
 FROM %s WHERE entity_type = $1`, qualify(r.ns, "embeddings")), entityType)
 	if err != nil {
 		return nil, fmt.Errorf("list embeddings by type: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
+	return collectEmbeddingRows(rows)
+}
 
+// CountAll satisfies the corresponding ports method.
+func (r EmbeddingRepository) CountAll(ctx context.Context) (int64, error) {
+	var n int64
+	if err := r.db.QueryRowContext(ctx, fmt.Sprintf(
+		`SELECT COUNT(*) FROM %s`, qualify(r.ns, "embeddings"),
+	)).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count embeddings: %w", err)
+	}
+	return n, nil
+}
+
+// ListAll satisfies the corresponding ports method.
+func (r EmbeddingRepository) ListAll(ctx context.Context) ([]domain.EmbeddingRecord, error) {
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+SELECT entity_id, entity_type, vector, model, dimensions, created_at, created_by
+FROM %s ORDER BY created_at ASC`, qualify(r.ns, "embeddings")))
+	if err != nil {
+		return nil, fmt.Errorf("list all embeddings: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return collectEmbeddingRows(rows)
+}
+
+func collectEmbeddingRows(rows *sql.Rows) ([]domain.EmbeddingRecord, error) {
 	out := make([]domain.EmbeddingRecord, 0)
 	for rows.Next() {
 		var rec domain.EmbeddingRecord
 		var vec []byte
 		var dims int64
-		if err := rows.Scan(&rec.EntityID, &rec.EntityType, &vec, &rec.Model, &dims, &rec.CreatedBy); err != nil {
+		if err := rows.Scan(&rec.EntityID, &rec.EntityType, &vec, &rec.Model, &dims, &rec.CreatedAt, &rec.CreatedBy); err != nil {
 			return nil, fmt.Errorf("scan embedding row: %w", err)
 		}
 		v, err := embedding.DecodeVector(vec)

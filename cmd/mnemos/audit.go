@@ -2,11 +2,12 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/felixgeelhaar/mnemos/internal/store"
 )
 
 // auditExport is the on-the-wire shape of `mnemos audit`. Top-level fields
@@ -61,14 +62,14 @@ func handleAudit(args []string, flags Flags) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	db, conn, err := openDB(ctx)
+	conn, err := openConn(ctx)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "open database"))
 		return
 	}
 	defer closeConn(conn)
 
-	export, err := buildAuditExport(ctx, db, resolveDSN(), includeEmbeddings)
+	export, err := buildAuditExport(ctx, conn, resolveDSN(), includeEmbeddings)
 	if err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "build audit export"))
 		return
@@ -82,16 +83,16 @@ func handleAudit(args []string, flags Flags) {
 	}
 }
 
-func buildAuditExport(ctx context.Context, db *sql.DB, dbPath string, includeEmbeddings bool) (auditExport, error) {
-	events, err := loadAllEventsForPush(ctx, db)
+func buildAuditExport(ctx context.Context, conn *store.Conn, dbPath string, includeEmbeddings bool) (auditExport, error) {
+	events, err := loadAllEventsForPush(ctx, conn)
 	if err != nil {
 		return auditExport{}, fmt.Errorf("load events: %w", err)
 	}
-	claims, evidence, err := loadAllClaimsForPush(ctx, db)
+	claims, evidence, err := loadAllClaimsForPush(ctx, conn)
 	if err != nil {
 		return auditExport{}, fmt.Errorf("load claims: %w", err)
 	}
-	rels, err := loadAllRelationshipsForPush(ctx, db)
+	rels, err := loadAllRelationshipsForPush(ctx, conn)
 	if err != nil {
 		return auditExport{}, fmt.Errorf("load relationships: %w", err)
 	}
@@ -113,7 +114,7 @@ func buildAuditExport(ctx context.Context, db *sql.DB, dbPath string, includeEmb
 	}
 
 	if includeEmbeddings {
-		embs, err := loadAllEmbeddingsForPush(ctx, db)
+		embs, err := loadAllEmbeddingsForPush(ctx, conn)
 		if err != nil {
 			return auditExport{}, fmt.Errorf("load embeddings: %w", err)
 		}

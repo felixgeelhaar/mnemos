@@ -55,7 +55,11 @@ func handleReset(args []string, f Flags) {
 		}
 	}
 
-	err := runJob("reset", map[string]string{"keep_events": fmt.Sprintf("%t", keepEvents)}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, conn *store.Conn) error {
+	err := runJob("reset", map[string]string{"keep_events": fmt.Sprintf("%t", keepEvents)}, f.Verbose, func(ctx context.Context, _ *workflow.Job, conn *store.Conn) error {
+		db, err := connDB(conn)
+		if err != nil {
+			return err
+		}
 		counts, err := resetDB(ctx, db, keepEvents)
 		if err != nil {
 			return NewSystemError(err, "reset failed")
@@ -73,9 +77,13 @@ func handleDeleteClaim(args []string, f Flags) {
 		os.Exit(int(ExitUsage))
 	}
 
-	err := runJob("delete-claim", map[string]string{"ids": strings.Join(args, ",")}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, conn *store.Conn) error {
+	err := runJob("delete-claim", map[string]string{"ids": strings.Join(args, ",")}, f.Verbose, func(ctx context.Context, _ *workflow.Job, conn *store.Conn) error {
+		db, err := connDB(conn)
+		if err != nil {
+			return err
+		}
 		var deletedClaims, deletedRels, deletedEvidence int64
-		err := withTx(ctx, db, func(q *sqlcgen.Queries) error {
+		err = withTx(ctx, db, func(q *sqlcgen.Queries) error {
 			for _, id := range args {
 				if err := q.DeleteRelationshipsByClaimID(ctx, sqlcgen.DeleteRelationshipsByClaimIDParams{
 					FromClaimID: id, ToClaimID: id,
@@ -118,10 +126,14 @@ func handleDeleteEvent(args []string, f Flags) {
 		os.Exit(int(ExitUsage))
 	}
 
-	err := runJob("delete-event", map[string]string{"ids": strings.Join(args, ",")}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, conn *store.Conn) error {
+	err := runJob("delete-event", map[string]string{"ids": strings.Join(args, ",")}, f.Verbose, func(ctx context.Context, _ *workflow.Job, conn *store.Conn) error {
+		db, err := connDB(conn)
+		if err != nil {
+			return err
+		}
 		var deletedEvents int64
 		var cascadedClaims int64
-		err := withTx(ctx, db, func(q *sqlcgen.Queries) error {
+		err = withTx(ctx, db, func(q *sqlcgen.Queries) error {
 			for _, id := range args {
 				// Cascade through dependent claims first.
 				claimIDs, err := q.ListClaimsByEventID(ctx, id)
@@ -212,7 +224,7 @@ func handleDedupe(args []string, f Flags) {
 	err := runJob("dedup", map[string]string{
 		"threshold": strconv.FormatFloat(threshold, 'f', 2, 64),
 		"apply":     fmt.Sprintf("%t", apply),
-	}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, conn *store.Conn) error {
+	}, f.Verbose, func(ctx context.Context, _ *workflow.Job, conn *store.Conn) error {
 		plan, err := pipeline.PlanSemanticDedupe(ctx, conn, threshold)
 		if err != nil {
 			return NewSystemError(err, "plan semantic dedupe")
@@ -273,7 +285,7 @@ func handleRecomputeTrust(args []string, f Flags) {
 		}
 	}
 
-	err := runJob("recompute-trust", map[string]string{}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, conn *store.Conn) error {
+	err := runJob("recompute-trust", map[string]string{}, f.Verbose, func(ctx context.Context, _ *workflow.Job, conn *store.Conn) error {
 		scorer, ok := conn.Claims.(ports.TrustScorer)
 		if !ok {
 			return NewSystemError(fmt.Errorf("backend %T does not support trust scoring", conn.Claims), "recompute trust")
@@ -301,7 +313,11 @@ func handleReembed(args []string, f Flags) {
 		}
 	}
 
-	err := runJob("reembed", map[string]string{"force": fmt.Sprintf("%t", f.Force), "dry_run": fmt.Sprintf("%t", f.DryRun)}, f.Verbose, func(ctx context.Context, _ *workflow.Job, db *sql.DB, conn *store.Conn) error {
+	err := runJob("reembed", map[string]string{"force": fmt.Sprintf("%t", f.Force), "dry_run": fmt.Sprintf("%t", f.DryRun)}, f.Verbose, func(ctx context.Context, _ *workflow.Job, conn *store.Conn) error {
+		db, err := connDB(conn)
+		if err != nil {
+			return err
+		}
 		q := sqlcgen.New(db)
 
 		// Determine which claim ids need (re-)embedding.

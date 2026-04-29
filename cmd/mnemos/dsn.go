@@ -49,32 +49,20 @@ func openConn(ctx context.Context) (*store.Conn, error) {
 	return store.Open(ctx, resolveDSN())
 }
 
-// openDB is the migration-window helper for cmd/mnemos call sites
-// that need *sql.DB directly — entity & compilation_job repositories
-// haven't been lifted into ports yet, and several CLI surfaces
-// (browse, audit, mcp) still issue raw SQL. It opens the configured
-// backend through the registry, then type-asserts Conn.Raw to a
-// *sql.DB.
+// connDB returns the underlying *sql.DB on a Conn for the small
+// number of admin/entity command paths that haven't been lifted to
+// ports yet. Returns a clear error when the backend doesn't expose
+// a *sql.DB (e.g. memory://) so the failure mode is "this command
+// requires a SQL backend" rather than a silent nil deref.
 //
-// Returns a clear error when MNEMOS_DB_URL points at a non-SQLite
-// backend (e.g. memory://) — those call sites genuinely need SQLite
-// today, and a loud error here beats a nil-deref later.
-//
-// The caller owns the *store.Conn lifecycle: defer conn.Close()
-// (which runs the provider's Closer and in turn closes the *sql.DB).
-// Do not also close the *sql.DB explicitly — that would double-close.
-func openDB(ctx context.Context) (*sql.DB, *store.Conn, error) {
-	conn, err := openConn(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
+// New call sites should reach for ports on Conn directly. This
+// helper exists only as a migration shim.
+func connDB(conn *store.Conn) (*sql.DB, error) {
 	db, ok := conn.Raw.(*sql.DB)
 	if !ok || db == nil {
-		dsn := resolveDSN()
-		_ = conn.Close()
-		return nil, nil, fmt.Errorf("backend at %q does not expose *sql.DB; this command requires a SQLite-compatible DSN (sqlite://, sqlite3://) until entity/job repositories are lifted into ports", dsn)
+		return nil, fmt.Errorf("backend at %q does not expose *sql.DB; this command requires a SQL-backed DSN (sqlite://, postgres://, mysql://, libsql://)", resolveDSN())
 	}
-	return db, conn, nil
+	return db, nil
 }
 
 // closeConn closes a *store.Conn, logging any error.

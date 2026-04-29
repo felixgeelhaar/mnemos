@@ -1,0 +1,219 @@
+syntax = "proto3";
+
+package mnemos.v1;
+
+option go_package = "github.com/felixgeelhaar/mnemos/proto/gen/mnemos/v1;mnemosv1";
+
+import "google/protobuf/timestamp.proto";
+
+// MnemosService provides the gRPC API surface for the Mnemos knowledge
+// registry. It mirrors the HTTP REST API at /v1/* with equivalent
+// operations for events, claims, relationships, embeddings, and metrics.
+service MnemosService {
+  // Health returns the service health status. Deep probes are available
+  // via the detailed field.
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // ListEvents returns a paginated list of all events, most recent first.
+  rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
+
+  // AppendEvents writes one or more events to the store. Idempotent on
+  // duplicate event IDs.
+  rpc AppendEvents(AppendEventsRequest) returns (AppendResponse);
+
+  // ListClaims returns a paginated list of claims with optional type/status
+  // filtering. Evidence links are included when include_evidence is true.
+  rpc ListClaims(ListClaimsRequest) returns (ListClaimsResponse);
+
+  // AppendClaims writes claims and optionally their evidence links.
+  rpc AppendClaims(AppendClaimsRequest) returns (AppendResponse);
+
+  // ListRelationships returns a paginated list of relationships with
+  // optional type filtering.
+  rpc ListRelationships(ListRelationshipsRequest) returns (ListRelationshipsResponse);
+
+  // AppendRelationships writes one or more relationship edges.
+  rpc AppendRelationships(AppendRelationshipsRequest) returns (AppendResponse);
+
+  // ListEmbeddings returns a paginated list of embeddings with optional
+  // entity_type filtering.
+  rpc ListEmbeddings(ListEmbeddingsRequest) returns (ListEmbeddingsResponse);
+
+  // AppendEmbeddings writes one or more embedding vectors.
+  rpc AppendEmbeddings(AppendEmbeddingsRequest) returns (AppendResponse);
+
+  // Metrics returns aggregate counts for the knowledge base.
+  rpc Metrics(MetricsRequest) returns (MetricsResponse);
+}
+
+// ---------------------------------------------------------------------------
+// Common types
+// ---------------------------------------------------------------------------
+
+message Pagination {
+  int32 limit  = 1;
+  int32 offset = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Health
+// ---------------------------------------------------------------------------
+
+message HealthRequest {
+  bool detailed = 1;
+}
+
+message HealthResponse {
+  string status  = 1;
+  string version = 2;
+  bool   healthy = 3;
+}
+
+// ---------------------------------------------------------------------------
+// Events
+// ---------------------------------------------------------------------------
+
+message Event {
+  string                 id             = 1;
+  string                 run_id         = 2;
+  string                 schema_version = 3;
+  string                 content        = 4;
+  string                 source_input_id = 5;
+  google.protobuf.Timestamp timestamp   = 6;
+  map<string, string>    metadata       = 7;
+  google.protobuf.Timestamp ingested_at = 8;
+}
+
+message ListEventsRequest {
+  Pagination pagination = 1;
+}
+
+message ListEventsResponse {
+  repeated Event events = 1;
+  int32          total  = 2;
+  int32          limit  = 3;
+  int32          offset = 4;
+}
+
+message AppendEventsRequest {
+  repeated Event events = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Claims
+// ---------------------------------------------------------------------------
+
+message Claim {
+  string    id         = 1;
+  string    text       = 2;
+  string    type       = 3;
+  double    confidence = 4;
+  string    status     = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+message ClaimEvidence {
+  string claim_id = 1;
+  string event_id = 2;
+}
+
+message ListClaimsRequest {
+  Pagination pagination        = 1;
+  string     type_filter       = 2;
+  string     status_filter     = 3;
+  bool       include_evidence  = 4;
+}
+
+message ListClaimsResponse {
+  repeated Claim         claims   = 1;
+  repeated ClaimEvidence evidence = 2;
+  int32                  total    = 3;
+  int32                  limit    = 4;
+  int32                  offset   = 5;
+}
+
+message AppendClaimsRequest {
+  repeated Claim         claims   = 1;
+  repeated ClaimEvidence evidence = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Relationships
+// ---------------------------------------------------------------------------
+
+message Relationship {
+  string    id            = 1;
+  string    type          = 2;
+  string    from_claim_id = 3;
+  string    to_claim_id   = 4;
+  google.protobuf.Timestamp created_at = 5;
+}
+
+message ListRelationshipsRequest {
+  Pagination pagination  = 1;
+  string     type_filter = 2;
+}
+
+message ListRelationshipsResponse {
+  repeated Relationship relationships = 1;
+  int32                   total       = 2;
+  int32                   limit       = 3;
+  int32                   offset      = 4;
+}
+
+message AppendRelationshipsRequest {
+  repeated Relationship relationships = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Embeddings
+// ---------------------------------------------------------------------------
+
+message Embedding {
+  string    entity_id   = 1;
+  string    entity_type = 2;
+  repeated float vector = 3;
+  string    model       = 4;
+  int32     dimensions  = 5;
+}
+
+message ListEmbeddingsRequest {
+  Pagination pagination  = 1;
+  string     entity_type = 2; // "event" or "claim"; empty = all
+}
+
+message ListEmbeddingsResponse {
+  repeated Embedding embeddings = 1;
+  int32              total      = 2;
+  int32              limit      = 3;
+  int32              offset     = 4;
+}
+
+message AppendEmbeddingsRequest {
+  repeated Embedding embeddings = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Common response
+// ---------------------------------------------------------------------------
+
+message AppendResponse {
+  int32 accepted = 1;
+  int32 skipped  = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Metrics
+// ---------------------------------------------------------------------------
+
+message MetricsRequest {}
+
+message MetricsResponse {
+  int64 runs             = 1;
+  int64 events           = 2;
+  int64 claims           = 3;
+  int64 contested_claims = 4;
+  int64 relationships    = 5;
+  int64 contradictions   = 6;
+  int64 embeddings       = 7;
+}

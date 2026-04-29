@@ -1085,7 +1085,7 @@ func printUsage() {
 	fmt.Println("  token issue --user <id> [--ttl <d>]  Mint a JWT for a user (default ttl 90 days)")
 	fmt.Println("  token revoke <jti>                   Add a JWT's jti to the denylist")
 	fmt.Println("  mcp                                  Start MCP server over stdio")
-	fmt.Println("  serve [--port <n>]                   Start HTTP registry server (default :7777)")
+	fmt.Println("  serve [--port <n>] [--grpc-port <n>] Start HTTP registry server (default :7777) with optional gRPC")
 	fmt.Println("")
 	fmt.Println("Registry Sync:")
 	fmt.Println("  registry connect <url> [--token T]   Wire this project to a remote registry")

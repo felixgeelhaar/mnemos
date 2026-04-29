@@ -250,3 +250,9 @@ Phase 6 of ADR 0001: ship a libSQL/Turso provider for cloud-replicated and edge-
 Phase 7 of ADR 0001: every production surface is backend-agnostic; no legacy. Add the port methods needed to express semantic dedupe and the serve.go HTTP handlers without raw SQL — Claims.RepointEvidence, Claims.DeleteCascade, Relationships.RepointEndpoint, Relationships.DeleteByClaim, Embeddings.Delete, plus paginated list methods on Events/Claims/Relationships/Embeddings. Implement in every native provider (sqlite, memory, postgres, mysql; libsql inherits sqlite). Migrate pipeline.ApplySemanticDedupe and the serve.go handlers to ports. Then drop legacy: MNEMOS_DB_PATH env var, openDB helper (keep openConn only), sqlite.Open public function, any remaining sqlite-only call sites in cmd/mnemos. Pre-launch posture — no backwards-compat stubs.
 
 ---
+
+## gRPC API Server
+
+Add a gRPC API surface to Mnemos alongside the existing HTTP REST API. Define proto schemas for events, claims, relationships, and embeddings that mirror the HTTP API contract. Generate Go code with protoc-gen-go-grpc. Implement a gRPC server that reuses the existing port-typed repositories and bearer-token auth from serve.go. Wire into the CLI via `mnemos serve --grpc-port` or `mnemos grpc`. This enables high-performance service-to-service communication for the cognitive stack (Chronos, Praxis, Nous) and supports streaming for large dataset operations.
+
+---

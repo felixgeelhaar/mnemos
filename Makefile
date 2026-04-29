@@ -6,7 +6,10 @@ COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildDate=$(BUILD_DATE)"
 
-.PHONY: fmt lint test test-integration build check sqlc install release-snapshot release-check
+PROTO_DIR := proto
+PROTO_GEN := proto/gen
+
+.PHONY: fmt lint test test-integration build check sqlc install release-snapshot release-check proto
 
 fmt:
 	$(GO) fmt ./...
@@ -36,6 +39,15 @@ install:
 
 sqlc:
 	sqlc generate
+
+proto:
+	@mkdir -p $(PROTO_GEN)
+	@protoc \
+		--go_out=$(PROTO_GEN) --go_opt=paths=source_relative \
+		--go-grpc_out=$(PROTO_GEN) --go-grpc_opt=paths=source_relative \
+		-I$(PROTO_DIR) \
+		$(shell find $(PROTO_DIR) -name '*.proto')
+	$(GO) fmt ./$(PROTO_GEN)/...
 
 check: fmt lint test build
 

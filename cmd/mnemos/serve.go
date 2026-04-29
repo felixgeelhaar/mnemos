@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,6 +20,8 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/auth"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/store"
+	mnemosgrpc "github.com/felixgeelhaar/mnemos/internal/server/grpc"
+	"google.golang.org/grpc"
 )
 
 //go:embed web/index.html
@@ -51,6 +54,7 @@ const (
 // needs first anyway.
 func handleServe(args []string, _ Flags) {
 	port := defaultServePort
+	grpcPort := 0 // 0 = disabled
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--port":
@@ -64,6 +68,18 @@ func handleServe(args []string, _ Flags) {
 				return
 			}
 			port = p
+			i++
+		case "--grpc-port":
+			if i+1 >= len(args) {
+				exitWithMnemosError(false, NewUserError("--grpc-port requires a value"))
+				return
+			}
+			p, err := strconv.Atoi(args[i+1])
+			if err != nil || p < 1 || p > 65535 {
+				exitWithMnemosError(false, NewUserError("--grpc-port must be a number between 1 and 65535"))
+				return
+			}
+			grpcPort = p
 			i++
 		default:
 			exitWithMnemosError(false, NewUserError("unknown serve flag %q", args[i]))
@@ -94,12 +110,20 @@ func handleServe(args []string, _ Flags) {
 		MaxHeaderBytes:    serveMaxHeaderBytes,
 	}
 
+	var grpcSrv *grpc.Server
+	if grpcPort > 0 {
+		grpcSrv = startGRPCServer(grpcPort, conn, dsn)
+	}
+
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
 	errCh := make(chan error, 1)
 	go func() {
 		fmt.Printf("mnemos registry serving on http://localhost:%d (db=%s)\n", port, dsn)
+		if grpcPort > 0 {
+			fmt.Printf("mnemos gRPC serving on localhost:%d\n", grpcPort)
+		}
 		fmt.Println("Press Ctrl+C to stop.")
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
@@ -116,7 +140,40 @@ func handleServe(args []string, _ Flags) {
 		if err := srv.Shutdown(ctx); err != nil {
 			fmt.Fprintf(os.Stderr, "shutdown: %v\n", err)
 		}
+		if grpcSrv != nil {
+			grpcSrv.GracefulStop()
+		}
 	}
+}
+
+// startGRPCServer creates and starts a gRPC server on the given port.
+// It shares the store.Conn and auth verifier with the HTTP surface.
+func startGRPCServer(port int, conn *store.Conn, dsn string) *grpc.Server {
+	_, projectRoot, _ := findProjectDB()
+	secretPath := auth.DefaultSecretPath(projectRoot)
+	secret, _, err := auth.LoadOrCreateSecret(secretPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "serve: load JWT secret for gRPC: %v\n", err)
+		os.Exit(int(ExitError))
+	}
+	verifier := auth.NewVerifier(secret, conn.RevokedTokens)
+	logger := bolt.New(bolt.NewJSONHandler(os.Stderr))
+
+	mnemosSrv := mnemosgrpc.NewServer(conn, verifier, logger, version)
+	grpcSrv := grpc.NewServer(grpc.UnaryInterceptor(mnemosSrv.UnaryInterceptor()))
+	mnemosSrv.Register(grpcSrv)
+
+	go func() {
+		lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "gRPC listen: %v\n", err)
+			os.Exit(int(ExitError))
+		}
+		if err := grpcSrv.Serve(lis); err != nil {
+			fmt.Fprintf(os.Stderr, "gRPC serve: %v\n", err)
+		}
+	}()
+	return grpcSrv
 }
 
 // newServerMux wires the routes. Exported in package for httptest in

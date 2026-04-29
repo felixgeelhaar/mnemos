@@ -32,6 +32,32 @@ func openMemory(t *testing.T) *store.Conn {
 	return conn
 }
 
+func TestOpen_DefaultNamespace(t *testing.T) {
+	t.Parallel()
+	conn, err := store.Open(context.Background(), "memory://")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer conn.Close()
+}
+
+func TestOpen_ExplicitNamespace(t *testing.T) {
+	t.Parallel()
+	conn, err := store.Open(context.Background(), "memory://?namespace=chronos")
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	defer conn.Close()
+}
+
+func TestOpen_InvalidNamespaceRejected(t *testing.T) {
+	t.Parallel()
+	_, err := store.Open(context.Background(), "memory://?namespace=Team-X")
+	if err == nil {
+		t.Fatal("expected error for invalid namespace, got nil")
+	}
+}
+
 func TestOpen_PopulatesAllRepositories(t *testing.T) {
 	t.Parallel()
 	conn := openMemory(t)

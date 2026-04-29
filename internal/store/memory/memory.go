@@ -22,6 +22,8 @@ package memory
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -38,6 +40,12 @@ func init() {
 	store.Register("memory", openProvider)
 }
 
+// namespaceRE mirrors ADR 0001 §3: lowercase, alphanumeric+underscore,
+// must start with a letter, max 63 bytes.
+var namespaceRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
+
+const defaultNamespace = "mnemos"
+
 // openProvider parses a memory:// DSN and returns a Conn with all
 // port-typed repositories backed by a fresh shared state struct. The
 // state lives only as long as the Conn — Close releases the
@@ -47,7 +55,18 @@ func openProvider(_ context.Context, dsn string) (*store.Conn, error) {
 	if !strings.HasPrefix(dsn, "memory://") {
 		return nil, fmt.Errorf("memory: not a memory dsn: %q", dsn)
 	}
-	st := newState()
+
+	ns := defaultNamespace
+	if u, err := url.Parse(dsn); err == nil {
+		if qns := u.Query().Get("namespace"); qns != "" {
+			ns = qns
+		}
+	}
+	if !namespaceRE.MatchString(ns) {
+		return nil, fmt.Errorf("memory: invalid namespace %q (want %s)", ns, namespaceRE.String())
+	}
+
+	st := newState(ns)
 	return &store.Conn{
 		Events:        EventRepository{state: st},
 		Claims:        ClaimRepository{state: st},
@@ -71,7 +90,8 @@ func openProvider(_ context.Context, dsn string) (*store.Conn, error) {
 // memory provider is for tests and embedding, not production
 // throughput.
 type state struct {
-	mu sync.RWMutex
+	mu        sync.RWMutex
+	namespace string // namespace for key prefixing (ADR 0001 §3)
 
 	events        map[string]storedEvent
 	eventOrder    []string // insertion order, for ListAll
@@ -94,8 +114,9 @@ type state struct {
 	jobs          map[string]storedCompilationJob
 }
 
-func newState() *state {
+func newState(namespace string) *state {
 	return &state{
+		namespace:     namespace,
 		events:        map[string]storedEvent{},
 		claims:        map[string]storedClaim{},
 		statusHistory: map[string][]storedTransition{},
@@ -111,6 +132,13 @@ func newState() *state {
 		claimEntities: map[claimEntityKey]string{},
 		jobs:          map[string]storedCompilationJob{},
 	}
+}
+
+// nsKey prefixes an id with the state's namespace so two Conns opened
+// with different namespaces but shared state don't collide. Used for
+// all string-keyed maps.
+func (s *state) nsKey(id string) string {
+	return s.namespace + ":" + id
 }
 
 // clear drops every collection. Called from Conn.Close so a closed

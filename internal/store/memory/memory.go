@@ -66,7 +66,10 @@ func openProvider(_ context.Context, dsn string) (*store.Conn, error) {
 		return nil, fmt.Errorf("memory: invalid namespace %q (want %s)", ns, namespaceRE.String())
 	}
 
-	st := newState(ns)
+	// Namespace is validated but not stored — each memory:// open gets a
+	// fresh isolated state, so isolation is by instance rather than key prefix.
+	_ = ns
+	st := newState()
 	return &store.Conn{
 		Events:        EventRepository{state: st},
 		Claims:        ClaimRepository{state: st},
@@ -90,8 +93,7 @@ func openProvider(_ context.Context, dsn string) (*store.Conn, error) {
 // memory provider is for tests and embedding, not production
 // throughput.
 type state struct {
-	mu        sync.RWMutex
-	namespace string // namespace for key prefixing (ADR 0001 §3)
+	mu sync.RWMutex
 
 	events        map[string]storedEvent
 	eventOrder    []string // insertion order, for ListAll
@@ -114,9 +116,8 @@ type state struct {
 	jobs          map[string]storedCompilationJob
 }
 
-func newState(namespace string) *state {
+func newState() *state {
 	return &state{
-		namespace:     namespace,
 		events:        map[string]storedEvent{},
 		claims:        map[string]storedClaim{},
 		statusHistory: map[string][]storedTransition{},
@@ -132,13 +133,6 @@ func newState(namespace string) *state {
 		claimEntities: map[claimEntityKey]string{},
 		jobs:          map[string]storedCompilationJob{},
 	}
-}
-
-// nsKey prefixes an id with the state's namespace so two Conns opened
-// with different namespaces but shared state don't collide. Used for
-// all string-keyed maps.
-func (s *state) nsKey(id string) string {
-	return s.namespace + ":" + id
 }
 
 // clear drops every collection. Called from Conn.Close so a closed

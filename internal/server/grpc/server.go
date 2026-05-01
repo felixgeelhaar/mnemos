@@ -217,6 +217,7 @@ func (s *Server) requireScope(ctx context.Context, want string) error {
 // Health
 // ---------------------------------------------------------------------------
 
+// Health is the gRPC health probe. Returns the running version and a human-readable status string.
 func (s *Server) Health(ctx context.Context, req *mnemosv1.HealthRequest) (*mnemosv1.HealthResponse, error) {
 	if !req.Detailed {
 		return &mnemosv1.HealthResponse{Status: "ok", Version: s.version}, nil
@@ -228,6 +229,7 @@ func (s *Server) Health(ctx context.Context, req *mnemosv1.HealthRequest) (*mnem
 // Events
 // ---------------------------------------------------------------------------
 
+// ListEvents returns events ordered by timestamp ascending. Pagination via Limit/PageToken (cursor = last event id).
 func (s *Server) ListEvents(ctx context.Context, req *mnemosv1.ListEventsRequest) (*mnemosv1.ListEventsResponse, error) {
 	limit, offset := normalizePagination(req.Pagination)
 
@@ -250,6 +252,7 @@ func (s *Server) ListEvents(ctx context.Context, req *mnemosv1.ListEventsRequest
 	return &mnemosv1.ListEventsResponse{Events: events, Total: int32(total), Limit: int32(limit), Offset: int32(offset)}, nil
 }
 
+// AppendEvents writes events idempotently. Re-appending the same id is a no-op (mirrors REST semantics).
 func (s *Server) AppendEvents(ctx context.Context, req *mnemosv1.AppendEventsRequest) (*mnemosv1.AppendResponse, error) {
 	if err := s.requireScope(ctx, domain.ScopeEventsWrite); err != nil {
 		return nil, err
@@ -303,6 +306,7 @@ func (s *Server) AppendEvents(ctx context.Context, req *mnemosv1.AppendEventsReq
 // Claims
 // ---------------------------------------------------------------------------
 
+// ListClaims returns claims with optional type/status filters and cursor-based pagination.
 func (s *Server) ListClaims(ctx context.Context, req *mnemosv1.ListClaimsRequest) (*mnemosv1.ListClaimsResponse, error) {
 	limit, offset := normalizePagination(req.Pagination)
 	typeFilter := req.TypeFilter
@@ -357,6 +361,7 @@ func (s *Server) ListClaims(ctx context.Context, req *mnemosv1.ListClaimsRequest
 	return &mnemosv1.ListClaimsResponse{Claims: claims, Evidence: evidence, Total: int32(total), Limit: int32(limit), Offset: int32(offset)}, nil
 }
 
+// AppendClaims upserts claims and their evidence links in a single batched call.
 func (s *Server) AppendClaims(ctx context.Context, req *mnemosv1.AppendClaimsRequest) (*mnemosv1.AppendResponse, error) {
 	if err := s.requireScope(ctx, domain.ScopeClaimsWrite); err != nil {
 		return nil, err
@@ -420,6 +425,7 @@ func (s *Server) AppendClaims(ctx context.Context, req *mnemosv1.AppendClaimsReq
 // Relationships
 // ---------------------------------------------------------------------------
 
+// ListRelationships returns relationships filtered by type/from/to with cursor pagination.
 func (s *Server) ListRelationships(ctx context.Context, req *mnemosv1.ListRelationshipsRequest) (*mnemosv1.ListRelationshipsResponse, error) {
 	limit, offset := normalizePagination(req.Pagination)
 	typeFilter := req.TypeFilter
@@ -460,6 +466,7 @@ func (s *Server) ListRelationships(ctx context.Context, req *mnemosv1.ListRelati
 	return &mnemosv1.ListRelationshipsResponse{Relationships: out, Total: int32(total), Limit: int32(limit), Offset: int32(offset)}, nil
 }
 
+// AppendRelationships upserts relationship rows. Idempotent on the (type, from, to) unique edge.
 func (s *Server) AppendRelationships(ctx context.Context, req *mnemosv1.AppendRelationshipsRequest) (*mnemosv1.AppendResponse, error) {
 	if err := s.requireScope(ctx, domain.ScopeRelationshipsWrite); err != nil {
 		return nil, err
@@ -502,6 +509,7 @@ func (s *Server) AppendRelationships(ctx context.Context, req *mnemosv1.AppendRe
 // Embeddings
 // ---------------------------------------------------------------------------
 
+// ListEmbeddings returns embedding rows filtered by entity_type with cursor pagination.
 func (s *Server) ListEmbeddings(ctx context.Context, req *mnemosv1.ListEmbeddingsRequest) (*mnemosv1.ListEmbeddingsResponse, error) {
 	limit, offset := normalizePagination(req.Pagination)
 	typeFilter := req.EntityType
@@ -531,6 +539,7 @@ func (s *Server) ListEmbeddings(ctx context.Context, req *mnemosv1.ListEmbedding
 	return &mnemosv1.ListEmbeddingsResponse{Embeddings: out, Total: int32(total), Limit: int32(limit), Offset: int32(offset)}, nil
 }
 
+// AppendEmbeddings upserts vector rows. Re-writing the same (entity_id, entity_type) replaces the vector.
 func (s *Server) AppendEmbeddings(ctx context.Context, req *mnemosv1.AppendEmbeddingsRequest) (*mnemosv1.AppendResponse, error) {
 	if err := s.requireScope(ctx, domain.ScopeEmbeddingsWrite); err != nil {
 		return nil, err
@@ -569,6 +578,7 @@ func (s *Server) AppendEmbeddings(ctx context.Context, req *mnemosv1.AppendEmbed
 // Metrics
 // ---------------------------------------------------------------------------
 
+// Metrics returns aggregate counts (events, claims, contradictions, embeddings) and the running version.
 func (s *Server) Metrics(ctx context.Context, _ *mnemosv1.MetricsRequest) (*mnemosv1.MetricsResponse, error) {
 	events, _ := s.conn.Events.ListAll(ctx)
 	claims, _ := s.conn.Claims.ListAll(ctx)

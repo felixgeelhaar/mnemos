@@ -15,6 +15,7 @@ import (
 
 	grpclib "google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -39,18 +40,18 @@ func startTestServer(t *testing.T) (mnemosv1.MnemosServiceClient, func()) {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	go srv.Serve(lis)
+	go func() { _ = srv.Serve(lis) }()
 
-	cc, err := grpclib.Dial(lis.Addr().String(), grpclib.WithInsecure())
+	cc, err := grpclib.NewClient(lis.Addr().String(), grpclib.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
 	client := mnemosv1.NewMnemosServiceClient(cc)
 
 	cleanup := func() {
-		cc.Close()
+		_ = cc.Close()
 		srv.GracefulStop()
-		conn.Close()
+		_ = conn.Close()
 	}
 	return client, cleanup
 }
@@ -201,12 +202,16 @@ func TestMetrics(t *testing.T) {
 	ctx := context.Background()
 	now := timestamppb.New(time.Now().UTC())
 
-	client.AppendEvents(ctx, &mnemosv1.AppendEventsRequest{
+	if _, err := client.AppendEvents(ctx, &mnemosv1.AppendEventsRequest{
 		Events: []*mnemosv1.Event{{Id: "ev-1", RunId: "r1", SchemaVersion: "v1", Content: "x", SourceInputId: "in1", Timestamp: now, IngestedAt: now}},
-	})
-	client.AppendClaims(ctx, &mnemosv1.AppendClaimsRequest{
+	}); err != nil {
+		t.Fatalf("AppendEvents: %v", err)
+	}
+	if _, err := client.AppendClaims(ctx, &mnemosv1.AppendClaimsRequest{
 		Claims: []*mnemosv1.Claim{{Id: "cl-1", Text: "x", Type: "fact", Confidence: 0.5, Status: "active", CreatedAt: now}},
-	})
+	}); err != nil {
+		t.Fatalf("AppendClaims: %v", err)
+	}
 
 	m, err := client.Metrics(ctx, &mnemosv1.MetricsRequest{})
 	if err != nil {

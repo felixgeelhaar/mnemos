@@ -44,7 +44,7 @@ jobs:
         run: go install github.com/felixgeelhaar/coverctl@latest
 
       - name: Enforce coverage policy
-        run: coverctl check --from-profile coverage.out -o json
+        run: coverctl check --profile ./coverage.out --from-profile -o json
 
       - name: Install nox
         run: go install github.com/felixgeelhaar/nox/cmd/nox@latest

@@ -64,10 +64,10 @@ type AnalysisInput struct {
 // deliberately conservative — operators tighten as their corpus
 // stabilises.
 type Thresholds struct {
-	SourceConcentration  float64
-	PolaritySkew         float64
-	TemporalCluster      float64
-	SingleSourceOfTruth  float64
+	SourceConcentration float64
+	PolaritySkew        float64
+	TemporalCluster     float64
+	SingleSourceOfTruth float64
 }
 
 // DefaultThresholds is a starting point. Anything ≥ 0.6 typically

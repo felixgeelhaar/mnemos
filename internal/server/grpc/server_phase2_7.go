@@ -1,0 +1,564 @@
+// Phase 2-7 gRPC service methods. Lives in a sibling file to keep
+// the original server.go (events/claims/relationships/embeddings)
+// readable while letting the new entity surfaces share the same
+// helpers (paginate, normalizePagination, actorFromContext, scope
+// guards).
+
+package grpc
+
+import (
+	"context"
+	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	"github.com/felixgeelhaar/mnemos/internal/domain"
+	mnemosv1 "github.com/felixgeelhaar/mnemos/proto/gen/mnemos/v1"
+)
+
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
+
+// ListActions returns recorded operational actions with optional
+// subject/run filters and cursor pagination.
+func (s *Server) ListActions(ctx context.Context, req *mnemosv1.ListActionsRequest) (*mnemosv1.ListActionsResponse, error) {
+	limit, offset := normalizePagination(req.Pagination)
+	var actions []domain.Action
+	var err error
+	switch {
+	case req.Subject != "":
+		actions, err = s.conn.Actions.ListBySubject(ctx, req.Subject)
+	case req.RunId != "":
+		actions, err = s.conn.Actions.ListByRunID(ctx, req.RunId)
+	default:
+		actions, err = s.conn.Actions.ListAll(ctx)
+	}
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list actions: %v", err)
+	}
+	total := len(actions)
+	page := paginate(actions, limit, offset)
+	out := make([]*mnemosv1.Action, 0, len(page))
+	for _, a := range page {
+		out = append(out, actionToProto(a))
+	}
+	return &mnemosv1.ListActionsResponse{Actions: out, Total: int32(total), Limit: int32(limit), Offset: int32(offset)}, nil
+}
+
+// AppendActions writes operational actions idempotently.
+func (s *Server) AppendActions(ctx context.Context, req *mnemosv1.AppendActionsRequest) (*mnemosv1.AppendResponse, error) {
+	if len(req.Actions) == 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "actions array is empty")
+	}
+	if len(req.Actions) > maxBatchRecords {
+		return nil, status.Errorf(codes.InvalidArgument, "actions batch size %d exceeds max %d", len(req.Actions), maxBatchRecords)
+	}
+	actor := actorFromContext(ctx)
+	accepted := 0
+	for i, a := range req.Actions {
+		if a.Id == "" {
+			return nil, status.Errorf(codes.InvalidArgument, "actions[%d].id is required", i)
+		}
+		at := time.Now().UTC()
+		if a.At != nil {
+			at = a.At.AsTime()
+		}
+		action := domain.Action{
+			ID:        a.Id,
+			RunID:     a.RunId,
+			Kind:      domain.ActionKind(a.Kind),
+			Subject:   a.Subject,
+			Actor:     a.Actor,
+			At:        at,
+			Metadata:  a.Metadata,
+			CreatedBy: firstNonEmptyStr(a.CreatedBy, actor),
+		}
+		if err := s.conn.Actions.Append(ctx, action); err != nil {
+			return nil, status.Errorf(codes.Internal, "append action %s: %v", action.ID, err)
+		}
+		accepted++
+	}
+	return &mnemosv1.AppendResponse{Accepted: int32(accepted)}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Outcomes
+// ---------------------------------------------------------------------------
+
+// ListOutcomes returns observed action outcomes.
+func (s *Server) ListOutcomes(ctx context.Context, req *mnemosv1.ListOutcomesRequest) (*mnemosv1.ListOutcomesResponse, error) {
+	limit, offset := normalizePagination(req.Pagination)
+	var outcomes []domain.Outcome
+	var err error
+	if req.ActionId != "" {
+		outcomes, err = s.conn.Outcomes.ListByActionID(ctx, req.ActionId)
+	} else {
+		outcomes, err = s.conn.Outcomes.ListAll(ctx)
+	}
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list outcomes: %v", err)
+	}
+	total := len(outcomes)
+	page := paginate(outcomes, limit, offset)
+	out := make([]*mnemosv1.Outcome, 0, len(page))
+	for _, o := range page {
+		out = append(out, outcomeToProto(o))
+	}
+	return &mnemosv1.ListOutcomesResponse{Outcomes: out, Total: int32(total), Limit: int32(limit), Offset: int32(offset)}, nil
+}
+
+// AppendOutcomes writes outcomes idempotently. The grpc surface does
+// NOT auto-fire action_of/outcome_of edges; that wiring lives in the
+// CLI/MCP layer for now.
+func (s *Server) AppendOutcomes(ctx context.Context, req *mnemosv1.AppendOutcomesRequest) (*mnemosv1.AppendResponse, error) {
+	if len(req.Outcomes) == 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "outcomes array is empty")
+	}
+	if len(req.Outcomes) > maxBatchRecords {
+		return nil, status.Errorf(codes.InvalidArgument, "outcomes batch size %d exceeds max %d", len(req.Outcomes), maxBatchRecords)
+	}
+	actor := actorFromContext(ctx)
+	accepted := 0
+	for i, o := range req.Outcomes {
+		if o.Id == "" {
+			return nil, status.Errorf(codes.InvalidArgument, "outcomes[%d].id is required", i)
+		}
+		observed := time.Now().UTC()
+		if o.ObservedAt != nil {
+			observed = o.ObservedAt.AsTime()
+		}
+		outcome := domain.Outcome{
+			ID:         o.Id,
+			ActionID:   o.ActionId,
+			Result:     domain.OutcomeResult(o.Result),
+			Metrics:    o.Metrics,
+			Notes:      o.Notes,
+			ObservedAt: observed,
+			Source:     o.Source,
+			CreatedBy:  firstNonEmptyStr(o.CreatedBy, actor),
+		}
+		if err := s.conn.Outcomes.Append(ctx, outcome); err != nil {
+			return nil, status.Errorf(codes.Internal, "append outcome %s: %v", outcome.ID, err)
+		}
+		accepted++
+	}
+	return &mnemosv1.AppendResponse{Accepted: int32(accepted)}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Lessons
+// ---------------------------------------------------------------------------
+
+// ListLessons returns synthesised lessons with optional service or
+// trigger filter.
+func (s *Server) ListLessons(ctx context.Context, req *mnemosv1.ListLessonsRequest) (*mnemosv1.ListLessonsResponse, error) {
+	limit, offset := normalizePagination(req.Pagination)
+	var lessons []domain.Lesson
+	var err error
+	switch {
+	case req.Service != "":
+		lessons, err = s.conn.Lessons.ListByService(ctx, req.Service)
+	case req.Trigger != "":
+		lessons, err = s.conn.Lessons.ListByTrigger(ctx, req.Trigger)
+	default:
+		lessons, err = s.conn.Lessons.ListAll(ctx)
+	}
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list lessons: %v", err)
+	}
+	total := len(lessons)
+	page := paginate(lessons, limit, offset)
+	out := make([]*mnemosv1.Lesson, 0, len(page))
+	for _, l := range page {
+		out = append(out, lessonToProto(l))
+	}
+	return &mnemosv1.ListLessonsResponse{Lessons: out, Total: int32(total), Limit: int32(limit), Offset: int32(offset)}, nil
+}
+
+// AppendLessons writes lessons idempotently.
+func (s *Server) AppendLessons(ctx context.Context, req *mnemosv1.AppendLessonsRequest) (*mnemosv1.AppendResponse, error) {
+	if len(req.Lessons) == 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "lessons array is empty")
+	}
+	if len(req.Lessons) > maxBatchRecords {
+		return nil, status.Errorf(codes.InvalidArgument, "lessons batch size %d exceeds max %d", len(req.Lessons), maxBatchRecords)
+	}
+	actor := actorFromContext(ctx)
+	accepted := 0
+	for i, l := range req.Lessons {
+		if l.Id == "" {
+			return nil, status.Errorf(codes.InvalidArgument, "lessons[%d].id is required", i)
+		}
+		derived := time.Now().UTC()
+		if l.DerivedAt != nil {
+			derived = l.DerivedAt.AsTime()
+		}
+		lesson := domain.Lesson{
+			ID:           l.Id,
+			Statement:    l.Statement,
+			Scope:        scopeFromProto(l.Scope),
+			Trigger:      l.Trigger,
+			Kind:         l.Kind,
+			Evidence:     l.Evidence,
+			Confidence:   l.Confidence,
+			DerivedAt:    derived,
+			LastVerified: timestampOrZero(l.LastVerified),
+			Source:       l.Source,
+			CreatedBy:    firstNonEmptyStr(l.CreatedBy, actor),
+		}
+		if err := s.conn.Lessons.Append(ctx, lesson); err != nil {
+			return nil, status.Errorf(codes.Internal, "append lesson %s: %v", lesson.ID, err)
+		}
+		accepted++
+	}
+	return &mnemosv1.AppendResponse{Accepted: int32(accepted)}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Decisions
+// ---------------------------------------------------------------------------
+
+// ListDecisions returns recorded decisions.
+func (s *Server) ListDecisions(ctx context.Context, req *mnemosv1.ListDecisionsRequest) (*mnemosv1.ListDecisionsResponse, error) {
+	limit, offset := normalizePagination(req.Pagination)
+	var decisions []domain.Decision
+	var err error
+	if req.RiskLevel != "" {
+		decisions, err = s.conn.Decisions.ListByRiskLevel(ctx, req.RiskLevel)
+	} else {
+		decisions, err = s.conn.Decisions.ListAll(ctx)
+	}
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list decisions: %v", err)
+	}
+	total := len(decisions)
+	page := paginate(decisions, limit, offset)
+	out := make([]*mnemosv1.Decision, 0, len(page))
+	for _, d := range page {
+		out = append(out, decisionToProto(d))
+	}
+	return &mnemosv1.ListDecisionsResponse{Decisions: out, Total: int32(total), Limit: int32(limit), Offset: int32(offset)}, nil
+}
+
+// AppendDecisions writes decisions idempotently.
+func (s *Server) AppendDecisions(ctx context.Context, req *mnemosv1.AppendDecisionsRequest) (*mnemosv1.AppendResponse, error) {
+	if len(req.Decisions) == 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "decisions array is empty")
+	}
+	if len(req.Decisions) > maxBatchRecords {
+		return nil, status.Errorf(codes.InvalidArgument, "decisions batch size %d exceeds max %d", len(req.Decisions), maxBatchRecords)
+	}
+	actor := actorFromContext(ctx)
+	accepted := 0
+	for i, d := range req.Decisions {
+		if d.Id == "" {
+			return nil, status.Errorf(codes.InvalidArgument, "decisions[%d].id is required", i)
+		}
+		chosen := time.Now().UTC()
+		if d.ChosenAt != nil {
+			chosen = d.ChosenAt.AsTime()
+		}
+		decision := domain.Decision{
+			ID:           d.Id,
+			Statement:    d.Statement,
+			Plan:         d.Plan,
+			Reasoning:    d.Reasoning,
+			RiskLevel:    domain.RiskLevel(d.RiskLevel),
+			Beliefs:      d.Beliefs,
+			Alternatives: d.Alternatives,
+			OutcomeID:    d.OutcomeId,
+			Scope:        scopeFromProto(d.Scope),
+			ChosenAt:     chosen,
+			CreatedBy:    firstNonEmptyStr(d.CreatedBy, actor),
+		}
+		if err := s.conn.Decisions.Append(ctx, decision); err != nil {
+			return nil, status.Errorf(codes.Internal, "append decision %s: %v", decision.ID, err)
+		}
+		accepted++
+	}
+	return &mnemosv1.AppendResponse{Accepted: int32(accepted)}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Playbooks
+// ---------------------------------------------------------------------------
+
+// ListPlaybooks returns synthesised or hand-authored playbooks.
+func (s *Server) ListPlaybooks(ctx context.Context, req *mnemosv1.ListPlaybooksRequest) (*mnemosv1.ListPlaybooksResponse, error) {
+	limit, offset := normalizePagination(req.Pagination)
+	var playbooks []domain.Playbook
+	var err error
+	switch {
+	case req.Trigger != "":
+		playbooks, err = s.conn.Playbooks.ListByTrigger(ctx, req.Trigger)
+	case req.Service != "":
+		playbooks, err = s.conn.Playbooks.ListByService(ctx, req.Service)
+	default:
+		playbooks, err = s.conn.Playbooks.ListAll(ctx)
+	}
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list playbooks: %v", err)
+	}
+	total := len(playbooks)
+	page := paginate(playbooks, limit, offset)
+	out := make([]*mnemosv1.Playbook, 0, len(page))
+	for _, p := range page {
+		out = append(out, playbookToProto(p))
+	}
+	return &mnemosv1.ListPlaybooksResponse{Playbooks: out, Total: int32(total), Limit: int32(limit), Offset: int32(offset)}, nil
+}
+
+// AppendPlaybooks writes playbooks idempotently.
+func (s *Server) AppendPlaybooks(ctx context.Context, req *mnemosv1.AppendPlaybooksRequest) (*mnemosv1.AppendResponse, error) {
+	if len(req.Playbooks) == 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "playbooks array is empty")
+	}
+	if len(req.Playbooks) > maxBatchRecords {
+		return nil, status.Errorf(codes.InvalidArgument, "playbooks batch size %d exceeds max %d", len(req.Playbooks), maxBatchRecords)
+	}
+	actor := actorFromContext(ctx)
+	accepted := 0
+	for i, p := range req.Playbooks {
+		if p.Id == "" {
+			return nil, status.Errorf(codes.InvalidArgument, "playbooks[%d].id is required", i)
+		}
+		derived := time.Now().UTC()
+		if p.DerivedAt != nil {
+			derived = p.DerivedAt.AsTime()
+		}
+		steps := make([]domain.PlaybookStep, 0, len(p.Steps))
+		for _, st := range p.Steps {
+			steps = append(steps, domain.PlaybookStep{
+				Order:       int(st.Order),
+				Action:      st.Action,
+				Description: st.Description,
+				Condition:   st.Condition,
+			})
+		}
+		playbook := domain.Playbook{
+			ID:                 p.Id,
+			Trigger:            p.Trigger,
+			Statement:          p.Statement,
+			Scope:              scopeFromProto(p.Scope),
+			Steps:              steps,
+			DerivedFromLessons: p.DerivedFromLessons,
+			Confidence:         p.Confidence,
+			DerivedAt:          derived,
+			LastVerified:       timestampOrZero(p.LastVerified),
+			Source:             p.Source,
+			CreatedBy:          firstNonEmptyStr(p.CreatedBy, actor),
+		}
+		if err := s.conn.Playbooks.Append(ctx, playbook); err != nil {
+			return nil, status.Errorf(codes.Internal, "append playbook %s: %v", playbook.ID, err)
+		}
+		accepted++
+	}
+	return &mnemosv1.AppendResponse{Accepted: int32(accepted)}, nil
+}
+
+// ---------------------------------------------------------------------------
+// EntityRelationships (polymorphic edges)
+// ---------------------------------------------------------------------------
+
+// ListEntityRelationships returns polymorphic cross-entity edges.
+func (s *Server) ListEntityRelationships(ctx context.Context, req *mnemosv1.ListEntityRelationshipsRequest) (*mnemosv1.ListEntityRelationshipsResponse, error) {
+	limit, offset := normalizePagination(req.Pagination)
+	var edges []domain.EntityRelationship
+	var err error
+	switch {
+	case req.EntityId != "" && req.EntityType != "":
+		edges, err = s.conn.EntityRels.ListByEntity(ctx, req.EntityId, req.EntityType)
+	case req.Kind != "":
+		edges, err = s.conn.EntityRels.ListByKind(ctx, req.Kind)
+	default:
+		edges, err = s.conn.EntityRels.ListAll(ctx)
+	}
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list entity_relationships: %v", err)
+	}
+	total := len(edges)
+	page := paginate(edges, limit, offset)
+	out := make([]*mnemosv1.EntityRelationship, 0, len(page))
+	for _, e := range page {
+		out = append(out, entityRelationshipToProto(e))
+	}
+	return &mnemosv1.ListEntityRelationshipsResponse{Edges: out, Total: int32(total), Limit: int32(limit), Offset: int32(offset)}, nil
+}
+
+// AppendEntityRelationships writes polymorphic edges idempotently.
+func (s *Server) AppendEntityRelationships(ctx context.Context, req *mnemosv1.AppendEntityRelationshipsRequest) (*mnemosv1.AppendResponse, error) {
+	if len(req.Edges) == 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "edges array is empty")
+	}
+	if len(req.Edges) > maxBatchRecords {
+		return nil, status.Errorf(codes.InvalidArgument, "edges batch size %d exceeds max %d", len(req.Edges), maxBatchRecords)
+	}
+	actor := actorFromContext(ctx)
+	edges := make([]domain.EntityRelationship, 0, len(req.Edges))
+	for i, e := range req.Edges {
+		if e.Id == "" {
+			return nil, status.Errorf(codes.InvalidArgument, "edges[%d].id is required", i)
+		}
+		createdAt := time.Now().UTC()
+		if e.CreatedAt != nil {
+			createdAt = e.CreatedAt.AsTime()
+		}
+		edges = append(edges, domain.EntityRelationship{
+			ID:        e.Id,
+			Kind:      domain.RelationshipType(e.Kind),
+			FromID:    e.FromId,
+			FromType:  e.FromType,
+			ToID:      e.ToId,
+			ToType:    e.ToType,
+			CreatedAt: createdAt,
+			CreatedBy: firstNonEmptyStr(e.CreatedBy, actor),
+		})
+	}
+	if err := s.conn.EntityRels.Upsert(ctx, edges); err != nil {
+		return nil, status.Errorf(codes.Internal, "upsert entity_relationships: %v", err)
+	}
+	return &mnemosv1.AppendResponse{Accepted: int32(len(edges))}, nil
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+func actionToProto(a domain.Action) *mnemosv1.Action {
+	return &mnemosv1.Action{
+		Id:        a.ID,
+		RunId:     a.RunID,
+		Kind:      string(a.Kind),
+		Subject:   a.Subject,
+		Actor:     a.Actor,
+		At:        timestampOrNil(a.At),
+		Metadata:  a.Metadata,
+		CreatedBy: a.CreatedBy,
+		CreatedAt: timestampOrNil(a.CreatedAt),
+	}
+}
+
+func outcomeToProto(o domain.Outcome) *mnemosv1.Outcome {
+	return &mnemosv1.Outcome{
+		Id:         o.ID,
+		ActionId:   o.ActionID,
+		Result:     string(o.Result),
+		Metrics:    o.Metrics,
+		Notes:      o.Notes,
+		ObservedAt: timestampOrNil(o.ObservedAt),
+		Source:     o.Source,
+		CreatedBy:  o.CreatedBy,
+		CreatedAt:  timestampOrNil(o.CreatedAt),
+	}
+}
+
+func lessonToProto(l domain.Lesson) *mnemosv1.Lesson {
+	return &mnemosv1.Lesson{
+		Id:           l.ID,
+		Statement:    l.Statement,
+		Scope:        scopeToProto(l.Scope),
+		Trigger:      l.Trigger,
+		Kind:         l.Kind,
+		Evidence:     l.Evidence,
+		Confidence:   l.Confidence,
+		DerivedAt:    timestampOrNil(l.DerivedAt),
+		LastVerified: timestampOrNil(l.LastVerified),
+		Source:       l.Source,
+		CreatedBy:    l.CreatedBy,
+	}
+}
+
+func decisionToProto(d domain.Decision) *mnemosv1.Decision {
+	return &mnemosv1.Decision{
+		Id:           d.ID,
+		Statement:    d.Statement,
+		Plan:         d.Plan,
+		Reasoning:    d.Reasoning,
+		RiskLevel:    string(d.RiskLevel),
+		Beliefs:      d.Beliefs,
+		Alternatives: d.Alternatives,
+		OutcomeId:    d.OutcomeID,
+		Scope:        scopeToProto(d.Scope),
+		ChosenAt:     timestampOrNil(d.ChosenAt),
+		CreatedBy:    d.CreatedBy,
+		CreatedAt:    timestampOrNil(d.CreatedAt),
+	}
+}
+
+func playbookToProto(p domain.Playbook) *mnemosv1.Playbook {
+	steps := make([]*mnemosv1.PlaybookStep, 0, len(p.Steps))
+	for _, st := range p.Steps {
+		steps = append(steps, &mnemosv1.PlaybookStep{
+			Order:       int32(st.Order),
+			Action:      st.Action,
+			Description: st.Description,
+			Condition:   st.Condition,
+		})
+	}
+	return &mnemosv1.Playbook{
+		Id:                 p.ID,
+		Trigger:            p.Trigger,
+		Statement:          p.Statement,
+		Scope:              scopeToProto(p.Scope),
+		Steps:              steps,
+		DerivedFromLessons: p.DerivedFromLessons,
+		Confidence:         p.Confidence,
+		DerivedAt:          timestampOrNil(p.DerivedAt),
+		LastVerified:       timestampOrNil(p.LastVerified),
+		Source:             p.Source,
+		CreatedBy:          p.CreatedBy,
+	}
+}
+
+func entityRelationshipToProto(e domain.EntityRelationship) *mnemosv1.EntityRelationship {
+	return &mnemosv1.EntityRelationship{
+		Id:        e.ID,
+		Kind:      string(e.Kind),
+		FromId:    e.FromID,
+		FromType:  e.FromType,
+		ToId:      e.ToID,
+		ToType:    e.ToType,
+		CreatedAt: timestampOrNil(e.CreatedAt),
+		CreatedBy: e.CreatedBy,
+	}
+}
+
+func scopeToProto(s domain.Scope) *mnemosv1.Scope {
+	if s.IsEmpty() {
+		return nil
+	}
+	return &mnemosv1.Scope{Service: s.Service, Env: s.Env, Team: s.Team}
+}
+
+func scopeFromProto(s *mnemosv1.Scope) domain.Scope {
+	if s == nil {
+		return domain.Scope{}
+	}
+	return domain.Scope{Service: s.Service, Env: s.Env, Team: s.Team}
+}
+
+func timestampOrNil(t time.Time) *timestamppb.Timestamp {
+	if t.IsZero() {
+		return nil
+	}
+	return timestamppb.New(t)
+}
+
+func timestampOrZero(t *timestamppb.Timestamp) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return t.AsTime()
+}
+
+func firstNonEmptyStr(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}

@@ -44,6 +44,42 @@ service MnemosService {
 
   // Metrics returns aggregate counts for the knowledge base.
   rpc Metrics(MetricsRequest) returns (MetricsResponse);
+
+  // ---- Phase 2-7 entities ---------------------------------------------------
+
+  // ListActions returns recorded operational actions.
+  rpc ListActions(ListActionsRequest) returns (ListActionsResponse);
+  // AppendActions writes operational actions idempotently.
+  rpc AppendActions(AppendActionsRequest) returns (AppendResponse);
+
+  // ListOutcomes returns observed action outcomes.
+  rpc ListOutcomes(ListOutcomesRequest) returns (ListOutcomesResponse);
+  // AppendOutcomes writes outcomes idempotently. Auto-edges to the
+  // parent action are NOT emitted server-side here; that wiring is
+  // done by the higher-level CLI/MCP surface and stays out of the
+  // raw write path.
+  rpc AppendOutcomes(AppendOutcomesRequest) returns (AppendResponse);
+
+  // ListLessons returns synthesised lessons.
+  rpc ListLessons(ListLessonsRequest) returns (ListLessonsResponse);
+  // AppendLessons writes lessons idempotently (UPSERT on id refreshes
+  // confidence/last_verified, snapshots prior to lesson_versions).
+  rpc AppendLessons(AppendLessonsRequest) returns (AppendResponse);
+
+  // ListDecisions returns recorded decisions.
+  rpc ListDecisions(ListDecisionsRequest) returns (ListDecisionsResponse);
+  // AppendDecisions writes decisions idempotently.
+  rpc AppendDecisions(AppendDecisionsRequest) returns (AppendResponse);
+
+  // ListPlaybooks returns synthesised or hand-authored playbooks.
+  rpc ListPlaybooks(ListPlaybooksRequest) returns (ListPlaybooksResponse);
+  // AppendPlaybooks writes playbooks idempotently.
+  rpc AppendPlaybooks(AppendPlaybooksRequest) returns (AppendResponse);
+
+  // ListEntityRelationships returns polymorphic cross-entity edges.
+  rpc ListEntityRelationships(ListEntityRelationshipsRequest) returns (ListEntityRelationshipsResponse);
+  // AppendEntityRelationships writes polymorphic edges idempotently.
+  rpc AppendEntityRelationships(AppendEntityRelationshipsRequest) returns (AppendResponse);
 }
 
 // ---------------------------------------------------------------------------
@@ -217,3 +253,207 @@ message MetricsResponse {
   int64 contradictions   = 6;
   int64 embeddings       = 7;
 }
+
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
+
+message Action {
+  string                     id            = 1;
+  string                     run_id        = 2;
+  string                     kind          = 3;
+  string                     subject       = 4;
+  string                     actor         = 5;
+  google.protobuf.Timestamp  at            = 6;
+  map<string, string>        metadata      = 7;
+  string                     created_by    = 8;
+  google.protobuf.Timestamp  created_at    = 9;
+}
+
+message ListActionsRequest {
+  Pagination pagination = 1;
+  string     subject    = 2; // optional filter; empty = all
+  string     run_id     = 3; // optional filter; empty = all
+}
+
+message ListActionsResponse {
+  repeated Action actions = 1;
+  int32           total   = 2;
+  int32           limit   = 3;
+  int32           offset  = 4;
+}
+
+message AppendActionsRequest { repeated Action actions = 1; }
+
+// ---------------------------------------------------------------------------
+// Outcomes
+// ---------------------------------------------------------------------------
+
+message Outcome {
+  string                    id          = 1;
+  string                    action_id   = 2;
+  string                    result      = 3; // success | failure | partial | unknown
+  map<string, double>       metrics     = 4;
+  string                    notes       = 5;
+  google.protobuf.Timestamp observed_at = 6;
+  string                    source      = 7; // "push" or "pull:<adapter>"
+  string                    created_by  = 8;
+  google.protobuf.Timestamp created_at  = 9;
+}
+
+message ListOutcomesRequest {
+  Pagination pagination = 1;
+  string     action_id  = 2; // optional filter
+}
+
+message ListOutcomesResponse {
+  repeated Outcome outcomes = 1;
+  int32            total    = 2;
+  int32            limit    = 3;
+  int32            offset   = 4;
+}
+
+message AppendOutcomesRequest { repeated Outcome outcomes = 1; }
+
+// ---------------------------------------------------------------------------
+// Lessons
+// ---------------------------------------------------------------------------
+
+message Scope {
+  string service = 1;
+  string env     = 2;
+  string team    = 3;
+}
+
+message Lesson {
+  string                    id             = 1;
+  string                    statement      = 2;
+  Scope                     scope          = 3;
+  string                    trigger        = 4;
+  string                    kind           = 5;
+  repeated string           evidence       = 6;
+  double                    confidence     = 7;
+  google.protobuf.Timestamp derived_at     = 8;
+  google.protobuf.Timestamp last_verified  = 9;
+  string                    source         = 10;
+  string                    created_by     = 11;
+}
+
+message ListLessonsRequest {
+  Pagination pagination = 1;
+  string     service    = 2; // optional scope filter
+  string     trigger    = 3; // optional trigger filter
+}
+
+message ListLessonsResponse {
+  repeated Lesson lessons = 1;
+  int32           total   = 2;
+  int32           limit   = 3;
+  int32           offset  = 4;
+}
+
+message AppendLessonsRequest { repeated Lesson lessons = 1; }
+
+// ---------------------------------------------------------------------------
+// Decisions
+// ---------------------------------------------------------------------------
+
+message Decision {
+  string                    id           = 1;
+  string                    statement    = 2;
+  string                    plan         = 3;
+  string                    reasoning    = 4;
+  string                    risk_level   = 5;
+  repeated string           beliefs      = 6;
+  repeated string           alternatives = 7;
+  string                    outcome_id   = 8;
+  Scope                     scope        = 9;
+  google.protobuf.Timestamp chosen_at    = 10;
+  string                    created_by   = 11;
+  google.protobuf.Timestamp created_at   = 12;
+}
+
+message ListDecisionsRequest {
+  Pagination pagination = 1;
+  string     risk_level = 2; // optional filter
+}
+
+message ListDecisionsResponse {
+  repeated Decision decisions = 1;
+  int32             total     = 2;
+  int32             limit     = 3;
+  int32             offset    = 4;
+}
+
+message AppendDecisionsRequest { repeated Decision decisions = 1; }
+
+// ---------------------------------------------------------------------------
+// Playbooks
+// ---------------------------------------------------------------------------
+
+message PlaybookStep {
+  int32  order       = 1;
+  string action      = 2;
+  string description = 3;
+  string condition   = 4;
+}
+
+message Playbook {
+  string                    id                   = 1;
+  string                    trigger              = 2;
+  string                    statement            = 3;
+  Scope                     scope                = 4;
+  repeated PlaybookStep     steps                = 5;
+  repeated string           derived_from_lessons = 6;
+  double                    confidence           = 7;
+  google.protobuf.Timestamp derived_at           = 8;
+  google.protobuf.Timestamp last_verified        = 9;
+  string                    source               = 10;
+  string                    created_by           = 11;
+}
+
+message ListPlaybooksRequest {
+  Pagination pagination = 1;
+  string     trigger    = 2; // optional filter
+  string     service    = 3; // optional scope filter
+}
+
+message ListPlaybooksResponse {
+  repeated Playbook playbooks = 1;
+  int32             total     = 2;
+  int32             limit     = 3;
+  int32             offset    = 4;
+}
+
+message AppendPlaybooksRequest { repeated Playbook playbooks = 1; }
+
+// ---------------------------------------------------------------------------
+// EntityRelationships
+// ---------------------------------------------------------------------------
+
+message EntityRelationship {
+  string                    id         = 1;
+  string                    kind       = 2;
+  string                    from_id    = 3;
+  string                    from_type  = 4;
+  string                    to_id      = 5;
+  string                    to_type    = 6;
+  google.protobuf.Timestamp created_at = 7;
+  string                    created_by = 8;
+}
+
+message ListEntityRelationshipsRequest {
+  Pagination pagination  = 1;
+  string     kind        = 2; // optional filter
+  string     entity_id   = 3; // optional: list edges touching this entity
+  string     entity_type = 4; // required when entity_id is set
+}
+
+message ListEntityRelationshipsResponse {
+  repeated EntityRelationship edges  = 1;
+  int32                       total  = 2;
+  int32                       limit  = 3;
+  int32                       offset = 4;
+}
+
+message AppendEntityRelationshipsRequest { repeated EntityRelationship edges = 1; }

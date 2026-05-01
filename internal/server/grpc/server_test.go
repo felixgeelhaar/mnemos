@@ -254,3 +254,84 @@ func TestAppendEventsEmptyID(t *testing.T) {
 		t.Errorf("code = %v, want InvalidArgument", st.Code())
 	}
 }
+
+func TestActionsRoundTrip(t *testing.T) {
+	client, cleanup := startTestServer(t)
+	defer cleanup()
+	ctx := context.Background()
+	at := timestamppb.New(time.Now().UTC())
+
+	if _, err := client.AppendActions(ctx, &mnemosv1.AppendActionsRequest{
+		Actions: []*mnemosv1.Action{
+			{Id: "ac_1", Kind: "rollback", Subject: "payments", At: at},
+			{Id: "ac_2", Kind: "deploy", Subject: "search", At: at},
+		},
+	}); err != nil {
+		t.Fatalf("AppendActions: %v", err)
+	}
+	list, err := client.ListActions(ctx, &mnemosv1.ListActionsRequest{Subject: "payments"})
+	if err != nil {
+		t.Fatalf("ListActions: %v", err)
+	}
+	if len(list.Actions) != 1 {
+		t.Fatalf("subject filter: want 1 got %d", len(list.Actions))
+	}
+	if list.Actions[0].Kind != "rollback" {
+		t.Fatalf("kind round-trip: want rollback got %q", list.Actions[0].Kind)
+	}
+}
+
+func TestLessonsRoundTrip(t *testing.T) {
+	client, cleanup := startTestServer(t)
+	defer cleanup()
+	ctx := context.Background()
+	now := timestamppb.New(time.Now().UTC())
+
+	if _, err := client.AppendLessons(ctx, &mnemosv1.AppendLessonsRequest{
+		Lessons: []*mnemosv1.Lesson{{
+			Id: "ls_1", Statement: "rollback works", Trigger: "x_trigger", Kind: "rollback",
+			Scope: &mnemosv1.Scope{Service: "payments"}, Evidence: []string{"ac_1"},
+			Confidence: 0.7, DerivedAt: now, Source: "synthesize",
+		}},
+	}); err != nil {
+		t.Fatalf("AppendLessons: %v", err)
+	}
+	list, err := client.ListLessons(ctx, &mnemosv1.ListLessonsRequest{Service: "payments"})
+	if err != nil {
+		t.Fatalf("ListLessons: %v", err)
+	}
+	if len(list.Lessons) != 1 {
+		t.Fatalf("service filter: want 1 got %d", len(list.Lessons))
+	}
+	if list.Lessons[0].Trigger != "x_trigger" {
+		t.Fatalf("trigger round-trip: want x_trigger got %q", list.Lessons[0].Trigger)
+	}
+}
+
+func TestEntityRelationshipsRoundTrip(t *testing.T) {
+	client, cleanup := startTestServer(t)
+	defer cleanup()
+	ctx := context.Background()
+	now := timestamppb.New(time.Now().UTC())
+
+	if _, err := client.AppendEntityRelationships(ctx, &mnemosv1.AppendEntityRelationshipsRequest{
+		Edges: []*mnemosv1.EntityRelationship{{
+			Id: "er_1", Kind: "action_of",
+			FromId: "ac_1", FromType: "action",
+			ToId: "oc_1", ToType: "outcome",
+			CreatedAt: now,
+		}},
+	}); err != nil {
+		t.Fatalf("AppendEntityRelationships: %v", err)
+	}
+	list, err := client.ListEntityRelationships(ctx, &mnemosv1.ListEntityRelationshipsRequest{Kind: "action_of"})
+	if err != nil {
+		t.Fatalf("ListEntityRelationships: %v", err)
+	}
+	if len(list.Edges) != 1 {
+		t.Fatalf("kind filter: want 1 got %d", len(list.Edges))
+	}
+	if list.Edges[0].FromId != "ac_1" {
+		t.Fatalf("from_id round-trip: %q", list.Edges[0].FromId)
+	}
+}

@@ -612,8 +612,9 @@ type RelationshipTestCase struct {
 }
 
 type RelTestClaim struct {
-	ID   string `yaml:"id"`
-	Text string `yaml:"text"`
+	ID        string `yaml:"id"`
+	Text      string `yaml:"text"`
+	ValidFrom string `yaml:"valid_from"`
 }
 
 type RelTestExpected struct {
@@ -643,6 +644,112 @@ func loadRelationshipTestFiles(t *testing.T) []RelationshipTestFile {
 		t.Fatalf("Failed to parse relationship_detection.yaml: %v", err)
 	}
 	return []RelationshipTestFile{tf}
+}
+
+// CausalTestCase mirrors RelationshipTestCase for the causal-detection
+// eval. ExpectedCausal lists pairs that DetectCausal must emit a
+// `causes` edge for; ExpectedNone is a "no causal edges" assertion.
+type CausalTestCase struct {
+	ID             string            `yaml:"id"`
+	Description    string            `yaml:"description"`
+	Claims         []RelTestClaim    `yaml:"claims"`
+	ExpectedCausal []RelTestExpected `yaml:"expected_causal"`
+	ExpectedNone   bool              `yaml:"expected_none"`
+}
+
+type CausalTestFile struct {
+	TestCases []CausalTestCase `yaml:"test_cases"`
+}
+
+func loadCausalTestFiles(t *testing.T) []CausalTestFile {
+	evalDir, err := os.Getwd()
+	if err != nil {
+		t.Skipf("eval directory not found: %v", err)
+	}
+	path := filepath.Join(evalDir, "causal_detection.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Skipf("causal_detection.yaml not found: %v", err)
+	}
+	var tf CausalTestFile
+	if err := yaml.Unmarshal(data, &tf); err != nil {
+		t.Fatalf("Failed to parse causal_detection.yaml: %v", err)
+	}
+	return []CausalTestFile{tf}
+}
+
+// TestCausalDetection evaluates the relate engine's DetectCausal
+// heuristic against annotated claim pairs. Phase 1 of the
+// evidence+causality+outcomes initiative.
+func TestCausalDetection(t *testing.T) {
+	files := loadCausalTestFiles(t)
+	relEngine := relate.NewEngine()
+
+	truePositives := 0
+	falsePositives := 0
+	falseNegatives := 0
+
+	for _, tf := range files {
+		for _, tc := range tf.TestCases {
+			t.Run(tc.ID, func(t *testing.T) {
+				claims := make([]domain.Claim, len(tc.Claims))
+				for i, c := range tc.Claims {
+					var vf time.Time
+					if c.ValidFrom != "" {
+						parsed, err := time.Parse(time.RFC3339, c.ValidFrom)
+						if err != nil {
+							t.Fatalf("%s: parse valid_from %q: %v", tc.ID, c.ValidFrom, err)
+						}
+						vf = parsed
+					}
+					claims[i] = domain.Claim{ID: c.ID, Text: c.Text, ValidFrom: vf}
+				}
+
+				rels, err := relEngine.DetectCausal(claims)
+				if err != nil {
+					t.Fatalf("DetectCausal() error = %v", err)
+				}
+
+				type edge struct{ from, to string }
+				actual := map[edge]domain.RelationshipType{}
+				for _, rel := range rels {
+					actual[edge{rel.FromClaimID, rel.ToClaimID}] = rel.Type
+				}
+
+				for _, exp := range tc.ExpectedCausal {
+					e := edge{exp.FromClaimID, exp.ToClaimID}
+					got, ok := actual[e]
+					if !ok {
+						falseNegatives++
+						t.Errorf("%s: expected causes edge %s -> %s, not found",
+							tc.ID, exp.FromClaimID, exp.ToClaimID)
+					} else if got != domain.RelationshipTypeCauses {
+						falsePositives++
+						t.Errorf("%s: edge %s -> %s: want causes, got %s",
+							tc.ID, exp.FromClaimID, exp.ToClaimID, got)
+					} else {
+						truePositives++
+					}
+				}
+
+				if tc.ExpectedNone && len(rels) > 0 {
+					falsePositives += len(rels)
+					t.Errorf("%s: expected no causal edges, got %d (%v)", tc.ID, len(rels), rels)
+				}
+			})
+		}
+	}
+
+	t.Logf("\n=== CAUSAL DETECTION EVAL ===")
+	t.Logf("True Positives:  %d", truePositives)
+	t.Logf("False Positives: %d", falsePositives)
+	t.Logf("False Negatives: %d", falseNegatives)
+	if truePositives+falsePositives > 0 {
+		t.Logf("Precision: %.1f%%", float64(truePositives)/float64(truePositives+falsePositives)*100)
+	}
+	if truePositives+falseNegatives > 0 {
+		t.Logf("Recall:    %.1f%%", float64(truePositives)/float64(truePositives+falseNegatives)*100)
+	}
 }
 
 func TestRobustness(t *testing.T) {

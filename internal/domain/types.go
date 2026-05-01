@@ -52,10 +52,57 @@ const (
 type RelationshipType string
 
 // Supported RelationshipType values.
+//
+// The original pair (supports / contradicts) expresses logical agreement
+// between claims. The causal+outcome family extends the graph to express
+// real-world dynamics: which action produced which observed state, which
+// hypothesis was validated or refuted by which outcome, and which
+// synthesised lesson was derived from which raw claim. The graph is
+// directional; semantics live on the From -> To direction.
 const (
 	RelationshipTypeSupports    RelationshipType = "supports"
 	RelationshipTypeContradicts RelationshipType = "contradicts"
+
+	// RelationshipTypeCauses asserts that From caused To (cause -> effect).
+	RelationshipTypeCauses RelationshipType = "causes"
+	// RelationshipTypeCausedBy is the inverse of Causes (effect -> cause)
+	// stored explicitly so reverse traversal stays a single index lookup.
+	RelationshipTypeCausedBy RelationshipType = "caused_by"
+	// RelationshipTypeActionOf links an action claim to the outcome claim
+	// it produced (action -> outcome). Used by the action+outcome layer.
+	RelationshipTypeActionOf RelationshipType = "action_of"
+	// RelationshipTypeOutcomeOf is the inverse of ActionOf (outcome -> action).
+	RelationshipTypeOutcomeOf RelationshipType = "outcome_of"
+	// RelationshipTypeValidates asserts From validates To, e.g. an outcome
+	// claim validates a hypothesis claim it was meant to test.
+	RelationshipTypeValidates RelationshipType = "validates"
+	// RelationshipTypeRefutes asserts From refutes To, the negative
+	// counterpart to Validates.
+	RelationshipTypeRefutes RelationshipType = "refutes"
+	// RelationshipTypeDerivedFrom links a synthesised claim (typically a
+	// lesson or playbook step) back to the raw claim it was generalised
+	// from, preserving provenance through the synthesis layer.
+	RelationshipTypeDerivedFrom RelationshipType = "derived_from"
 )
+
+// IsValidRelationshipType reports whether t is a recognised relationship
+// type. Validation paths use this rather than open-coding the switch so
+// future additions only need to update the const block plus this helper.
+func IsValidRelationshipType(t RelationshipType) bool {
+	switch t {
+	case RelationshipTypeSupports,
+		RelationshipTypeContradicts,
+		RelationshipTypeCauses,
+		RelationshipTypeCausedBy,
+		RelationshipTypeActionOf,
+		RelationshipTypeOutcomeOf,
+		RelationshipTypeValidates,
+		RelationshipTypeRefutes,
+		RelationshipTypeDerivedFrom:
+		return true
+	}
+	return false
+}
 
 // Input represents a raw document or data source submitted for ingestion.
 type Input struct {
@@ -478,10 +525,8 @@ func (r Relationship) Validate() error {
 	if r.FromClaimID == r.ToClaimID {
 		return fmt.Errorf("relationship %s self-references claim %s", r.ID, r.FromClaimID)
 	}
-	switch r.Type {
-	case RelationshipTypeSupports, RelationshipTypeContradicts:
-	default:
-		return fmt.Errorf("relationship type %q invalid (want supports or contradicts)", r.Type)
+	if !IsValidRelationshipType(r.Type) {
+		return fmt.Errorf("relationship type %q invalid", r.Type)
 	}
 	return nil
 }

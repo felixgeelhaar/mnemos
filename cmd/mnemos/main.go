@@ -416,6 +416,7 @@ func handleQuery(args []string, f Flags) {
 		var queryErr error
 		opts := query.AnswerOptions{
 			Hops:           hops,
+			HopKinds:       qa.hopKinds,
 			MinTrust:       minTrust,
 			AsOf:           asOf,
 			IncludeHistory: includeHistory,
@@ -1064,6 +1065,8 @@ func printUsage() {
 	fmt.Println("Query & Reporting:")
 	fmt.Println("  query [--run <run-id>] <question>    Query with evidence")
 	fmt.Println("  query --hops <N> <question>          Expand result claims via N hops of supports/contradicts")
+	fmt.Println("  query --hops <N> --kind <list>       Restrict hop expansion to comma-separated edge kinds")
+	fmt.Println("                                          (e.g. causes,validates,refutes)")
 	fmt.Println("  query --llm <question>               Query with LLM-grounded answer")
 	fmt.Println("  query --min-trust X <question>       Only return claims with trust_score >= X (X in [0, 1])")
 	fmt.Println("  query --at YYYY-MM-DD <question>     Point-in-time query against the temporal-validity layer")
@@ -1149,6 +1152,7 @@ type queryArgs struct {
 	asOf           time.Time
 	includeHistory bool
 	entity         string // filter answer to claims linked to this entity (id or name)
+	hopKinds       []domain.RelationshipType
 }
 
 func parseQueryArgs(args []string) (queryArgs, error) {
@@ -1208,6 +1212,16 @@ func parseQueryArgs(args []string) (queryArgs, error) {
 			}
 			out.entity = strings.TrimSpace(questionArgs[1])
 			questionArgs = questionArgs[2:]
+		case "--kind":
+			if len(questionArgs) < 2 {
+				return queryArgs{}, NewUserError("--kind requires a comma-separated list (e.g. causes,supports)")
+			}
+			kinds, err := parseHopKinds(questionArgs[1])
+			if err != nil {
+				return queryArgs{}, NewUserError("--kind: %v", err)
+			}
+			out.hopKinds = kinds
+			questionArgs = questionArgs[2:]
 		default:
 			goto done
 		}
@@ -1245,6 +1259,34 @@ func formatEvolution(c domain.Claim) string {
 	default:
 		return ""
 	}
+}
+
+// parseHopKinds parses a comma-separated list of relationship kinds
+// for the `query --kind` flag. Each entry is validated against the
+// recognised RelationshipType set so a typo fails fast rather than
+// silently filtering out every edge.
+func parseHopKinds(spec string) ([]domain.RelationshipType, error) {
+	parts := strings.Split(spec, ",")
+	out := make([]domain.RelationshipType, 0, len(parts))
+	seen := make(map[domain.RelationshipType]struct{}, len(parts))
+	for _, p := range parts {
+		k := domain.RelationshipType(strings.TrimSpace(p))
+		if k == "" {
+			continue
+		}
+		if !domain.IsValidRelationshipType(k) {
+			return nil, fmt.Errorf("unknown relationship kind %q", k)
+		}
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, k)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("at least one kind is required")
+	}
+	return out, nil
 }
 
 // parseAsOf accepts a YYYY-MM-DD date or a full RFC3339(Nano)

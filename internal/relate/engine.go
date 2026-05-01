@@ -60,6 +60,64 @@ const minContentTokenOverlap = 2
 // that must overlap with the longer claim for a relationship to be inferred.
 const minOverlapRatio = 0.3
 
+// actionPrefixes mark a raw (un-stemmed) token as describing an
+// action — something an actor *did*. Matched against the raw
+// lowercase tokens of the claim so a single entry covers most
+// conjugations: "deploy" matches "deploy", "deployed", "deploys",
+// "deploying". The set is operations-oriented; user-action language
+// ("said", "wrote") is deliberately absent.
+var actionPrefixes = []string{
+	"deploy", "releas", "shipp", "push", "merg",
+	"restart", "rollback", "roll", "scal",
+	"upgrad", "downgrad", "patch", "configur", "enabl",
+	"disabl", "migrat", "switch", "cutover",
+	"reboot", "restor", "trigger", "kill", "stop",
+	"start", "launch", "promot", "revert",
+	"hotfix", "block", "unblock", "throttl", "drain",
+	"appli", "execut",
+}
+
+// stateChangePrefixes mark a raw (un-stemmed) token as describing an
+// observed state change — something that *happened* to a system.
+// Matched against raw lowercase tokens; same rationale as
+// actionPrefixes.
+var stateChangePrefixes = []string{
+	"latenc", "throughput", "error", "response",
+	"memor", "availab", "uptim", "downtim", "outag", "incident",
+	"regress", "spike", "spik", "drop", "dropp", "increas", "decreas",
+	"degrad", "improv", "recover", "recov",
+	"crash", "broke", "broken",
+	"saturat",
+}
+
+// minCausalEntityOverlap is the minimum non-noise content-token
+// overlap between an action claim and a state-change claim before a
+// `causes` edge is emitted. One specific token (e.g. the service or
+// component name) is enough once generic infrastructure nouns
+// ("service", "system") are excluded — see causalNoiseTokens.
+const minCausalEntityOverlap = 1
+
+// causalNoiseTokens are content tokens that survive stop-word removal
+// but are too generic to count as a shared entity for causal
+// detection. Without filtering, any two operational claims would tie
+// together via "service" alone. Stems are listed because tokens
+// arrive post-stemWord.
+var causalNoiseTokens = map[string]struct{}{
+	"service": {}, "system": {}, "systems": {}, "app": {},
+	"production": {}, "prod": {}, "stage": {}, "staging": {},
+	"instance": {}, "replica": {}, "cluster": {}, "server": {},
+	"node": {}, "pod": {}, "container": {}, "host": {},
+	"environment": {}, "env": {},
+}
+
+// causalTimeTolerance bounds how far apart two claims can be in time
+// and still be linked by the causal heuristic. A deploy at 09:00
+// causing latency at 09:05 is plausible; a deploy at 09:00 "causing"
+// latency three weeks later is almost certainly noise. The tolerance
+// is intentionally generous because evidence-event timestamps can lag
+// the underlying real-world action.
+const causalTimeTolerance = 48 * time.Hour
+
 // Detect compares all claim pairs and returns inferred relationships.
 func (e Engine) Detect(claims []domain.Claim) ([]domain.Relationship, error) {
 	rels := make([]domain.Relationship, 0)
@@ -176,6 +234,160 @@ func (e Engine) DetectIncremental(newClaims []domain.Claim, existingClaims []dom
 	}
 
 	return rels, nil
+}
+
+// DetectCausal scans claim pairs and emits `causes` edges when one
+// claim looks like an action and another like a state change with
+// shared entities and a plausible temporal ordering. Returns only
+// causal edges; it does NOT replace Detect's logical edges
+// (supports/contradicts) — callers compose both passes.
+//
+// The heuristic is intentionally conservative: a `causes` edge stored
+// in the graph is a strong assertion, so false positives are worse
+// than false negatives. When the heuristic is uncertain (e.g. shared
+// entities but no timestamp ordering), no edge is emitted; the LLM
+// extractor (DetectCausalLLM) is the path for ambiguous cases.
+func (e Engine) DetectCausal(claims []domain.Claim) ([]domain.Relationship, error) {
+	if len(claims) < 2 {
+		return nil, nil
+	}
+	rels := make([]domain.Relationship, 0)
+	now := e.now().UTC()
+
+	type analyzed struct {
+		tokens   map[string]struct{}
+		isAction bool
+		isState  bool
+		ts       time.Time
+	}
+	cache := make([]analyzed, len(claims))
+	for i, c := range claims {
+		tokens, _ := contentTokensAndPolarity(c.Text)
+		raw := rawContentTokens(c.Text)
+		cache[i] = analyzed{
+			tokens:   tokens,
+			isAction: hasAnyPrefix(raw, actionPrefixes),
+			isState:  hasAnyPrefix(raw, stateChangePrefixes),
+			ts:       claimEffectiveTime(c),
+		}
+	}
+
+	for i := 0; i < len(claims); i++ {
+		for j := 0; j < len(claims); j++ {
+			if i == j {
+				continue
+			}
+			if !cache[i].isAction || !cache[j].isState {
+				continue
+			}
+			// Don't emit if the same claim qualifies as both — usually
+			// means the claim already describes cause+effect inline,
+			// in which case there is no edge to draw.
+			if cache[i].isState && cache[j].isAction {
+				continue
+			}
+			if causalEntityOverlap(cache[i].tokens, cache[j].tokens) < minCausalEntityOverlap {
+				continue
+			}
+			if !plausibleCausalOrdering(cache[i].ts, cache[j].ts) {
+				continue
+			}
+			id, err := e.nextID()
+			if err != nil {
+				return nil, err
+			}
+			rels = append(rels, domain.Relationship{
+				ID:          id,
+				Type:        domain.RelationshipTypeCauses,
+				FromClaimID: claims[i].ID,
+				ToClaimID:   claims[j].ID,
+				CreatedAt:   now,
+			})
+		}
+	}
+	return rels, nil
+}
+
+// hasAnyPrefix reports whether any token in tokens starts with any
+// prefix in the probe list. Prefix match keeps the indicator lists
+// short and keeps the action/state detection separate from the
+// overlap path's stemming.
+func hasAnyPrefix(tokens map[string]struct{}, prefixes []string) bool {
+	for tok := range tokens {
+		for _, p := range prefixes {
+			if strings.HasPrefix(tok, p) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// causalEntityOverlap counts shared content tokens between two
+// claims, excluding the generic infrastructure nouns in
+// causalNoiseTokens. Used by DetectCausal so a shared "service" alone
+// can't tie two unrelated claims together.
+func causalEntityOverlap(a, b map[string]struct{}) int {
+	count := 0
+	for tok := range a {
+		if _, noise := causalNoiseTokens[tok]; noise {
+			continue
+		}
+		if _, ok := b[tok]; ok {
+			count++
+		}
+	}
+	return count
+}
+
+// rawContentTokens lowercases the text and returns its content tokens
+// without any stemming. Used by the causal action/state heuristic
+// where prefix matching against raw conjugations is more reliable
+// than fighting stemWord's lossy output.
+func rawContentTokens(text string) map[string]struct{} {
+	words := strings.Fields(strings.ToLower(text))
+	out := make(map[string]struct{}, len(words))
+	for _, w := range words {
+		w = strings.Trim(w, ",.;:!?()[]{}\"'")
+		if w == "" {
+			continue
+		}
+		if _, ok := negationWords[w]; ok {
+			continue
+		}
+		if _, ok := stopWords[w]; ok {
+			continue
+		}
+		out[w] = struct{}{}
+	}
+	return out
+}
+
+// claimEffectiveTime picks the timestamp the causal heuristic should
+// reason about. ValidFrom is preferred (set from source-event
+// timestamp during ingest); we fall back to CreatedAt only when
+// ValidFrom is the zero value, which means the claim predates the
+// temporal-validity layer.
+func claimEffectiveTime(c domain.Claim) time.Time {
+	if !c.ValidFrom.IsZero() {
+		return c.ValidFrom
+	}
+	return c.CreatedAt
+}
+
+// plausibleCausalOrdering returns true when the cause time precedes
+// the effect time within causalTimeTolerance. Zero-valued timestamps
+// fall through as "no signal, allow it" — extraction often loses
+// timestamps and we don't want to drop every causal pair just because
+// the upstream data was thin.
+func plausibleCausalOrdering(causeAt, effectAt time.Time) bool {
+	if causeAt.IsZero() || effectAt.IsZero() {
+		return true
+	}
+	if !causeAt.Before(effectAt) && !causeAt.Equal(effectAt) {
+		return false
+	}
+	return effectAt.Sub(causeAt) <= causalTimeTolerance
 }
 
 // contentTokensAndPolarity splits text into content tokens (stop words removed)

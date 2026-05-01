@@ -91,6 +91,12 @@ type AnswerOptions struct {
 	// rewriting the retrieval pipeline. nil disables the filter
 	// (the common case).
 	AllowedClaimIDs map[string]struct{}
+	// HopKinds, when non-empty, restricts hop expansion to relationship
+	// edges of these types. Empty means "follow every kind", preserving
+	// pre-causal behaviour. Used by `query --kind causes,validates ...`
+	// to walk a single semantic family of edges (e.g. only the causal
+	// graph, not contradictions).
+	HopKinds []domain.RelationshipType
 }
 
 // Answer searches all stored events for the best answer to the given question.
@@ -214,7 +220,7 @@ func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents
 		hopDistance[c.ID] = 0
 	}
 	if opts.Hops > 0 {
-		expanded, err := e.expandClaimsByHops(ctx, claims, opts.Hops, hopDistance)
+		expanded, err := e.expandClaimsByHops(ctx, claims, opts.Hops, hopDistance, opts.HopKinds)
 		if err != nil {
 			// Hop expansion is additive — log via the standard error path
 			// rather than failing the whole answer.
@@ -259,13 +265,18 @@ func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents
 // themselves). hopDistance is mutated in place: each newly-seen claim is
 // recorded with its hop distance from the seed set. Termination: when the
 // frontier of newly-discovered IDs is empty or maxHops is reached.
-func (e Engine) expandClaimsByHops(ctx context.Context, seed []domain.Claim, maxHops int, hopDistance map[string]int) ([]domain.Claim, error) {
+func (e Engine) expandClaimsByHops(ctx context.Context, seed []domain.Claim, maxHops int, hopDistance map[string]int, kinds []domain.RelationshipType) ([]domain.Claim, error) {
 	if maxHops <= 0 || len(seed) == 0 {
 		return nil, nil
 	}
 	frontier := make([]string, 0, len(seed))
 	for _, c := range seed {
 		frontier = append(frontier, c.ID)
+	}
+
+	allowed := make(map[domain.RelationshipType]struct{}, len(kinds))
+	for _, k := range kinds {
+		allowed[k] = struct{}{}
 	}
 
 	var expanded []domain.Claim
@@ -276,6 +287,11 @@ func (e Engine) expandClaimsByHops(ctx context.Context, seed []domain.Claim, max
 		}
 		nextIDs := map[string]struct{}{}
 		for _, rel := range rels {
+			if len(allowed) > 0 {
+				if _, ok := allowed[rel.Type]; !ok {
+					continue
+				}
+			}
 			for _, neighbor := range []string{rel.FromClaimID, rel.ToClaimID} {
 				if _, seen := hopDistance[neighbor]; seen {
 					continue

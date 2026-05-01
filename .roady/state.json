@@ -1,7 +1,12 @@
 {
   "project_id": "Mnemos",
-  "version": 107,
+  "version": 109,
   "task_states": {
+    "task-action-outcome-recording": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
     "task-append-only-event-store": {
       "status": "done",
       "path": "",
@@ -12,6 +17,13 @@
       "started_at": "2026-04-12T11:34:43.933278+02:00",
       "completed_at": "2026-04-12T11:37:07.875432+02:00",
       "elapsed_minutes": 2
+    },
+    "task-causal-relationship-edges": {
+      "status": "in_progress",
+      "path": "",
+      "owner": "ai-agent",
+      "started_at": "2026-05-01T10:11:05.444231+02:00",
+      "elapsed_minutes": 0
     },
     "task-claim-extraction-engine": {
       "status": "done",
@@ -78,6 +90,11 @@
       "started_at": "2026-04-18T08:51:40.914879+02:00",
       "completed_at": "2026-04-18T09:03:24.310433+02:00",
       "elapsed_minutes": 11
+    },
+    "task-decision-memory": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
     },
     "task-documentation-ingestion-pipeline": {
       "status": "done",
@@ -156,6 +173,16 @@
       "completed_at": "2026-04-17T22:30:10.377087+02:00",
       "elapsed_minutes": 0
     },
+    "task-grpc-api-server": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
+    "task-human-editable-markdown-layer-with-system-versioned-history": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
     "task-knowledge-browsing-mcp-tools": {
       "status": "done",
       "path": "",
@@ -177,6 +204,11 @@
       "started_at": "2026-04-18T01:08:45.47228+02:00",
       "completed_at": "2026-04-18T01:33:19.282223+02:00",
       "elapsed_minutes": 24
+    },
+    "task-lessons-synthesis-engine": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
     },
     "task-llm-powered-claim-extraction": {
       "status": "done",
@@ -387,6 +419,11 @@
       "completed_at": "2026-04-12T11:31:59.45509+02:00",
       "elapsed_minutes": 2
     },
+    "task-playbook-synthesis": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
     "task-project-scoped-database-with-init-subcommand": {
       "status": "done",
       "path": "",
@@ -442,6 +479,11 @@
       "completed_at": "2026-04-12T15:15:29.580042+02:00",
       "elapsed_minutes": 5
     },
+    "task-scope-aware-memory": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
     "task-sqlc-migration-phase-2": {
       "status": "done",
       "path": "",
@@ -463,6 +505,11 @@
       "started_at": "2026-04-12T14:34:28.536768+02:00",
       "completed_at": "2026-04-12T14:37:50.063802+02:00",
       "elapsed_minutes": 3
+    },
+    "task-temporal-validity-hardening": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
     },
     "task-web-interface-on-registry-api": {
       "status": "done",
@@ -487,5 +534,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-04-29T15:50:56.984313+02:00"
+  "updated_at": "2026-05-01T10:11:05.444231+02:00"
 }

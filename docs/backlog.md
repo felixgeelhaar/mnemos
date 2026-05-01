@@ -256,3 +256,51 @@ Phase 7 of ADR 0001: every production surface is backend-agnostic; no legacy. Ad
 Add a gRPC API surface to Mnemos alongside the existing HTTP REST API. Define proto schemas for events, claims, relationships, and embeddings that mirror the HTTP API contract. Generate Go code with protoc-gen-go-grpc. Implement a gRPC server that reuses the existing port-typed repositories and bearer-token auth from serve.go. Wire into the CLI via `mnemos serve --grpc-port` or `mnemos grpc`. This enables high-performance service-to-service communication for the cognitive stack (Chronos, Praxis, Nous) and supports streaming for large dataset operations.
 
 ---
+
+## Causal Relationship Edges
+
+Phase 1 of evidence+causality+outcomes. Extend `relationships.kind` beyond supports/contradicts with: causes, caused_by, action_of, outcome_of, validates, refutes, derived_from. Domain: new RelKind* consts in internal/domain/types.go. internal/relate/engine.go: causal heuristic (action-verb claim t1 + state-change claim t2 with shared entities → causes) plus LLM extractor for ambiguous pairs. Query --hops gains --kind filter. Schema migration. Add evals/relate/causal/ with 20 cases. Foundation for outcomes, lessons, decisions, playbooks. No new entity types — pure edge-type expansion. Sequencing: ship before Action Outcomes since outcomes link via action_of/outcome_of edges.
+
+---
+
+## Action Outcome Recording
+
+Phase 2 of evidence+causality+outcomes. New domain types: Action{ID, Kind, Subject, Actor, RunID, At} and Outcome{ID, ActionID, Result, Metrics map[string]float64, ObservedAt}. Schema: actions, outcomes tables with FK to events. Two ingestion paths: (1) push API — `mnemos ingest --kind=action` + MCP `record_action`/`record_outcome` tools for agent-reported events; (2) pull adapters — Prometheus/OTel/log scrape under internal/adapters/outcomes/ for autonomous capture. Link Action↔Outcome via Phase 1 action_of/outcome_of edges. Required for Lessons synthesis (clusters action→outcome chains). Pull adapters can be incremental — ship at least one (Prometheus) with the push API.
+
+---
+
+## Lessons Synthesis Engine
+
+Phase 3 — sharpest differentiator. New domain: Lesson{ID, Statement, Scope{Service,Env,Team}, Evidence []ActionID, Confidence, DerivedAt, LastVerified}. Schema: lessons + lesson_evidence tables, system-versioned per Phase 7 versioning best-practice. internal/synthesize/ engine clusters action→outcome chains by similarity + scope; emits Lesson when N≥3 corroborating with low contradiction. Confidence formula: corroboration_count × outcome_consistency × recency_weight. Brain-best-practice synthesis trigger — hybrid: incremental on-write (cheap consolidation, every claim ingest) + periodic batch (full re-cluster, sleep-like, configurable cron, default 24h) + manual `mnemos synthesize`. Query: `mnemos lessons --service=X --kind=Y`. MCP tool: `query_lessons`. Positioning anchor: "evidence-based memory that learns from actions over time".
+
+---
+
+## Temporal Validity Hardening
+
+Phase 4. Strengthen existing valid_from/valid_to with stale-detection signals. Add columns: claims.last_verified, claims.verify_count, claims.half_life_days (per-claim override of hardcoded 90d default in internal/trust/trust.go). Surface staleness: Answer.StaleClaims[] in query results when freshness < threshold. New CLI: `mnemos verify <claim>` re-confirms against new events, bumps last_verified + verify_count, recomputes trust. Trust formula stays confidence × corroboration × freshness but freshness now uses per-claim half-life. Prevents stale-memory poisoning of agent decisions. No new entity types — column additions + CLI.
+
+---
+
+## Decision Memory
+
+Phase 5. New domain: Decision{ID, Belief []ClaimID, Plan, Alternatives []string, Reasoning, RiskLevel, ChosenAt, OutcomeID *string}. Closes the loop: decision → action → outcome → validates/refutes belief claims. Schema: decisions table, FK to outcomes. Decision.OutcomeID links to Phase 2 Outcome — when set, Phase 1 validates/refutes edges fire automatically against Belief claim list. Audit query: `mnemos decision <id>` replays decision with retrieved evidence as it existed at ChosenAt (point-in-time using Phase 4 temporal validity). MCP tool: `record_decision`. Enables agent self-audit and reasoning improvement.
+
+---
+
+## Playbook Synthesis
+
+Phase 6. Direct compete with gbrain "skills" but derived not authored-from-scratch. Domain: Playbook{ID, Trigger, Steps []Step, Scope, DerivedFromLesson []LessonID, Confidence}. Steps as structured JSON contract — Mnemos returns steps only, Praxis executes (separation of concerns). Auto-synthesis in internal/synthesize/playbooks.go: cluster Phase 3 lessons by trigger pattern (e.g. "latency_spike_after_deploy" from N lessons matching that scope+kind) → emit playbook. Manual authoring also supported via markdown source-of-truth (overlaps with Phase 7). Query: `mnemos playbook <trigger>`. MCP tool: `query_playbook`. Distinct from skills: playbooks have provenance back to lessons back to actions back to events.
+
+---
+
+## Human-Editable Markdown Layer with System-Versioned History
+
+Phase 7. Markdown export-back loop for engineers to "correct system memory". CLI: `mnemos export --kind=lesson|claim|playbook [--scope=...]` emits Git-friendly markdown with stable IDs in frontmatter. `mnemos import <file.md>` diffs against current state, creates new version row, fires extract+relate on changed text. Versioning best-practice: SQL:2011 system-versioned tables — append-only `*_versions` (claim_versions, lesson_versions, playbook_versions) with full row snapshot + valid_from/valid_to. Git-style deltas overcomplicate query. Audit-friendly, time-travel queries trivial: `WHERE @timestamp BETWEEN valid_from AND valid_to`. Schema migration adds versioning triggers in SQLite/Postgres/MySQL providers. Integrates with Phase 4 temporal validity.
+
+---
+
+## Scope-Aware Memory
+
+Phase 8. Multi-tenant scope beyond run_id and Postgres-schema namespace. Add scope JSONB column to claims, lessons, playbooks, decisions: {service, env, team, custom_tags}. Scope filter on every query, list, and synthesis path. Synthesis (Phase 3, 6) clusters strictly within scope to prevent cross-context noise. CLI: `--service=`, `--env=`, `--team=` flags on query/process/lessons/playbook. MCP: scope param on every tool. Indexes on scope JSON paths in each backend (SQLite json_extract, Postgres JSONB GIN, MySQL JSON functional). Defaults: when unset, all-scopes. Integrates with existing Agent.AllowedRuns whitelist.
+
+---

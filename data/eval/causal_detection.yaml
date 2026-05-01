@@ -1,0 +1,250 @@
+# Causal Detection Evaluation
+# Tests the relate engine's DetectCausal heuristic for action -> outcome edges.
+# Phase 1 of the evidence+causality+outcomes initiative — see CLAUDE.md.
+#
+# Heuristic ground rules (see internal/relate/engine.go):
+#  - One claim must look like an action (deploy, rollback, scale, ...).
+#  - The other must look like a state change (latency, error rate, ...).
+#  - Shared content tokens >= 2 (rough entity overlap proxy).
+#  - Action timestamp must precede the state change within 48h when both
+#    are populated; missing timestamps fall through as "allowed".
+#
+# Cases are intentionally short — they target the heuristic, not full
+# extraction quality.
+
+test_cases:
+  # === True causal pairs (should detect causes edge) ===
+
+  - id: causal-001
+    description: "Deploy followed by latency spike on the same service"
+    claims:
+      - id: cl_a1
+        text: "We deployed payments service v1.42 to production"
+        valid_from: "2026-04-20T09:00:00Z"
+      - id: cl_e1
+        text: "Payments service latency spiked to 1200ms after the change"
+        valid_from: "2026-04-20T09:05:00Z"
+    expected_causal:
+      - from_claim_id: cl_a1
+        to_claim_id: cl_e1
+
+  - id: causal-002
+    description: "Rollback followed by latency recovery"
+    claims:
+      - id: cl_a2
+        text: "We rolled back payments service to v1.41"
+        valid_from: "2026-04-20T10:00:00Z"
+      - id: cl_e2
+        text: "Payments service latency dropped back to 240ms"
+        valid_from: "2026-04-20T10:02:00Z"
+    expected_causal:
+      - from_claim_id: cl_a2
+        to_claim_id: cl_e2
+
+  - id: causal-003
+    description: "Scale-up followed by throughput improvement"
+    claims:
+      - id: cl_a3
+        text: "We scaled the orders worker pool from 4 to 16 instances"
+        valid_from: "2026-04-21T11:00:00Z"
+      - id: cl_e3
+        text: "Orders worker throughput increased from 800 to 3100 qps"
+        valid_from: "2026-04-21T11:10:00Z"
+    expected_causal:
+      - from_claim_id: cl_a3
+        to_claim_id: cl_e3
+
+  - id: causal-004
+    description: "Configuration change followed by error rate change"
+    claims:
+      - id: cl_a4
+        text: "We configured the auth service connection pool to 200"
+        valid_from: "2026-04-22T08:00:00Z"
+      - id: cl_e4
+        text: "Auth service error rate dropped below 0.1%"
+        valid_from: "2026-04-22T08:30:00Z"
+    expected_causal:
+      - from_claim_id: cl_a4
+        to_claim_id: cl_e4
+
+  - id: causal-005
+    description: "Migration followed by query latency degradation"
+    claims:
+      - id: cl_a5
+        text: "We migrated reports database to the new cluster"
+        valid_from: "2026-04-23T14:00:00Z"
+      - id: cl_e5
+        text: "Reports database query latency degraded to p95 4500ms"
+        valid_from: "2026-04-23T14:15:00Z"
+    expected_causal:
+      - from_claim_id: cl_a5
+        to_claim_id: cl_e5
+
+  - id: causal-006
+    description: "Hotfix followed by incident recovery"
+    claims:
+      - id: cl_a6
+        text: "We applied hotfix patch to checkout service"
+        valid_from: "2026-04-24T16:00:00Z"
+      - id: cl_e6
+        text: "Checkout service incident recovered, errors back to baseline"
+        valid_from: "2026-04-24T16:08:00Z"
+    expected_causal:
+      - from_claim_id: cl_a6
+        to_claim_id: cl_e6
+
+  - id: causal-007
+    description: "Restart followed by memory recovery"
+    claims:
+      - id: cl_a7
+        text: "We restarted the search service replicas"
+        valid_from: "2026-04-25T10:00:00Z"
+      - id: cl_e7
+        text: "Search service memory dropped from 92% to 41%"
+        valid_from: "2026-04-25T10:03:00Z"
+    expected_causal:
+      - from_claim_id: cl_a7
+        to_claim_id: cl_e7
+
+  - id: causal-008
+    description: "Disable feature flag followed by CPU drop"
+    claims:
+      - id: cl_a8
+        text: "We disabled the recommendations sidebar feature flag"
+        valid_from: "2026-04-26T12:00:00Z"
+      - id: cl_e8
+        text: "Recommendations service CPU dropped from 78% to 22%"
+        valid_from: "2026-04-26T12:05:00Z"
+    expected_causal:
+      - from_claim_id: cl_a8
+        to_claim_id: cl_e8
+
+  - id: causal-009
+    description: "Enable cache followed by response time improvement"
+    claims:
+      - id: cl_a9
+        text: "We enabled redis cache for the catalog service"
+        valid_from: "2026-04-27T09:00:00Z"
+      - id: cl_e9
+        text: "Catalog service response time improved from 320ms to 45ms"
+        valid_from: "2026-04-27T09:05:00Z"
+    expected_causal:
+      - from_claim_id: cl_a9
+        to_claim_id: cl_e9
+
+  - id: causal-010
+    description: "Throttle change followed by error rate change"
+    claims:
+      - id: cl_a10
+        text: "We throttled the inventory sync job to 100 rps"
+        valid_from: "2026-04-28T18:00:00Z"
+      - id: cl_e10
+        text: "Inventory sync error rate dropped from 5% to 0.3%"
+        valid_from: "2026-04-28T18:10:00Z"
+    expected_causal:
+      - from_claim_id: cl_a10
+        to_claim_id: cl_e10
+
+  - id: causal-011
+    description: "Upgrade followed by availability change"
+    claims:
+      - id: cl_a11
+        text: "We upgraded the load balancer to v3.0"
+        valid_from: "2026-04-29T11:00:00Z"
+      - id: cl_e11
+        text: "Load balancer availability improved to 99.99%"
+        valid_from: "2026-04-29T11:30:00Z"
+    expected_causal:
+      - from_claim_id: cl_a11
+        to_claim_id: cl_e11
+
+  - id: causal-012
+    description: "Promote canary followed by error spike"
+    claims:
+      - id: cl_a12
+        text: "We promoted notifications canary to full rollout"
+        valid_from: "2026-04-30T13:00:00Z"
+      - id: cl_e12
+        text: "Notifications service errors spiked to 450 per minute"
+        valid_from: "2026-04-30T13:04:00Z"
+    expected_causal:
+      - from_claim_id: cl_a12
+        to_claim_id: cl_e12
+
+  # === Negative cases (should NOT detect causal) ===
+
+  - id: causal-neg-001
+    description: "Two unrelated state changes — no action present"
+    claims:
+      - id: cl_n1
+        text: "Payments service latency was high yesterday"
+      - id: cl_n2
+        text: "Search service errors increased this morning"
+    expected_none: true
+
+  - id: causal-neg-002
+    description: "Two unrelated actions — no state change"
+    claims:
+      - id: cl_n3
+        text: "We deployed payments service v1.42"
+      - id: cl_n4
+        text: "We restarted the search service"
+    expected_none: true
+
+  - id: causal-neg-003
+    description: "Action and state change but no entity overlap"
+    claims:
+      - id: cl_n5
+        text: "We deployed checkout service v2.0"
+      - id: cl_n6
+        text: "Search service memory increased to 70%"
+    expected_none: true
+
+  - id: causal-neg-004
+    description: "State change before action — implausible ordering"
+    claims:
+      - id: cl_n7
+        text: "Payments service latency spiked at 09:00"
+        valid_from: "2026-04-20T09:00:00Z"
+      - id: cl_n8
+        text: "We deployed payments service v1.43 at 11:00"
+        valid_from: "2026-04-20T11:00:00Z"
+    expected_none: true
+
+  - id: causal-neg-005
+    description: "Action and state change too far apart in time"
+    claims:
+      - id: cl_n9
+        text: "We deployed payments service v1.50 last month"
+        valid_from: "2026-03-01T09:00:00Z"
+      - id: cl_n10
+        text: "Payments service latency spiked today"
+        valid_from: "2026-04-30T09:00:00Z"
+    expected_none: true
+
+  - id: causal-neg-006
+    description: "Two parallel actions on the same service"
+    claims:
+      - id: cl_n11
+        text: "We deployed payments service v1.42"
+      - id: cl_n12
+        text: "We restarted payments service replicas"
+    expected_none: true
+
+  - id: causal-neg-007
+    description: "Two pure facts about the same service — no action"
+    claims:
+      - id: cl_n13
+        text: "Payments service runs on Go 1.24"
+      - id: cl_n14
+        text: "Payments service has 12 endpoints"
+    expected_none: true
+
+  - id: causal-neg-008
+    description: "Action and state change on completely different domains"
+    claims:
+      - id: cl_n15
+        text: "We deployed payments backend service"
+      - id: cl_n16
+        text: "Search frontend latency increased"
+    expected_none: true

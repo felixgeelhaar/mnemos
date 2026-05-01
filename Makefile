@@ -51,6 +51,16 @@ proto:
 
 check: fmt lint test build
 
+# nox-scan runs the security baseline scan and exits non-zero when any
+# new finding is detected (anything not present in findings.json).
+# Operators refresh the baseline by reviewing diffs in findings.json.
+nox-scan:
+	@if command -v nox >/dev/null 2>&1; then \
+		nox scan .; \
+	else \
+		echo "nox not installed, skipping"; \
+	fi
+
 release-check:
 	goreleaser check
 

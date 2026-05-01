@@ -59,6 +59,47 @@ func LoadOrCreateSecret(path string) ([]byte, bool, error) {
 	return secret, true, nil
 }
 
+// LoadPreviousSecret returns the previous-generation signing secret
+// when one is configured, or nil when no rotation is in progress.
+//
+// Resolution order:
+//  1. MNEMOS_JWT_PREV_SECRET env var (hex-encoded).
+//  2. <auth-dir>/jwt-secret.previous file alongside the active secret.
+//
+// Returning nil with a nil error is the steady-state path: there is
+// no previous secret, the verifier behaves as a single-key verifier.
+func LoadPreviousSecret(activePath string) ([]byte, error) {
+	if envHex := strings.TrimSpace(os.Getenv("MNEMOS_JWT_PREV_SECRET")); envHex != "" {
+		b, err := hex.DecodeString(envHex)
+		if err != nil {
+			return nil, fmt.Errorf("MNEMOS_JWT_PREV_SECRET is not valid hex: %w", err)
+		}
+		if len(b) < 32 {
+			return nil, errors.New("MNEMOS_JWT_PREV_SECRET must decode to at least 32 bytes")
+		}
+		return b, nil
+	}
+	if activePath == "" {
+		return nil, nil
+	}
+	prevPath := activePath + ".previous"
+	data, err := os.ReadFile(prevPath) //nolint:gosec // G304: server-resolved path
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read %s: %w", prevPath, err)
+	}
+	decoded, err := hex.DecodeString(strings.TrimSpace(string(data)))
+	if err != nil {
+		return nil, fmt.Errorf("read %s: not hex-encoded: %w", prevPath, err)
+	}
+	if len(decoded) < 32 {
+		return nil, fmt.Errorf("read %s: must decode to at least 32 bytes", prevPath)
+	}
+	return decoded, nil
+}
+
 // DefaultSecretPath returns the default location for the JWT secret
 // file. Resolution order:
 //  1. MNEMOS_AUTH_DIR env var — explicit override; intended for

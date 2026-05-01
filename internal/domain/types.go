@@ -385,19 +385,52 @@ const (
 // nothing more.
 //
 // AllowedRuns optionally restricts the agent to a whitelist of run
-// ids. Empty list means "every run is allowed" — F.x can extend with
-// glob patterns later. The whitelist gates write paths that carry a
-// run_id (today: events); claim/relationship/embedding writes
-// indirectly inherit because the agent must be able to seed the
-// underlying event first.
+// ids. Empty list means "every run is allowed". Entries support
+// shell-glob patterns (matched via [path.Match]) so a single agent
+// can scope to a class of runs without listing every concrete ID:
+// `prod-*`, `nightly-?-2026`, `release/[0-9]*`. The whitelist gates
+// write paths that carry a run_id (today: events); claim /
+// relationship / embedding writes indirectly inherit because the
+// agent must be able to seed the underlying event first.
+//
+// Quota optionally caps how much an agent can write per rolling
+// window. Zero values mean "no limit". Counters live on the agent
+// row and are incremented after every successful write.
 type Agent struct {
 	ID          string
 	Name        string
 	OwnerID     string // user_id of the human accountable for this agent
 	Scopes      []string
 	AllowedRuns []string
+	Quota       AgentQuota
 	Status      AgentStatus
 	CreatedAt   time.Time
+}
+
+// AgentQuota caps an agent's write volume. WindowSeconds is the
+// rolling window (e.g. 86400 for "per day"); MaxWrites caps the
+// number of write RPCs in that window; MaxTokens caps the cumulative
+// LLM token spend reported by the axi-go capability evidence chain
+// (zero means uncapped).
+type AgentQuota struct {
+	WindowSeconds int64 `json:"window_seconds,omitempty"`
+	MaxWrites     int64 `json:"max_writes,omitempty"`
+	MaxTokens     int64 `json:"max_tokens,omitempty"`
+}
+
+// IsZero reports whether the quota imposes any limit.
+func (q AgentQuota) IsZero() bool {
+	return q.WindowSeconds == 0 && q.MaxWrites == 0 && q.MaxTokens == 0
+}
+
+// AgentUsage carries the rolling counters paired with the quota
+// configured on Agent. Persistence implementations refresh the
+// window when WindowStart + WindowSeconds is in the past.
+type AgentUsage struct {
+	AgentID     string
+	WindowStart time.Time
+	Writes      int64
+	Tokens      int64
 }
 
 // Validate enforces the minimum invariants for a persistable Agent.

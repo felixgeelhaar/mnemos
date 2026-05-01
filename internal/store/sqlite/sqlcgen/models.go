@@ -120,6 +120,17 @@ type Entity struct {
 	CreatedBy      string `json:"created_by"`
 }
 
+type EntityRelationship struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	FromID    string `json:"from_id"`
+	FromType  string `json:"from_type"`
+	ToID      string `json:"to_id"`
+	ToType    string `json:"to_type"`
+	CreatedAt string `json:"created_at"`
+	CreatedBy string `json:"created_by"`
+}
+
 type Event struct {
 	ID            string `json:"id"`
 	RunID         string `json:"run_id"`
@@ -152,6 +163,14 @@ type LessonEvidence struct {
 	ActionID string `json:"action_id"`
 }
 
+type LessonVersion struct {
+	VersionID   int64  `json:"version_id"`
+	LessonID    string `json:"lesson_id"`
+	PayloadJson string `json:"payload_json"`
+	ValidFrom   string `json:"valid_from"`
+	ValidTo     string `json:"valid_to"`
+}
+
 type Outcome struct {
 	ID          string `json:"id"`
 	ActionID    string `json:"action_id"`
@@ -182,6 +201,14 @@ type Playbook struct {
 type PlaybookLesson struct {
 	PlaybookID string `json:"playbook_id"`
 	LessonID   string `json:"lesson_id"`
+}
+
+type PlaybookVersion struct {
+	VersionID   int64  `json:"version_id"`
+	PlaybookID  string `json:"playbook_id"`
+	PayloadJson string `json:"payload_json"`
+	ValidFrom   string `json:"valid_from"`
+	ValidTo     string `json:"valid_to"`
 }
 
 type Relationship struct {

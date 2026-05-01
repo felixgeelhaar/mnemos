@@ -1,23 +1,51 @@
 # AGENTS
 
-## Repo reality (as of current tree)
-- This repository is currently planning-first: no application source code, no build system, and no test/lint/typecheck config are present.
-- Do not guess stack-specific commands (`npm`, `pytest`, `go test`, etc.) unless relevant files are added in the same change.
+## Repo reality
+
+Mnemos is the **local-first evidence layer** of the cognitive stack (Mnemos → Chronos → Nous → Praxis). Code is feature-complete through Phase 8: claim extraction, contradiction detection, causal edges, action+outcome recording, lesson + playbook synthesis, decision audit, multi-tenant scope, markdown round-trip, multi-backend storage, HTTP REST, gRPC, MCP. See `README.md` for the user-facing surface and `CLAUDE.md` for architecture and conventions.
 
 ## Verified sources of truth
-- Product/architecture intent lives in `PRD.md` and `TDD.md`.
-- Roadmapping context is in `Vision.md`, `Roadmap.md`, and `Product Brief.md`.
-- Execution state is tracked in `.roady/spec.yaml`, `.roady/plan.json`, and `.roady/state.json`.
 
-## Required planning workflow
-- This repo has an active Roady workspace (`.roady/`) and an approved plan; check Roady state before implementing.
-- Prefer Roady state over prose when deciding what is pending vs done.
-- Current unlocked pending task in state: `task-core-foundation` (see `.roady/state.json`).
+- **Product / strategy**: `PRD.md`, `Product Brief.md`, `Vision.md`
+- **Technical design**: `TDD.md` (covers MVP domain — Phase 2+ schema lives in `sql/sqlite/schema.sql` + ADRs)
+- **Architecture decisions**: `docs/adr/` (currently `0001-multi-backend-storage.md`)
+- **Roadmap**: `Roadmap.md` — phase status: 1, 2A, 2B, A, F, axi-go all SHIPPED; Phase 3 (v1.0) FUTURE
+- **Execution state**: `.roady/` workspace (spec, plan, state)
+- **Architecture overview for AI agents**: `CLAUDE.md`
+
+## Build, test, lint
+
+```bash
+make check          # fmt + lint + test + build (CI equivalent)
+make build          # bin/mnemos
+make test           # go test -race -count=1 ./... (102 eval cases)
+make sqlc           # regen sqlc from sql/sqlite/queries
+make release-check  # validate .goreleaser.yaml
+```
+
+CI: `.github/workflows/ci.yml` runs format → vet → golangci-lint v2.1 → race tests → build → goreleaser check on push/PR to main.
 
 ## Structure and boundaries
-- `docs/` currently has no usable project docs/content (only `.DS_Store`).
-- `.relicta/` exists for release memory/state; treat as tool metadata, not product source.
-- `.gitignore` reserves `data/ingestion/` for local ingestion artifacts; keep `.gitkeep` if creating that tree.
 
-## Known gotcha
-- `.roady/state.json` contains historical evidence referencing files like `scripts/ingest_docs.py` and `docs/source/README.md` that are not in the current tree; verify file existence before relying on those notes.
+- `cmd/mnemos/` — CLI subcommands; one file per command; `mcp` and `serve` (HTTP + gRPC) live alongside
+- `internal/` — packages by domain (extract, relate, query, synthesize, store/{sqlite,memory,postgres,mysql,libsql}, ...)
+- `proto/mnemos/v1/mnemos.proto` — gRPC schema; `proto/gen/` holds generated code
+- `sql/sqlite/` — schema + sqlc query source; regenerate after edits via `make sqlc`
+- `docs/` — `phase2-plan.md`, `integrations.md`, `backlog.md`, `adr/0001-multi-backend-storage.md`
+- `client/` — typed Go client for the HTTP registry
+- `data/` — local ingestion artifacts (gitignored except `.gitkeep`)
+- `.relicta/` — release tooling metadata; not product source
+
+## Conventions
+
+- Conventional Commits.
+- Stdlib + project-owned libraries (`bolt` logging, `fortify` retry, `statekit` state machine, `mcp-go`).
+- `CGO_ENABLED=0` — pure-Go SQLite via `modernc.org/sqlite`.
+- All repository methods take `context.Context` first.
+- Domain types ship `Validate()`; contradictions are first-class.
+- Backends register from `init()` against the URL-scheme dispatcher in `internal/store`.
+
+## Open items (see Roadmap.md for full list)
+
+- gRPC API has no dedicated README section beyond the registry block — covered in `proto/mnemos/v1/mnemos.proto`.
+- `TDD.md` covers MVP only; Phase 2+ schema (actions, outcomes, lessons, decisions, playbooks, scopes, causal edges) lives in `sql/sqlite/schema.sql`.

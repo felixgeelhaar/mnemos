@@ -29,12 +29,29 @@ Empower users to answer: "What is the current state of truth and what is the evi
 * Proactively identify and resolve knowledge contradictions.  
 * Build high trust in AI outputs through transparent sourcing.
 
-## Product Bets inputs → knowledge claims improve understanding contradictions increase trust evidence beats RAG
+## Product Bets
 
-## User Flow add inputs extract knowledge ask question get structured answer
+- Inputs → knowledge claims improve understanding.
+- Surfacing contradictions increases trust.
+- Evidence-grounded answers beat ungoverned RAG.
 
-## Success Metrics \<5 min time-to-value ≥70% structured answers contradictions visible
+## User Flow
 
-## Risks poor extraction false contradictions perceived as RAG
+1. Add inputs (notes, transcripts, docs).
+2. Mnemos extracts structured claims with evidence.
+3. Ask a question.
+4. Get a structured answer with citations and surfaced contradictions.
+
+## Success Metrics
+
+- < 5 min time-to-value
+- ≥ 70 % structured answers
+- Contradictions visible to the user
+
+## Risks
+
+- Poor extraction quality.
+- False-positive contradictions.
+- Perception that Mnemos is "just RAG".
 
 Definition of Success Users can reliably understand what happened and why.  

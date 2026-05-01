@@ -9,16 +9,19 @@ import (
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
 )
 
-// UserRepository persists and retrieves user identities.
+// UserRepository persists and retrieves user identities. Backed by
+// sqlc-generated queries (see sql/sqlite/query/users.sql).
 type UserRepository struct {
 	db *sql.DB
+	q  *sqlcgen.Queries
 }
 
 // NewUserRepository returns a UserRepository backed by the given database.
 func NewUserRepository(db *sql.DB) UserRepository {
-	return UserRepository{db: db}
+	return UserRepository{db: db, q: sqlcgen.New(db)}
 }
 
 // Create inserts a new user. Returns an error if the email is already
@@ -31,11 +34,14 @@ func (r UserRepository) Create(ctx context.Context, u domain.User) error {
 	if err != nil {
 		return err
 	}
-	_, err = r.db.ExecContext(ctx,
-		`INSERT INTO users (id, name, email, status, scopes_json, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		u.ID, u.Name, u.Email, string(u.Status), scopesJSON, u.CreatedAt.UTC().Format(time.RFC3339Nano),
-	)
-	if err != nil {
+	if err := r.q.CreateUser(ctx, sqlcgen.CreateUserParams{
+		ID:         u.ID,
+		Name:       u.Name,
+		Email:      u.Email,
+		Status:     string(u.Status),
+		ScopesJson: scopesJSON,
+		CreatedAt:  u.CreatedAt.UTC().Format(time.RFC3339Nano),
+	}); err != nil {
 		return fmt.Errorf("insert user %s: %w", u.ID, err)
 	}
 	return nil
@@ -54,123 +60,100 @@ func encodeUserScopes(scopes []string) (string, error) {
 	return string(b), nil
 }
 
-// UpdateScopes replaces the user's scope list. Existing tokens still
-// in flight keep their original scopes — only freshly-issued tokens
-// see the new list.
+// UpdateScopes replaces the user's scope list. In-flight tokens keep
+// their issued scopes; only freshly-issued tokens see the new list.
 func (r UserRepository) UpdateScopes(ctx context.Context, id string, scopes []string) error {
 	scopesJSON, err := encodeUserScopes(scopes)
 	if err != nil {
 		return err
 	}
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE users SET scopes_json = ? WHERE id = ?`, scopesJSON, id)
-	if err != nil {
+	if err := r.q.UpdateUserScopes(ctx, sqlcgen.UpdateUserScopesParams{
+		ScopesJson: scopesJSON,
+		ID:         id,
+	}); err != nil {
 		return fmt.Errorf("update user scopes %s: %w", id, err)
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("user %s: %w", id, sql.ErrNoRows)
-	}
-	return nil
+	return r.assertExists(ctx, id)
 }
 
-// GetByID returns the user with the given ID, or an error wrapping
-// sql.ErrNoRows if not found.
+// GetByID returns the user with the given ID, or sql.ErrNoRows.
 func (r UserRepository) GetByID(ctx context.Context, id string) (domain.User, error) {
-	return r.scanOne(ctx, `WHERE id = ?`, id)
+	row, err := r.q.GetUserByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.User{}, fmt.Errorf("user %s: %w", id, sql.ErrNoRows)
+		}
+		return domain.User{}, fmt.Errorf("get user %s: %w", id, err)
+	}
+	return userRowToDomain(row.ID, row.Name, row.Email, row.Status, row.ScopesJson, row.CreatedAt)
 }
 
-// GetByEmail returns the user with the given email, or an error wrapping
-// sql.ErrNoRows if not found. Email match is exact.
+// GetByEmail returns the user with the given email, or sql.ErrNoRows.
 func (r UserRepository) GetByEmail(ctx context.Context, email string) (domain.User, error) {
-	return r.scanOne(ctx, `WHERE email = ?`, email)
+	row, err := r.q.GetUserByEmail(ctx, email)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.User{}, fmt.Errorf("user %s: %w", email, sql.ErrNoRows)
+		}
+		return domain.User{}, fmt.Errorf("get user by email %s: %w", email, err)
+	}
+	return userRowToDomain(row.ID, row.Name, row.Email, row.Status, row.ScopesJson, row.CreatedAt)
 }
 
 // List returns all users in created_at order (oldest first). Both
 // active and revoked users are returned; callers filter as needed.
 func (r UserRepository) List(ctx context.Context) ([]domain.User, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, email, status, scopes_json, created_at FROM users ORDER BY created_at ASC`)
+	rows, err := r.q.ListUsers(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
-	defer closeRows(rows)
-
-	users := make([]domain.User, 0)
-	for rows.Next() {
-		u, err := scanUser(rows)
+	out := make([]domain.User, 0, len(rows))
+	for _, row := range rows {
+		u, err := userRowToDomain(row.ID, row.Name, row.Email, row.Status, row.ScopesJson, row.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
-		users = append(users, u)
+		out = append(out, u)
 	}
-	return users, rows.Err()
+	return out, nil
 }
 
 // UpdateStatus changes a user's status (e.g., active → revoked). Soft
 // delete: the row stays so historical created_by references remain
 // resolvable.
 func (r UserRepository) UpdateStatus(ctx context.Context, id string, status domain.UserStatus) error {
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE users SET status = ? WHERE id = ?`, string(status), id)
-	if err != nil {
+	if err := r.q.UpdateUserStatus(ctx, sqlcgen.UpdateUserStatusParams{
+		Status: string(status),
+		ID:     id,
+	}); err != nil {
 		return fmt.Errorf("update user status %s: %w", id, err)
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("user %s: %w", id, sql.ErrNoRows)
+	return r.assertExists(ctx, id)
+}
+
+func (r UserRepository) assertExists(ctx context.Context, id string) error {
+	if _, err := r.q.GetUserByID(ctx, id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("user %s: %w", id, sql.ErrNoRows)
+		}
+		return err
 	}
 	return nil
 }
 
-func (r UserRepository) scanOne(ctx context.Context, where string, args ...any) (domain.User, error) {
-	//nolint:gosec // G202: where clause is one of two literal constants from internal callers, never user input
-	row := r.db.QueryRowContext(ctx,
-		`SELECT id, name, email, status, scopes_json, created_at FROM users `+where, args...)
-
-	var (
-		u         domain.User
-		statusStr string
-		scopesRaw string
-		createdAt string
-	)
-	if err := row.Scan(&u.ID, &u.Name, &u.Email, &statusStr, &scopesRaw, &createdAt); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return domain.User{}, fmt.Errorf("user %v: %w", args, sql.ErrNoRows)
-		}
-		return domain.User{}, fmt.Errorf("scan user: %w", err)
-	}
+func userRowToDomain(id, name, email, status, scopesJSON, createdAt string) (domain.User, error) {
 	t, err := time.Parse(time.RFC3339Nano, createdAt)
 	if err != nil {
 		return domain.User{}, fmt.Errorf("parse user created_at: %w", err)
 	}
-	u.Status = domain.UserStatus(statusStr)
-	u.CreatedAt = t
-	if err := json.Unmarshal([]byte(scopesRaw), &u.Scopes); err != nil {
-		return domain.User{}, fmt.Errorf("decode user scopes: %w", err)
+	u := domain.User{
+		ID:        id,
+		Name:      name,
+		Email:     email,
+		Status:    domain.UserStatus(status),
+		CreatedAt: t,
 	}
-	return u, nil
-}
-
-// scanUser is the row-scanner counterpart for List. Kept separate from
-// scanOne because *sql.Rows and *sql.Row aren't interchangeable.
-func scanUser(rows *sql.Rows) (domain.User, error) {
-	var (
-		u         domain.User
-		statusStr string
-		scopesRaw string
-		createdAt string
-	)
-	if err := rows.Scan(&u.ID, &u.Name, &u.Email, &statusStr, &scopesRaw, &createdAt); err != nil {
-		return domain.User{}, fmt.Errorf("scan user row: %w", err)
-	}
-	t, err := time.Parse(time.RFC3339Nano, createdAt)
-	if err != nil {
-		return domain.User{}, fmt.Errorf("parse user created_at: %w", err)
-	}
-	u.Status = domain.UserStatus(statusStr)
-	u.CreatedAt = t
-	if err := json.Unmarshal([]byte(scopesRaw), &u.Scopes); err != nil {
+	if err := json.Unmarshal([]byte(scopesJSON), &u.Scopes); err != nil {
 		return domain.User{}, fmt.Errorf("decode user scopes: %w", err)
 	}
 	return u, nil

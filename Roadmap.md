@@ -102,7 +102,9 @@ mnemos pull = query team knowledge alongside local
 - [x] **F.3** — Per-user scope policy: `users.scopes_json`, `mnemos user create --scope <s>`, user JWTs honour the recorded list (legacy users keep `*`)
 - [x] **F.4 + F.4.b** — Agent → run_id whitelist: `agents.allowed_runs_json`, JWT `Runs` claim, batch pre-checks on every write endpoint (events directly; claims/relationships/embeddings via evidence join). CLI: `mnemos agent create --run <id>`
 - [x] **F.5** — Audit by principal: `mnemos audit who <id> [--since <duration>] [--human]` returns every write attributed to a user/agent/system across events, claims, relationships, embeddings, and `claim_status_history`
-- [ ] Future: glob-pattern run scopes, agent quota policies, federated agent sync
+- [x] Glob-pattern run scopes — `Claims.AllowsRun` + `domain.Agent.AllowedRuns` accept `*`, exact, and shell-glob patterns (`prod-*`, `nightly-?-2026`, `release/[0-9]*`).
+- [x] Agent quota policies — `domain.AgentQuota` (window seconds, max writes, max tokens) + `auth.QuotaTracker` enforces rolling windows in memory; `ErrQuotaExceeded` on overflow.
+- [x] Federated agent sync — `AgentRepository.Upsert(batch)` on every backend (sqlite/memory/postgres/mysql); registries push/pull agents like other resources.
 
 ---
 
@@ -130,7 +132,7 @@ mnemos pull = query team knowledge alongside local
 
 - [x] GraphRAG-style multi-hop queries (supports/contradicts edge expansion)
 - [x] Compliance and audit trails (Phase A + F deliver the substrate)
-- [ ] Bias detection
+- [x] Bias detection — `internal/bias` ships four indicators (source concentration, polarity skew, temporal cluster, single-source-of-truth) with operator-tunable thresholds.
 - [ ] Enterprise integrations (Slack, Teams, Jira)
 - [x] Web interface — embedded SPA shipped with `mnemos serve`
 

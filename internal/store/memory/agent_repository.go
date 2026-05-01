@@ -110,6 +110,29 @@ func (r AgentRepository) UpdateAllowedRuns(_ context.Context, id string, runs []
 	return nil
 }
 
+// Upsert idempotently writes a batch of agents — used by federation.
+func (r AgentRepository) Upsert(_ context.Context, agents []domain.Agent) error {
+	for _, a := range agents {
+		if err := a.Validate(); err != nil {
+			return fmt.Errorf("invalid agent %s: %w", a.ID, err)
+		}
+	}
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	for _, a := range agents {
+		r.state.agents[a.ID] = storedAgent{
+			ID:          a.ID,
+			Name:        a.Name,
+			OwnerID:     a.OwnerID,
+			Scopes:      copyStringSlice(a.Scopes),
+			AllowedRuns: copyStringSlice(a.AllowedRuns),
+			Status:      a.Status,
+			CreatedAt:   a.CreatedAt,
+		}
+	}
+	return nil
+}
+
 func (s storedAgent) toDomain() domain.Agent {
 	return domain.Agent{
 		ID:          s.ID,

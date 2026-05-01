@@ -15,6 +15,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -68,13 +70,26 @@ func (c Claims) HasScope(want string) bool {
 
 // AllowsRun reports whether the bearer may write to the given
 // run_id. Empty Runs list means "no restriction" (allows every run).
-// Non-empty list requires an exact match.
+// Non-empty list accepts:
+//   - "*" wildcard (every run)
+//   - exact match
+//   - shell-glob match via [path.Match] (`prod-*`, `nightly-?-2026`,
+//     `release/[0-9]*`). Patterns that fail to compile fall back to
+//     exact-string compare so a malformed pattern can't grant
+//     unintended access.
 func (c Claims) AllowsRun(runID string) bool {
 	if len(c.Runs) == 0 {
 		return true
 	}
-	for _, r := range c.Runs {
-		if r == runID {
+	for _, pat := range c.Runs {
+		if pat == "*" || pat == runID {
+			return true
+		}
+		if !strings.ContainsAny(pat, "*?[") {
+			continue // not a glob; exact match already failed above
+		}
+		matched, err := path.Match(pat, runID)
+		if err == nil && matched {
 			return true
 		}
 	}
@@ -89,9 +104,16 @@ type Issuer struct {
 }
 
 // Verifier parses + validates JWTs and consults the revocation denylist.
+//
+// Dual-key support: a `previous` secret may be supplied to support
+// zero-downtime rotation. New tokens always sign under the active
+// secret; tokens issued under the previous secret continue to verify
+// until they expire. Drop the previous secret once the longest-lived
+// outstanding token has expired.
 type Verifier struct {
-	secret  []byte
-	revoked ports.RevokedTokenRepository
+	secret         []byte
+	previousSecret []byte
+	revoked        ports.RevokedTokenRepository
 }
 
 // NewIssuer returns an Issuer signing tokens with the given secret. The
@@ -104,6 +126,15 @@ func NewIssuer(secret []byte) *Issuer {
 // given secret and consults revoked for instant-revocation lookups.
 func NewVerifier(secret []byte, revoked ports.RevokedTokenRepository) *Verifier {
 	return &Verifier{secret: secret, revoked: revoked}
+}
+
+// NewVerifierWithPrevious returns a dual-key Verifier. Tokens signed
+// under either active or previous validate; new tokens (issued via
+// [Issuer]) always sign under active. Pass nil/empty previous to
+// disable the rotation path — callers without a rotation in flight
+// should use [NewVerifier] instead.
+func NewVerifierWithPrevious(active, previous []byte, revoked ports.RevokedTokenRepository) *Verifier {
+	return &Verifier{secret: active, previousSecret: previous, revoked: revoked}
 }
 
 // IssueUserToken mints a JWT for a human user, valid for ttl.
@@ -186,15 +217,18 @@ func (i *Issuer) issue(subject string, kind TokenKind, scopes, runs []string, tt
 // denylist. Returns the validated claims or an error explaining why
 // the token was rejected.
 func (v *Verifier) ParseAndValidate(ctx context.Context, tokenString string) (*Claims, error) {
-	parsed, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(t *jwt.Token) (any, error) {
-		// Lock the algorithm to prevent the classic alg=none / alg=RS256
-		// confusion attack where an attacker swaps in a different
-		// algorithm.
-		if t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
-			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
-		}
-		return v.secret, nil
-	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
+	parseWith := func(secret []byte) (*jwt.Token, error) {
+		return jwt.ParseWithClaims(tokenString, &Claims{}, func(t *jwt.Token) (any, error) {
+			if t.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+				return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+			}
+			return secret, nil
+		}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
+	}
+	parsed, err := parseWith(v.secret)
+	if err != nil && len(v.previousSecret) > 0 && isSignatureError(err) {
+		parsed, err = parseWith(v.previousSecret)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("parse token: %w", err)
 	}
@@ -216,6 +250,15 @@ func (v *Verifier) ParseAndValidate(ctx context.Context, tokenString string) (*C
 	}
 
 	return claims, nil
+}
+
+// isSignatureError reports whether err is a signature-mismatch
+// failure (i.e. the only error category for which falling back to
+// the previous key is sensible). Other failures — expired token,
+// malformed JWT, unknown alg — should not trigger fallback.
+func isSignatureError(err error) bool {
+	return errors.Is(err, jwt.ErrSignatureInvalid) ||
+		errors.Is(err, jwt.ErrTokenSignatureInvalid)
 }
 
 // GenerateSecret returns 32 bytes of cryptographically random data,

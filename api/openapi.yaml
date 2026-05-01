@@ -1,0 +1,305 @@
+openapi: 3.0.3
+info:
+  title: Mnemos HTTP Registry
+  description: |
+    Mnemos is the local-first evidence layer that grounds AI in truth. This
+    schema covers the HTTP registry surface exposed by `mnemos serve`. The
+    equivalent gRPC service is at `proto/mnemos/v1/mnemos.proto` and covers
+    the same Phase 2-7 entity surface.
+  version: 0.13.0
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+servers:
+  - url: http://localhost:7777
+    description: Default `mnemos serve` bind
+security:
+  - bearerAuth: []
+  - {}
+paths:
+  /health:
+    get:
+      summary: Liveness probe
+      description: Open path; bypasses bearer auth.
+      security: []
+      responses:
+        "200":
+          description: Server reachable
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+  /v1/metrics:
+    get:
+      summary: Knowledge-base counts
+      description: |
+        Mirrors `mnemos metrics`: total events, claims by type and status,
+        contradictions, average trust score, low-trust count.
+      responses:
+        "200":
+          description: Counts
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Metrics" }
+  /v1/events:
+    get:
+      summary: List events
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200":
+          description: Events
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/Event" }
+    post:
+      summary: Append a batch of events
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [events]
+              properties:
+                events:
+                  type: array
+                  items: { $ref: "#/components/schemas/Event" }
+      responses:
+        "200":
+          description: Append summary
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppendSummary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/claims:
+    get:
+      summary: List claims
+      parameters:
+        - { name: type, in: query, schema: { type: string, enum: [fact, hypothesis, decision] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, contested, resolved, deprecated] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200":
+          description: Claims
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  claims:
+                    type: array
+                    items: { $ref: "#/components/schemas/Claim" }
+    post:
+      summary: Upsert a batch of claims
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [claims]
+              properties:
+                claims:
+                  type: array
+                  items: { $ref: "#/components/schemas/Claim" }
+      responses:
+        "200":
+          description: Upsert summary
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppendSummary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/relationships:
+    get:
+      summary: List relationships
+      parameters:
+        - { name: type, in: query, schema: { type: string, enum: [supports, contradicts, causes, caused_by, action_of, outcome_of, validates, refutes, derived_from] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200":
+          description: Relationships
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  relationships:
+                    type: array
+                    items: { $ref: "#/components/schemas/Relationship" }
+    post:
+      summary: Upsert relationships
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [relationships]
+              properties:
+                relationships:
+                  type: array
+                  items: { $ref: "#/components/schemas/Relationship" }
+      responses:
+        "200":
+          description: Upsert summary
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppendSummary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/embeddings:
+    get:
+      summary: List embeddings
+      parameters:
+        - { name: entity_type, in: query, schema: { type: string, enum: [event, claim] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200":
+          description: Embeddings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  embeddings:
+                    type: array
+                    items: { $ref: "#/components/schemas/Embedding" }
+    post:
+      summary: Upsert embeddings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [embeddings]
+              properties:
+                embeddings:
+                  type: array
+                  items: { $ref: "#/components/schemas/Embedding" }
+      responses:
+        "200":
+          description: Upsert summary
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AppendSummary" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        JWT (HS256) issued by the same `mnemos serve` instance via
+        `mnemos token issue`. Required on all write methods (POST/PUT/DELETE);
+        reads stay open. Signing key from `MNEMOS_JWT_SECRET` or
+        `MNEMOS_AUTH_DIR/jwt-secret`. The same verifier gates the gRPC surface.
+        Client-side `MNEMOS_REGISTRY_TOKEN` is for push/pull against a *remote*
+        registry and is unrelated to inbound auth.
+  responses:
+    Unauthorized:
+      description: Missing or invalid bearer token
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Health:
+      type: object
+      properties:
+        status: { type: string, enum: [ok] }
+        version: { type: string }
+      required: [status]
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+      required: [error]
+    Event:
+      type: object
+      properties:
+        id: { type: string }
+        run_id: { type: string }
+        schema_version: { type: string }
+        content: { type: string }
+        source_input_id: { type: string }
+        timestamp: { type: string, format: date-time }
+        metadata:
+          type: object
+          additionalProperties: true
+      required: [id, content, timestamp]
+    Claim:
+      type: object
+      properties:
+        id: { type: string }
+        text: { type: string }
+        type: { type: string, enum: [fact, hypothesis, decision] }
+        status: { type: string, enum: [active, contested, resolved, deprecated] }
+        confidence: { type: number, format: double }
+        trust_score: { type: number, format: double }
+        valid_from: { type: string, format: date-time, nullable: true }
+        valid_to: { type: string, format: date-time, nullable: true }
+        evidence:
+          type: array
+          items:
+            type: object
+            properties:
+              event_id: { type: string }
+            required: [event_id]
+        scope:
+          type: object
+          properties:
+            service: { type: string }
+            env: { type: string }
+            team: { type: string }
+      required: [id, text, type]
+    Relationship:
+      type: object
+      properties:
+        id: { type: string }
+        type:
+          type: string
+          enum: [supports, contradicts, causes, caused_by, action_of, outcome_of, validates, refutes, derived_from]
+        from_claim_id: { type: string }
+        to_claim_id: { type: string }
+        created_at: { type: string, format: date-time }
+      required: [id, type, from_claim_id, to_claim_id]
+    Embedding:
+      type: object
+      properties:
+        entity_id: { type: string }
+        entity_type: { type: string, enum: [event, claim] }
+        model: { type: string }
+        vector:
+          type: array
+          items: { type: number, format: double }
+      required: [entity_id, entity_type, vector]
+    AppendSummary:
+      type: object
+      properties:
+        appended: { type: integer }
+        skipped: { type: integer }
+      required: [appended]
+    Metrics:
+      type: object
+      properties:
+        events: { type: integer }
+        claims: { type: integer }
+        relationships: { type: integer }
+        contradictions: { type: integer }
+        avg_trust: { type: number, format: double }
+        low_trust_count: { type: integer }
+        claims_by_type:
+          type: object
+          additionalProperties: { type: integer }
+        claims_by_status:
+          type: object
+          additionalProperties: { type: integer }

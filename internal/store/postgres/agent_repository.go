@@ -141,6 +141,51 @@ func scanAgentRow(row *sql.Row) (domain.Agent, error) {
 	return a, nil
 }
 
+// Upsert idempotently writes a batch of agents — used by federation.
+func (r AgentRepository) Upsert(ctx context.Context, agents []domain.Agent) error {
+	if len(agents) == 0 {
+		return nil
+	}
+	for _, a := range agents {
+		if err := a.Validate(); err != nil {
+			return fmt.Errorf("invalid agent %s: %w", a.ID, err)
+		}
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("upsert agents: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	q := fmt.Sprintf(`
+INSERT INTO %s (id, name, owner_id, scopes_json, allowed_runs_json, status, created_at)
+VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7)
+ON CONFLICT (id) DO UPDATE SET
+	name = EXCLUDED.name,
+	owner_id = EXCLUDED.owner_id,
+	scopes_json = EXCLUDED.scopes_json,
+	allowed_runs_json = EXCLUDED.allowed_runs_json,
+	status = EXCLUDED.status`, qualify(r.ns, "agents"))
+	for _, a := range agents {
+		scopesJSON, err := encodeStringList(a.Scopes)
+		if err != nil {
+			return err
+		}
+		runsJSON, err := encodeStringList(a.AllowedRuns)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, q,
+			a.ID, a.Name, a.OwnerID, scopesJSON, runsJSON, string(a.Status), a.CreatedAt.UTC(),
+		); err != nil {
+			return fmt.Errorf("upsert agent %s: %w", a.ID, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("upsert agents: commit: %w", err)
+	}
+	return nil
+}
+
 func scanAgentRows(rows *sql.Rows) (domain.Agent, error) {
 	var (
 		a         domain.Agent

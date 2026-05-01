@@ -253,3 +253,97 @@ func TestAllowsRun_EmptyWhitelistMeansUnrestricted(t *testing.T) {
 		t.Errorf("empty Runs should mean every run allowed")
 	}
 }
+
+func TestAllowsRun_WildcardStarMatchesEverything(t *testing.T) {
+	t.Parallel()
+	c := Claims{Runs: []string{"*"}}
+	if !c.AllowsRun("anything-here") {
+		t.Errorf("'*' should match every run")
+	}
+}
+
+func TestAllowsRun_GlobPatternsMatch(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		pattern string
+		runID   string
+		want    bool
+	}{
+		{"prod-*", "prod-2026-04-30", true},
+		{"prod-*", "staging-2026-04-30", false},
+		{"nightly-?-2026", "nightly-a-2026", true},
+		{"nightly-?-2026", "nightly-ab-2026", false},
+		{"release/[0-9]*", "release/42", true},
+		{"release/[0-9]*", "release/abc", false},
+		{"exact", "exact", true},
+		{"exact", "different", false},
+	}
+	for _, c := range cases {
+		got := (Claims{Runs: []string{c.pattern}}).AllowsRun(c.runID)
+		if got != c.want {
+			t.Errorf("AllowsRun(pattern=%q, run=%q) = %v, want %v", c.pattern, c.runID, got, c.want)
+		}
+	}
+}
+
+func TestVerifier_DualKeyRotation(t *testing.T) {
+	user := domain.User{ID: "u1", Scopes: []string{"*"}}
+	revoked := newFakeRevoked()
+
+	oldSecret, _ := GenerateSecret()
+	tokOld, _, err := NewIssuer(oldSecret).IssueUserToken(user, time.Hour)
+	if err != nil {
+		t.Fatalf("issue old: %v", err)
+	}
+
+	// Rotate: new active, old kept as previous.
+	newSecret, _ := GenerateSecret()
+	v := NewVerifierWithPrevious(newSecret, oldSecret, revoked)
+
+	if _, err := v.ParseAndValidate(context.Background(), tokOld); err != nil {
+		t.Errorf("token issued under previous secret should still validate: %v", err)
+	}
+
+	tokNew, _, err := NewIssuer(newSecret).IssueUserToken(user, time.Hour)
+	if err != nil {
+		t.Fatalf("issue new: %v", err)
+	}
+	if _, err := v.ParseAndValidate(context.Background(), tokNew); err != nil {
+		t.Errorf("token under active secret failed: %v", err)
+	}
+}
+
+func TestVerifier_RotationDoesNotMaskUnknownSecret(t *testing.T) {
+	user := domain.User{ID: "u1", Scopes: []string{"*"}}
+	revoked := newFakeRevoked()
+
+	other, _ := GenerateSecret()
+	tokForeign, _, _ := NewIssuer(other).IssueUserToken(user, time.Hour)
+
+	active, _ := GenerateSecret()
+	previous, _ := GenerateSecret()
+	v := NewVerifierWithPrevious(active, previous, revoked)
+
+	if _, err := v.ParseAndValidate(context.Background(), tokForeign); err == nil {
+		t.Errorf("foreign-secret token must be rejected")
+	}
+}
+
+func TestVerifier_RotationDoesNotBypassExpiry(t *testing.T) {
+	user := domain.User{ID: "u1", Scopes: []string{"*"}}
+	revoked := newFakeRevoked()
+
+	old, _ := GenerateSecret()
+	tokOld, _, err := NewIssuer(old).IssueUserToken(user, 1*time.Millisecond)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	time.Sleep(10 * time.Millisecond)
+
+	active, _ := GenerateSecret()
+	v := NewVerifierWithPrevious(active, old, revoked)
+
+	if _, err := v.ParseAndValidate(context.Background(), tokOld); err == nil {
+		t.Errorf("expired token should be rejected even when previous secret matches")
+	}
+}

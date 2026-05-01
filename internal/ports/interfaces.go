@@ -227,6 +227,12 @@ type AgentRepository interface {
 	UpdateStatus(ctx context.Context, id string, status domain.AgentStatus) error
 	UpdateScopes(ctx context.Context, id string, scopes []string) error
 	UpdateAllowedRuns(ctx context.Context, id string, runs []string) error
+
+	// Upsert is the federation entry point: callers (HTTP /v1/agents
+	// POST handlers, push/pull workers) hand a batch of agents and
+	// the repository preserves identity, status, scopes, and
+	// allowed-runs. Implementations dedupe by ID.
+	Upsert(ctx context.Context, agents []domain.Agent) error
 }
 
 // CompilationJobRepository persists workflow job state. The runner

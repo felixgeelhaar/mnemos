@@ -9,22 +9,24 @@ import (
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
 )
 
 // AgentRepository persists and retrieves non-human principals.
-// Scopes are stored as a JSON-encoded array of strings: SQLite has no
-// native list type and we want to keep the column scannable from
-// shell/SQL one-liners without bespoke decoders.
+// Backed by sqlc-generated queries (see sql/sqlite/query/agents.sql).
+// Scopes and allowed_runs are JSON-encoded TEXT to keep the column
+// scannable from shell SQL one-liners without a bespoke decoder.
 type AgentRepository struct {
 	db *sql.DB
+	q  *sqlcgen.Queries
 }
 
 // NewAgentRepository returns an AgentRepository backed by the given database.
 func NewAgentRepository(db *sql.DB) AgentRepository {
-	return AgentRepository{db: db}
+	return AgentRepository{db: db, q: sqlcgen.New(db)}
 }
 
-// Create inserts a new agent. The owner must already exist (FK
+// Create inserts a new agent. Owner must already exist (FK
 // constraint); upstream callers should look the user up first to
 // produce a friendlier error than the FK violation.
 func (r AgentRepository) Create(ctx context.Context, a domain.Agent) error {
@@ -35,100 +37,150 @@ func (r AgentRepository) Create(ctx context.Context, a domain.Agent) error {
 	if err != nil {
 		return err
 	}
-	runsJSON, err := encodeScopes(a.AllowedRuns) // same shape: []string → JSON
+	runsJSON, err := encodeScopes(a.AllowedRuns)
 	if err != nil {
 		return err
 	}
-	_, err = r.db.ExecContext(ctx,
-		`INSERT INTO agents (id, name, owner_id, scopes_json, allowed_runs_json, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		a.ID, a.Name, a.OwnerID, scopesJSON, runsJSON, string(a.Status), a.CreatedAt.UTC().Format(time.RFC3339Nano),
-	)
-	if err != nil {
+	if err := r.q.CreateAgent(ctx, sqlcgen.CreateAgentParams{
+		ID:              a.ID,
+		Name:            a.Name,
+		OwnerID:         a.OwnerID,
+		ScopesJson:      scopesJSON,
+		AllowedRunsJson: runsJSON,
+		Status:          string(a.Status),
+		CreatedAt:       a.CreatedAt.UTC().Format(time.RFC3339Nano),
+	}); err != nil {
 		return fmt.Errorf("insert agent %s: %w", a.ID, err)
 	}
 	return nil
 }
 
-// GetByID returns the agent with the given ID, or an error wrapping
-// sql.ErrNoRows if not found.
+// GetByID returns the agent with the given ID, or sql.ErrNoRows.
 func (r AgentRepository) GetByID(ctx context.Context, id string) (domain.Agent, error) {
-	row := r.db.QueryRowContext(ctx,
-		`SELECT id, name, owner_id, scopes_json, allowed_runs_json, status, created_at FROM agents WHERE id = ?`, id)
-	return scanAgentRow(row, id)
+	row, err := r.q.GetAgentByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.Agent{}, fmt.Errorf("agent %s: %w", id, sql.ErrNoRows)
+		}
+		return domain.Agent{}, fmt.Errorf("get agent %s: %w", id, err)
+	}
+	return rowToAgent(row)
 }
 
 // List returns every agent in created_at order (oldest first).
 func (r AgentRepository) List(ctx context.Context) ([]domain.Agent, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, name, owner_id, scopes_json, allowed_runs_json, status, created_at FROM agents ORDER BY created_at ASC`)
+	rows, err := r.q.ListAgents(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list agents: %w", err)
 	}
-	defer closeRows(rows)
-
-	out := make([]domain.Agent, 0)
-	for rows.Next() {
-		a, err := scanAgent(rows)
+	out := make([]domain.Agent, 0, len(rows))
+	for _, row := range rows {
+		a, err := rowToAgent(row)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, a)
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 // UpdateStatus changes an agent's status (e.g., active → revoked).
-// Soft delete: the row stays so historical attribution remains
-// resolvable.
 func (r AgentRepository) UpdateStatus(ctx context.Context, id string, status domain.AgentStatus) error {
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE agents SET status = ? WHERE id = ?`, string(status), id)
-	if err != nil {
+	if err := r.q.UpdateAgentStatus(ctx, sqlcgen.UpdateAgentStatusParams{
+		Status: string(status),
+		ID:     id,
+	}); err != nil {
 		return fmt.Errorf("update agent status %s: %w", id, err)
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("agent %s: %w", id, sql.ErrNoRows)
-	}
-	return nil
+	return r.assertExists(ctx, id)
 }
 
-// UpdateScopes replaces the agent's scope list. Existing tokens
-// already in flight will continue to carry their issued scopes — only
-// freshly-issued tokens see the new list.
+// UpdateScopes replaces the agent's scope list. In-flight tokens
+// keep their issued scopes; only freshly-issued tokens see the new
+// list.
 func (r AgentRepository) UpdateScopes(ctx context.Context, id string, scopes []string) error {
 	scopesJSON, err := encodeScopes(scopes)
 	if err != nil {
 		return err
 	}
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE agents SET scopes_json = ? WHERE id = ?`, scopesJSON, id)
-	if err != nil {
+	if err := r.q.UpdateAgentScopes(ctx, sqlcgen.UpdateAgentScopesParams{
+		ScopesJson: scopesJSON,
+		ID:         id,
+	}); err != nil {
 		return fmt.Errorf("update agent scopes %s: %w", id, err)
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("agent %s: %w", id, sql.ErrNoRows)
-	}
-	return nil
+	return r.assertExists(ctx, id)
 }
 
-// UpdateAllowedRuns replaces the agent's run whitelist. Same caveat
-// as UpdateScopes: in-flight tokens keep their issued whitelist;
-// only newly-issued tokens see the change.
+// UpdateAllowedRuns replaces the agent's run whitelist.
 func (r AgentRepository) UpdateAllowedRuns(ctx context.Context, id string, runs []string) error {
 	runsJSON, err := encodeScopes(runs)
 	if err != nil {
 		return err
 	}
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE agents SET allowed_runs_json = ? WHERE id = ?`, runsJSON, id)
-	if err != nil {
+	if err := r.q.UpdateAgentAllowedRuns(ctx, sqlcgen.UpdateAgentAllowedRunsParams{
+		AllowedRunsJson: runsJSON,
+		ID:              id,
+	}); err != nil {
 		return fmt.Errorf("update agent allowed_runs %s: %w", id, err)
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("agent %s: %w", id, sql.ErrNoRows)
+	return r.assertExists(ctx, id)
+}
+
+// Upsert idempotently writes a batch of agents. Used by federation
+// (push/pull) so a registry mirrors peers' agents while preserving
+// identity, status, scopes, and allowed-runs.
+func (r AgentRepository) Upsert(ctx context.Context, agents []domain.Agent) error {
+	if len(agents) == 0 {
+		return nil
+	}
+	for _, a := range agents {
+		if err := a.Validate(); err != nil {
+			return fmt.Errorf("invalid agent %s: %w", a.ID, err)
+		}
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("upsert agents: begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	q := r.q.WithTx(tx)
+	for _, a := range agents {
+		scopesJSON, err := encodeScopes(a.Scopes)
+		if err != nil {
+			return err
+		}
+		runsJSON, err := encodeScopes(a.AllowedRuns)
+		if err != nil {
+			return err
+		}
+		if err := q.UpsertAgent(ctx, sqlcgen.UpsertAgentParams{
+			ID:              a.ID,
+			Name:            a.Name,
+			OwnerID:         a.OwnerID,
+			ScopesJson:      scopesJSON,
+			AllowedRunsJson: runsJSON,
+			Status:          string(a.Status),
+			CreatedAt:       a.CreatedAt.UTC().Format(time.RFC3339Nano),
+		}); err != nil {
+			return fmt.Errorf("upsert agent %s: %w", a.ID, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("upsert agents: commit: %w", err)
+	}
+	return nil
+}
+
+// assertExists returns sql.ErrNoRows when the id is unknown so the
+// Update* methods preserve their established "missing row → ErrNoRows"
+// contract that sqlc's :exec doesn't surface on its own.
+func (r AgentRepository) assertExists(ctx context.Context, id string) error {
+	if _, err := r.q.GetAgentByID(ctx, id); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("agent %s: %w", id, sql.ErrNoRows)
+		}
+		return err
 	}
 	return nil
 }
@@ -144,49 +196,23 @@ func encodeScopes(scopes []string) (string, error) {
 	return string(b), nil
 }
 
-type agentRowScanner interface {
-	Scan(dest ...any) error
-}
-
-func scanAgentRow(row *sql.Row, id string) (domain.Agent, error) {
-	a, err := scanAgent(rowOnce{row: row})
-	if errors.Is(err, sql.ErrNoRows) {
-		return domain.Agent{}, fmt.Errorf("agent %s: %w", id, sql.ErrNoRows)
-	}
-	return a, err
-}
-
-func scanAgent(s agentRowScanner) (domain.Agent, error) {
-	var (
-		a         domain.Agent
-		scopesRaw string
-		runsRaw   string
-		statusStr string
-		createdAt string
-	)
-	if err := s.Scan(&a.ID, &a.Name, &a.OwnerID, &scopesRaw, &runsRaw, &statusStr, &createdAt); err != nil {
-		return domain.Agent{}, err
-	}
-	t, err := time.Parse(time.RFC3339Nano, createdAt)
+func rowToAgent(row sqlcgen.Agent) (domain.Agent, error) {
+	t, err := time.Parse(time.RFC3339Nano, row.CreatedAt)
 	if err != nil {
 		return domain.Agent{}, fmt.Errorf("parse agent created_at: %w", err)
 	}
-	a.CreatedAt = t
-	a.Status = domain.AgentStatus(statusStr)
-	if err := json.Unmarshal([]byte(scopesRaw), &a.Scopes); err != nil {
+	a := domain.Agent{
+		ID:        row.ID,
+		Name:      row.Name,
+		OwnerID:   row.OwnerID,
+		Status:    domain.AgentStatus(row.Status),
+		CreatedAt: t,
+	}
+	if err := json.Unmarshal([]byte(row.ScopesJson), &a.Scopes); err != nil {
 		return domain.Agent{}, fmt.Errorf("decode agent scopes: %w", err)
 	}
-	if err := json.Unmarshal([]byte(runsRaw), &a.AllowedRuns); err != nil {
+	if err := json.Unmarshal([]byte(row.AllowedRunsJson), &a.AllowedRuns); err != nil {
 		return domain.Agent{}, fmt.Errorf("decode agent allowed_runs: %w", err)
 	}
 	return a, nil
 }
-
-// rowOnce adapts *sql.Row to the agentRowScanner interface so the
-// per-row scan helper can serve both QueryRowContext and QueryContext
-// callers without copy-paste.
-type rowOnce struct{ row *sql.Row }
-
-// Scan delegates to the wrapped *sql.Row so a Row participates in
-// the agentRowScanner interface.
-func (r rowOnce) Scan(dest ...any) error { return r.row.Scan(dest...) }

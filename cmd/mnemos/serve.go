@@ -118,14 +118,34 @@ func handleServe(args []string, _ Flags) {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
+	tlsCert := os.Getenv("MNEMOS_TLS_CERT_FILE")
+	tlsKey := os.Getenv("MNEMOS_TLS_KEY_FILE")
+	if tlsCert != "" && tlsKey != "" {
+		tlsCfg, err := buildServerTLS(tlsCert, tlsKey, os.Getenv("MNEMOS_MTLS_CLIENT_CA_FILE"))
+		if err != nil {
+			exitWithMnemosError(false, NewSystemError(err, "build TLS"))
+		}
+		srv.TLSConfig = tlsCfg
+	}
+
 	errCh := make(chan error, 1)
 	go func() {
-		fmt.Printf("mnemos registry serving on http://localhost:%d (db=%s)\n", port, dsn)
+		scheme := "http"
+		if srv.TLSConfig != nil {
+			scheme = "https"
+		}
+		fmt.Printf("mnemos registry serving on %s://localhost:%d (db=%s)\n", scheme, port, dsn)
 		if grpcPort > 0 {
 			fmt.Printf("mnemos gRPC serving on localhost:%d\n", grpcPort)
 		}
 		fmt.Println("Press Ctrl+C to stop.")
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		var err error
+		if srv.TLSConfig != nil {
+			err = srv.ListenAndServeTLS(tlsCert, tlsKey)
+		} else {
+			err = srv.ListenAndServe()
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 	}()
@@ -156,11 +176,25 @@ func startGRPCServer(port int, conn *store.Conn, dsn string) *grpc.Server {
 		fmt.Fprintf(os.Stderr, "serve: load JWT secret for gRPC: %v\n", err)
 		os.Exit(int(ExitError))
 	}
-	verifier := auth.NewVerifier(secret, conn.RevokedTokens)
+	prev, err := auth.LoadPreviousSecret(secretPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "serve: load previous JWT secret for gRPC: %v\n", err)
+		os.Exit(int(ExitError))
+	}
+	verifier := auth.NewVerifierWithPrevious(secret, prev, conn.RevokedTokens)
 	logger := bolt.New(bolt.NewJSONHandler(os.Stderr))
 
 	mnemosSrv := mnemosgrpc.NewServer(conn, verifier, logger, version)
-	grpcSrv := grpc.NewServer(grpc.UnaryInterceptor(mnemosSrv.UnaryInterceptor()))
+	grpcOpts := []grpc.ServerOption{grpc.UnaryInterceptor(mnemosSrv.UnaryInterceptor())}
+	if cert, key := os.Getenv("MNEMOS_TLS_CERT_FILE"), os.Getenv("MNEMOS_TLS_KEY_FILE"); cert != "" && key != "" {
+		creds, err := buildServerCreds(cert, key, os.Getenv("MNEMOS_MTLS_CLIENT_CA_FILE"))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "serve: gRPC TLS: %v\n", err)
+			os.Exit(int(ExitError))
+		}
+		grpcOpts = append(grpcOpts, grpc.Creds(creds))
+	}
+	grpcSrv := grpc.NewServer(grpcOpts...)
 	mnemosSrv.Register(grpcSrv)
 
 	go func() {
@@ -197,7 +231,12 @@ func newServerMux(conn *store.Conn) http.Handler {
 	if created {
 		fmt.Fprintf(os.Stderr, "serve: generated new JWT secret at %s — previously-issued tokens are invalid\n", secretPath)
 	}
-	verifier := auth.NewVerifier(secret, conn.RevokedTokens)
+	prev, err := auth.LoadPreviousSecret(secretPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "serve: load previous JWT secret: %v\n", err)
+		os.Exit(int(ExitError))
+	}
+	verifier := auth.NewVerifierWithPrevious(secret, prev, conn.RevokedTokens)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleWebRoot)

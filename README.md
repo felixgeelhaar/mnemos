@@ -24,8 +24,7 @@ RAG alone reduces hallucination by 40-71%. But RAG on ungoverned data? 52% fabri
 # macOS / Linux (Homebrew)
 brew tap felixgeelhaar/tap && brew install mnemos
 
-# Go (any platform with Go 1.25+)
-go install github.com/felixgeelhaar/mnemos/cmd/mnemos@latest
+# Go (any platform with Go 1.26+)
 go install github.com/felixgeelhaar/mnemos/cmd/mnemos@latest
 
 # Docker
@@ -229,7 +228,15 @@ Defaults: `limit=50`, capped at `200`. Port also accepts `MNEMOS_SERVE_PORT`. Re
 
 **Web UI.** `mnemos serve` also serves a minimal single-page UI at `GET /`. It renders the metrics, paginated claims (with type/status filters), and the contradiction list by hitting the same `/v1/*` endpoints above. The HTML is embedded via `//go:embed` so there's no separate deploy step — one binary, one port.
 
-**Authentication.** Set `MNEMOS_REGISTRY_TOKEN=<your-secret>` to require `Authorization: Bearer <your-secret>` on all write methods (POST/PUT/DELETE). Reads stay open by default — useful for browse-only dashboards. When the env var is unset, the registry is fully open (suitable for local dev and trusted networks).
+**Authentication.** All write methods (POST/PUT/DELETE) require a JWT bearer token issued by the same `mnemos serve` instance: `Authorization: Bearer <jwt>`. Reads stay open by default — useful for browse-only dashboards. The signing key comes from `MNEMOS_JWT_SECRET` (hex-encoded, ≥ 32 bytes) or `MNEMOS_AUTH_DIR/jwt-secret` (auto-created on first boot, 0600). Issue tokens with `mnemos token issue`; revoke with `mnemos token revoke`. With no verifier configured, the registry is fully open (suitable for local dev and trusted networks).
+
+The client-side `MNEMOS_REGISTRY_TOKEN` (used by `mnemos push` / `mnemos pull` to talk to a *remote* registry) is unrelated to inbound HTTP auth — see "Push / Pull" below.
+
+Full HTTP schema: [`api/openapi.yaml`](api/openapi.yaml).
+
+### gRPC (alongside HTTP)
+
+`mnemos serve --grpc-port 7778` exposes the same registry surface over gRPC for typed, streaming-capable clients. Schema: [`proto/mnemos/v1/mnemos.proto`](proto/mnemos/v1/mnemos.proto). The service mirrors HTTP and covers Phase 2-7 entities: `ListEvents/AppendEvents`, `ListClaims/AppendClaims`, `ListRelationships/AppendRelationships`, `ListEmbeddings/AppendEmbeddings`, `Metrics`, plus `List*/Append*` for `Actions`, `Outcomes`, `Lessons`, `Decisions`, `Playbooks`, `EntityRelationships`. Auth uses the JWT verifier (`MNEMOS_JWT_SECRET` or `MNEMOS_AUTH_DIR`); send `authorization: Bearer <jwt>` metadata. With no verifier configured, auth is disabled — appropriate for local development only.
 
 ### Integrating Mnemos in your app
 
@@ -313,20 +320,33 @@ Sync is idempotent — IDs are the dedup key, so running `push`/`pull` twice is 
 ## Architecture
 
 ```
-cmd/mnemos           # CLI entrypoint
+cmd/mnemos           # CLI entrypoint (CLI + mcp + serve subcommands)
+proto/mnemos/v1      # gRPC schema (Phase 2-7 entities)
 internal/
-  domain/            # Core types: Event, Claim, Relationship, EmbeddingRecord
+  domain/            # Core types: Event, Claim, ClaimEvidence, Relationship, EmbeddingRecord, Action, Outcome, Lesson, Decision, Playbook, Scope
   ports/             # Interfaces for engines and repositories
   pipeline/          # Shared orchestration (extraction, persistence, embeddings)
   ingest/            # Multi-format input ingestion
   parser/            # Input-to-event normalization
   extract/           # Claim extraction with evidence mapping
-  relate/            # Relationship detection (supports/contradicts)
-  query/             # Query assembly and ranking
+  relate/            # Relationship + causal edge detection (supports, contradicts, causes, validates, ...)
+  query/             # Query assembly and ranking (BM25 + cosine hybrid)
   embedding/         # Vector embedding client abstraction
   llm/               # LLM client abstraction (multi-provider)
-  store/sqlite/      # SQLite event store (sqlc-generated queries)
+  synthesize/        # Cluster action→outcome chains into Lessons; Lessons → Playbooks
+  markdown/          # YAML-frontmatter round-trip for Lessons + Playbooks
+  adapters/outcomes/ # Pull-based Outcome sources (Prometheus instant-query)
+  store/             # URL-scheme dispatched repository registry (ADR 0001)
+  store/sqlite/      # SQLite + FTS5 (sqlc-generated)
+  store/memory/      # In-process backend
+  store/postgres/    # Postgres / Postgres-wire-compatible engines
+  store/mysql/       # MySQL / MariaDB / MySQL-wire-compatible engines
+  store/libsql/      # libSQL / Turso (remote + local file)
   workflow/          # Job runner with retries and structured logs
+  trust/             # Trust scoring (confidence × corroboration × freshness)
+  autoedge/          # Polymorphic cross-entity edges + auto-fire
+  auth/              # JWT signing + bearer-token enforcement
+  server/            # HTTP REST + gRPC server wiring
 ```
 
 ## Environment Variables
@@ -512,8 +532,9 @@ Phase 1: Developer Primitive — Available now.
 
 - Rule-based and LLM-powered extraction with eval coverage
 - Embeddings for semantic search
-- CLI + MCP server entrypoints
-- 78 extraction eval cases
+- CLI + MCP server + HTTP REST + gRPC entrypoints
+- 102 eval cases (90 extraction + 12 relationship detection)
+- Pluggable storage backends per [ADR 0001](docs/adr/0001-multi-backend-storage.md): SQLite, in-memory, Postgres, MySQL/MariaDB, libSQL/Turso
 
 ### Evidence + Causality + Outcomes (v0.13+)
 
@@ -536,7 +557,11 @@ Contributions welcome. See [PRD.md](./PRD.md) for product direction and [TDD.md]
 
 ## Releases
 
-Tagged releases are published with GoReleaser via `.github/workflows/release.yml`, including Homebrew formula updates and Docker images.
+Tagged releases are published with GoReleaser via `.github/workflows/release.yml`, including Homebrew formula updates and Docker images. Human-readable release history: [`CHANGELOG.md`](CHANGELOG.md).
+
+## Security
+
+Auth surfaces, threat model, container hardening, and secret management: [`SECURITY.md`](SECURITY.md).
 
 ## License
 

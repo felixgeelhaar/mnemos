@@ -52,15 +52,39 @@ Mapping claim → events. Fields: claim\_id, event\_id. Rule: ≥1 event per cla
 
 ### 3.1.5 Relationship
 
-Claim-to-claim edge. Fields: id, type (supports | contradicts), from\_claim\_id, to\_claim\_id, created\_at
+Claim-to-claim edge. Fields: id, type (`supports`, `contradicts`, plus the causal/outcome family `causes`, `caused_by`, `action_of`, `outcome_of`, `validates`, `refutes`, `derived_from`), from\_claim\_id, to\_claim\_id, created\_at.
 
 ### 3.1.6 CompilationJob
 
-Tracks processing. Fields: id, kind, status, scope, started\_at, updated\_at, error
+Tracks processing. Fields: id, kind, status, scope, started\_at, updated\_at, error.
+
+### 3.1.7 Action (Phase 2)
+
+Recorded operational change. Fields: id, kind (deploy | rollback | scale | ...), subject, actor, run\_id, at, metadata\_json.
+
+### 3.1.8 Outcome (Phase 2)
+
+Observed result of an Action. Fields: id, action\_id, result (success | failure | partial | unknown), metrics\_json, source (push | pull:prometheus | ...), at.
+
+### 3.1.9 Lesson (Phase 3)
+
+Synthesised operational truth derived from action→outcome chains. Fields: id, statement, scope (Service, Env, Team), evidence (\[]ActionID), confidence, trigger, kind, source (synthesize | human), valid\_from, valid\_to.
+
+### 3.1.10 Decision (Phase 5)
+
+Agent decision audit record. Fields: id, statement, plan, reasoning, risk\_level (low | medium | high | critical), beliefs (\[]ClaimID), alternatives, outcome\_id, scope, created\_at.
+
+### 3.1.11 Playbook (Phase 6)
+
+Praxis-ready response derived from Lesson clusters. Fields: id, trigger, scope, steps (\[]PlaybookStep), derived\_from\_lessons, confidence, valid\_from, valid\_to.
+
+### 3.1.12 Scope (Phase 8)
+
+Multi-tenant filter primitive: {Service, Env, Team}. Attached to Claims, Lessons, Decisions, Playbooks.
 
 ## 3.2 Data Storage
 
-Database: SQLite (MVP)
+Database: pluggable per [ADR 0001](docs/adr/0001-multi-backend-storage.md). Default SQLite (`modernc.org/sqlite`, FTS5); also `memory://`, `postgres://`, `mysql://`, `libsql://`. Backends register from `init()` against the URL-scheme dispatcher in `internal/store`.
 
 ### 3.2.1 Tables: events
 
@@ -81,6 +105,34 @@ id (PK), type, from\_claim\_id, to\_claim\_id, created\_at
 ### 3.2.5 Tables: compilation\_jobs
 
 id (PK), kind, status, scope\_json, started\_at, updated\_at, error
+
+### 3.2.6 Tables: actions, outcomes (Phase 2)
+
+`actions(id PK, kind, subject, actor, run_id, at, metadata_json)`. `outcomes(id PK, action_id FK, result, metrics_json, source, at)`. Index on `actions(subject)`, `actions(run_id)`, `outcomes(action_id)`.
+
+### 3.2.7 Tables: lessons, lessons\_versions (Phase 3 + Phase 7)
+
+`lessons(id PK, statement, scope_service, scope_env, scope_team, evidence_json, confidence, trigger, kind, source, valid_from, valid_to)`. Companion `lessons_versions` is a system-versioned snapshot table populated by triggers on every UPDATE/DELETE — supports `mnemos history --kind lesson`.
+
+### 3.2.8 Tables: decisions (Phase 5)
+
+`decisions(id PK, statement, plan, reasoning, risk_level, beliefs_json, alternatives_json, outcome_id, scope_service, scope_env, scope_team, created_at)`. FK `outcome_id → outcomes(id)` nullable.
+
+### 3.2.9 Tables: playbooks, playbook\_steps, playbooks\_versions (Phase 6 + Phase 7)
+
+`playbooks(id PK, trigger, scope_*, derived_from_lessons_json, confidence, valid_from, valid_to)`. `playbook_steps(playbook_id FK, ordinal, kind, args_json)`. `playbooks_versions` mirrors `lessons_versions`.
+
+### 3.2.10 Tables: entities, claim\_entities (Phase 9)
+
+`entities(id PK, type, normalized_name UNIQUE-with-type, display_name)`. `claim_entities(claim_id FK, entity_id FK)`. Materialised by the pipeline from LLM-tagged claims.
+
+### 3.2.11 Tables: claim\_status\_history (Phase 4 lifecycle)
+
+`claim_status_history(id PK, claim_id FK, from_status, to_status, changed_at, changed_by, reason)`. Append-only audit trail consumed by the query engine to render `Evolution:` lines.
+
+### 3.2.12 Tables: events\_fts, claims\_fts (Phase 10 hybrid retrieval)
+
+FTS5 virtual tables maintained by INSERT/UPDATE/DELETE triggers on `events` and `claims`. Backfilled on the v0.9 → v0.10 migration. Reads do not need to think about staleness.
 
 ## 3.3 Interfaces (Ports)
 

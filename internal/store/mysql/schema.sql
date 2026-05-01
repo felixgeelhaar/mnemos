@@ -335,3 +335,18 @@ CREATE TABLE IF NOT EXISTS playbook_versions (
   KEY idx_playbook_versions_playbook_id (playbook_id),
   CONSTRAINT fk_pv_playbook FOREIGN KEY (playbook_id) REFERENCES playbooks(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS entity_relationships (
+  id         VARCHAR(190) NOT NULL,
+  kind       VARCHAR(32)  NOT NULL,
+  from_id    VARCHAR(190) NOT NULL,
+  from_type  VARCHAR(32)  NOT NULL,
+  to_id      VARCHAR(190) NOT NULL,
+  to_type    VARCHAR(32)  NOT NULL,
+  created_at DATETIME(6)  NOT NULL,
+  created_by VARCHAR(190) NOT NULL DEFAULT '<system>',
+  PRIMARY KEY (id),
+  UNIQUE KEY uniq_entity_relationships_edge (kind, from_type, from_id, to_type, to_id),
+  KEY idx_entity_relationships_from (from_type, from_id),
+  KEY idx_entity_relationships_to   (to_type, to_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/felixgeelhaar/mnemos/internal/autoedge"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 )
 
@@ -197,6 +198,10 @@ func handleDecisionAttachOutcome(args []string) {
 	defer closeConn(conn)
 	if err := conn.Decisions.AttachOutcome(ctx, args[0], args[1]); err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "attach outcome"))
+		return
+	}
+	if err := autoedge.OnDecisionOutcomeAttached(ctx, conn.Decisions, conn.Outcomes, conn.EntityRels, args[0], args[1], ""); err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "auto-link validates/refutes edges"))
 		return
 	}
 	emitJSON(map[string]string{"decision_id": args[0], "outcome_id": args[1]})

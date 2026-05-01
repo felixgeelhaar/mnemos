@@ -376,6 +376,21 @@ CREATE TABLE IF NOT EXISTS playbook_versions (
 	FOREIGN KEY (playbook_id) REFERENCES playbooks(id)
 );
 CREATE INDEX IF NOT EXISTS idx_playbook_versions_playbook_id ON playbook_versions(playbook_id);
+
+CREATE TABLE IF NOT EXISTS entity_relationships (
+	id TEXT PRIMARY KEY,
+	kind TEXT NOT NULL,
+	from_id TEXT NOT NULL,
+	from_type TEXT NOT NULL,
+	to_id TEXT NOT NULL,
+	to_type TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	created_by TEXT NOT NULL DEFAULT '<system>'
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_relationships_unique_edge
+	ON entity_relationships(kind, from_type, from_id, to_type, to_id);
+CREATE INDEX IF NOT EXISTS idx_entity_relationships_from ON entity_relationships(from_type, from_id);
+CREATE INDEX IF NOT EXISTS idx_entity_relationships_to ON entity_relationships(to_type, to_id);
 `
 
 	if _, err := db.Exec(schema); err != nil {

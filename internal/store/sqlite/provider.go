@@ -52,6 +52,7 @@ func openProvider(_ context.Context, dsn string) (*store.Conn, error) {
 		Lessons:       NewLessonRepository(db),
 		Decisions:     NewDecisionRepository(db),
 		Playbooks:     NewPlaybookRepository(db),
+		EntityRels:    NewEntityRelationshipRepository(db),
 		Raw:           db,
 		Closer:        db.Close,
 	}, nil

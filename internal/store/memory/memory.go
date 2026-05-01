@@ -86,6 +86,7 @@ func openProvider(_ context.Context, dsn string) (*store.Conn, error) {
 		Lessons:       LessonRepository{state: st},
 		Decisions:     DecisionRepository{state: st},
 		Playbooks:     PlaybookRepository{state: st},
+		EntityRels:    EntityRelationshipRepository{state: st},
 		Raw:           st,
 		Closer:        func() error { st.clear(); return nil },
 	}, nil
@@ -135,6 +136,9 @@ type state struct {
 	playbookLessons  map[string]map[string]struct{} // playbook_id -> set of lesson_ids
 	lessonVersions   map[string][]storedEntityVersion
 	playbookVersions map[string][]storedEntityVersion
+	entityRels       map[string]domain.EntityRelationship
+	entityRelOrder   []string
+	entityRelKey     map[entityRelKey]string // (kind,from_type,from_id,to_type,to_id) → id
 }
 
 // storedEntityVersion is the in-memory analogue of a row in
@@ -172,6 +176,8 @@ func newState() *state {
 		playbookLessons:  map[string]map[string]struct{}{},
 		lessonVersions:   map[string][]storedEntityVersion{},
 		playbookVersions: map[string][]storedEntityVersion{},
+		entityRels:       map[string]domain.EntityRelationship{},
+		entityRelKey:     map[entityRelKey]string{},
 	}
 }
 
@@ -215,6 +221,9 @@ func (s *state) clear() {
 	s.playbookLessons = map[string]map[string]struct{}{}
 	s.lessonVersions = map[string][]storedEntityVersion{}
 	s.playbookVersions = map[string][]storedEntityVersion{}
+	s.entityRels = map[string]domain.EntityRelationship{}
+	s.entityRelOrder = nil
+	s.entityRelKey = map[entityRelKey]string{}
 }
 
 // actorOr mirrors sqlite.actorOr: an empty actor falls back to the

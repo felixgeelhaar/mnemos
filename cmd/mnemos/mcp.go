@@ -14,6 +14,7 @@ import (
 
 	"github.com/felixgeelhaar/bolt"
 	mcp "github.com/felixgeelhaar/mcp-go"
+	"github.com/felixgeelhaar/mnemos/internal/autoedge"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/embedding"
 	"github.com/felixgeelhaar/mnemos/internal/ingest"
@@ -1083,6 +1084,9 @@ func mcpRunRecordOutcome(ctx context.Context, actor string, input mcpRecordOutco
 	}
 	defer closeConn(conn)
 	if err := conn.Outcomes.Append(ctx, outcome); err != nil {
+		return mcpRecordOutcomeOutput{}, err
+	}
+	if err := autoedge.OnOutcomeAppended(ctx, conn.EntityRels, outcome, actor); err != nil {
 		return mcpRecordOutcomeOutput{}, err
 	}
 	return mcpRecordOutcomeOutput{ID: outcome.ID, ActionID: outcome.ActionID, Result: string(outcome.Result)}, nil

@@ -265,6 +265,19 @@ type OutcomeRepository interface {
 	DeleteAll(ctx context.Context) error
 }
 
+// EntityRelationshipRepository persists polymorphic edges between
+// arbitrary entities (action↔outcome, outcome↔claim, decision
+// ↔outcome). The classic claim-only relationships graph stays
+// unaffected; cross-entity edges live exclusively here.
+type EntityRelationshipRepository interface {
+	Upsert(ctx context.Context, edges []domain.EntityRelationship) error
+	ListByEntity(ctx context.Context, entityID, entityType string) ([]domain.EntityRelationship, error)
+	ListByKind(ctx context.Context, kind string) ([]domain.EntityRelationship, error)
+	ListAll(ctx context.Context) ([]domain.EntityRelationship, error)
+	CountAll(ctx context.Context) (int64, error)
+	DeleteAll(ctx context.Context) error
+}
+
 // LessonRepository persists synthesised lessons and the link table
 // back to the actions that corroborated them. Lessons are upsert-by-id
 // so re-running synthesis with fresh evidence ratchets confidence and

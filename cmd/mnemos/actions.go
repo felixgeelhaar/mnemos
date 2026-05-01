@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/felixgeelhaar/mnemos/internal/autoedge"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 )
 
@@ -326,6 +327,10 @@ func handleOutcomeRecord(args []string) {
 	defer closeConn(conn)
 	if err := conn.Outcomes.Append(ctx, outcome); err != nil {
 		exitWithMnemosError(false, NewSystemError(err, "append outcome"))
+		return
+	}
+	if err := autoedge.OnOutcomeAppended(ctx, conn.EntityRels, outcome, outcome.CreatedBy); err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "auto-link action_of edges"))
 		return
 	}
 	emitJSON(map[string]string{"id": outcome.ID, "action_id": outcome.ActionID, "result": string(outcome.Result)})

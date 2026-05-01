@@ -229,6 +229,34 @@ type CompilationJobRepository interface {
 	GetByID(ctx context.Context, id string) (domain.CompilationJob, error)
 }
 
+// ActionRepository persists and retrieves operational actions —
+// recorded changes that may have produced observable outcomes.
+// Actions are append-only: an action's facts are immutable once
+// written; status drift is captured by emitting a follow-up Action
+// plus its Outcome rather than mutating the original row.
+type ActionRepository interface {
+	Append(ctx context.Context, action domain.Action) error
+	GetByID(ctx context.Context, id string) (domain.Action, error)
+	ListByRunID(ctx context.Context, runID string) ([]domain.Action, error)
+	ListBySubject(ctx context.Context, subject string) ([]domain.Action, error)
+	ListAll(ctx context.Context) ([]domain.Action, error)
+	CountAll(ctx context.Context) (int64, error)
+	DeleteAll(ctx context.Context) error
+}
+
+// OutcomeRepository persists and retrieves the observed results of
+// actions. Outcomes carry an ActionID back-reference plus a numeric
+// metric map. Outcomes are append-only for the same reasons as
+// Actions; corrections are expressed via a fresh Outcome row.
+type OutcomeRepository interface {
+	Append(ctx context.Context, outcome domain.Outcome) error
+	GetByID(ctx context.Context, id string) (domain.Outcome, error)
+	ListByActionID(ctx context.Context, actionID string) ([]domain.Outcome, error)
+	ListAll(ctx context.Context) ([]domain.Outcome, error)
+	CountAll(ctx context.Context) (int64, error)
+	DeleteAll(ctx context.Context) error
+}
+
 // EntityRepository persists canonicalised entities and the
 // claim_entities link table. The interface mirrors the SQLite
 // implementation's public surface so cmd/mnemos and internal/pipeline

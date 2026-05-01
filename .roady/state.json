@@ -1,10 +1,12 @@
 {
   "project_id": "Mnemos",
-  "version": 109,
+  "version": 111,
   "task_states": {
     "task-action-outcome-recording": {
-      "status": "pending",
+      "status": "in_progress",
       "path": "",
+      "owner": "ai-agent",
+      "started_at": "2026-05-01T10:26:20.332954+02:00",
       "elapsed_minutes": 0
     },
     "task-append-only-event-store": {
@@ -19,11 +21,15 @@
       "elapsed_minutes": 2
     },
     "task-causal-relationship-edges": {
-      "status": "in_progress",
+      "status": "done",
       "path": "",
       "owner": "ai-agent",
+      "evidence": [
+        "7d948a8 feat(relate): causal relationship edges (Phase 1)"
+      ],
       "started_at": "2026-05-01T10:11:05.444231+02:00",
-      "elapsed_minutes": 0
+      "completed_at": "2026-05-01T10:21:11.950419+02:00",
+      "elapsed_minutes": 10
     },
     "task-claim-extraction-engine": {
       "status": "done",
@@ -534,5 +540,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-05-01T10:11:05.444231+02:00"
+  "updated_at": "2026-05-01T10:26:20.332954+02:00"
 }

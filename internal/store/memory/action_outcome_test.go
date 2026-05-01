@@ -1,0 +1,98 @@
+package memory
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/store"
+)
+
+func openTestConn(t *testing.T) *store.Conn {
+	t.Helper()
+	conn, err := store.Open(context.Background(), "memory://")
+	if err != nil {
+		t.Fatalf("open memory store: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return conn
+}
+
+func TestActionRepository_AppendListIdempotent(t *testing.T) {
+	conn := openTestConn(t)
+	ctx := context.Background()
+	at := time.Date(2026, 4, 30, 9, 0, 0, 0, time.UTC)
+	a := domain.Action{
+		ID:      "ac_1",
+		RunID:   "run_a",
+		Kind:    domain.ActionKindDeploy,
+		Subject: "payments",
+		At:      at,
+	}
+	if err := conn.Actions.Append(ctx, a); err != nil {
+		t.Fatalf("append action: %v", err)
+	}
+	// Idempotent re-append.
+	if err := conn.Actions.Append(ctx, a); err != nil {
+		t.Fatalf("re-append action: %v", err)
+	}
+	count, err := conn.Actions.CountAll(ctx)
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("want count=1, got %d", count)
+	}
+	gotByRun, err := conn.Actions.ListByRunID(ctx, "run_a")
+	if err != nil {
+		t.Fatalf("list by run: %v", err)
+	}
+	if len(gotByRun) != 1 || gotByRun[0].ID != "ac_1" {
+		t.Fatalf("list by run: want ac_1, got %#v", gotByRun)
+	}
+	gotBySubject, err := conn.Actions.ListBySubject(ctx, "payments")
+	if err != nil {
+		t.Fatalf("list by subject: %v", err)
+	}
+	if len(gotBySubject) != 1 {
+		t.Fatalf("list by subject: want 1, got %d", len(gotBySubject))
+	}
+}
+
+func TestOutcomeRepository_AppendListByAction(t *testing.T) {
+	conn := openTestConn(t)
+	ctx := context.Background()
+	at := time.Date(2026, 4, 30, 9, 0, 0, 0, time.UTC)
+	if err := conn.Actions.Append(ctx, domain.Action{
+		ID: "ac_1", Kind: domain.ActionKindRollback, Subject: "payments", At: at,
+	}); err != nil {
+		t.Fatalf("seed action: %v", err)
+	}
+	out := domain.Outcome{
+		ID:         "oc_1",
+		ActionID:   "ac_1",
+		Result:     domain.OutcomeResultSuccess,
+		Metrics:    map[string]float64{"latency_after_ms": 240, "latency_before_ms": 1200},
+		ObservedAt: at.Add(2 * time.Minute),
+	}
+	if err := conn.Outcomes.Append(ctx, out); err != nil {
+		t.Fatalf("append outcome: %v", err)
+	}
+	got, err := conn.Outcomes.ListByActionID(ctx, "ac_1")
+	if err != nil {
+		t.Fatalf("list by action: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 outcome, got %d", len(got))
+	}
+	if got[0].Result != domain.OutcomeResultSuccess {
+		t.Fatalf("result: want success, got %s", got[0].Result)
+	}
+	if got[0].Metrics["latency_after_ms"] != 240 {
+		t.Fatalf("metric latency_after_ms: want 240, got %v", got[0].Metrics["latency_after_ms"])
+	}
+	if got[0].Source != "push" {
+		t.Fatalf("source default: want push, got %q", got[0].Source)
+	}
+}

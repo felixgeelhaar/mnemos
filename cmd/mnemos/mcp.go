@@ -125,6 +125,36 @@ type mcpWatchFileOutput struct {
 	ActiveWatches int    `json:"activeWatches"`
 }
 
+type mcpRecordActionInput struct {
+	Kind     string            `json:"kind" jsonschema:"required,description=Action kind (deploy, rollback, restart, scale, configure, migrate, feature_flag, hotfix, custom)"`
+	Subject  string            `json:"subject" jsonschema:"required,description=Service or component the action targets"`
+	Actor    string            `json:"actor,omitempty" jsonschema:"description=User or agent id that performed the action"`
+	RunID    string            `json:"runId,omitempty" jsonschema:"description=Optional run id for scoped storage"`
+	At       string            `json:"at,omitempty" jsonschema:"description=When the action happened (RFC3339 / YYYY-MM-DD / 'now', defaults to now)"`
+	Metadata map[string]string `json:"metadata,omitempty" jsonschema:"description=Free-form string metadata for the action"`
+}
+
+type mcpRecordActionOutput struct {
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`
+	Subject string `json:"subject"`
+}
+
+type mcpRecordOutcomeInput struct {
+	ActionID   string             `json:"actionId" jsonschema:"required,description=Id of the action this outcome reports on"`
+	Result     string             `json:"result" jsonschema:"required,description=success | failure | partial | unknown"`
+	Metrics    map[string]float64 `json:"metrics,omitempty" jsonschema:"description=Numeric metric observations (e.g. latency_after_ms, error_rate)"`
+	Notes      string             `json:"notes,omitempty" jsonschema:"description=Free-form human notes about the outcome"`
+	ObservedAt string             `json:"observedAt,omitempty" jsonschema:"description=When the outcome was observed (RFC3339, defaults to now)"`
+	Source     string             `json:"source,omitempty" jsonschema:"description=Source of the report (default 'push'; pull adapters use 'pull:<name>')"`
+}
+
+type mcpRecordOutcomeOutput struct {
+	ID       string `json:"id"`
+	ActionID string `json:"action_id"`
+	Result   string `json:"result"`
+}
+
 // handleMCP starts the MCP server over stdio. This is a long-lived process
 // that blocks until the connection is closed.
 func handleMCP() {
@@ -286,6 +316,22 @@ func handleMCP() {
 				return dispatchAxiTool[mcpIngestGitLogOutput](ctx, kernel, nil, "ingest_git_log", input)
 			}
 			return mcpRunIngestGitLog(ctx, mcpActor, input)
+		})
+
+	srv.Tool("record_action").
+		Description("Record an operational action (deploy, rollback, scale, etc.) so it can be paired with later Outcomes for the synthesis layer. Idempotent on id.").
+		OutputSchema(mcpRecordActionOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpRecordActionInput) (mcpRecordActionOutput, error) {
+			return mcpRunRecordAction(ctx, mcpActor, input)
+		})
+
+	srv.Tool("record_outcome").
+		Description("Record the observed outcome of a previously recorded Action, including numeric metrics. Idempotent on id.").
+		OutputSchema(mcpRecordOutcomeOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpRecordOutcomeInput) (mcpRecordOutcomeOutput, error) {
+			return mcpRunRecordOutcome(ctx, mcpActor, input)
 		})
 
 	srv.Tool("watch_file").
@@ -710,4 +756,80 @@ func mcpRunMetrics() (mcpMetricsOutput, error) {
 		Contradictions:  contradictionsCount,
 		Embeddings:      embeddingsCount,
 	}, nil
+}
+
+func mcpRunRecordAction(ctx context.Context, actor string, input mcpRecordActionInput) (mcpRecordActionOutput, error) {
+	at := time.Now().UTC()
+	if strings.TrimSpace(input.At) != "" {
+		t, err := parseTimeArg(input.At)
+		if err != nil {
+			return mcpRecordActionOutput{}, fmt.Errorf("at: %w", err)
+		}
+		at = t
+	}
+	id, err := newID("ac_")
+	if err != nil {
+		return mcpRecordActionOutput{}, fmt.Errorf("generate action id: %w", err)
+	}
+	resolvedActor := input.Actor
+	if resolvedActor == "" {
+		resolvedActor = actor
+	}
+	action := domain.Action{
+		ID:        id,
+		RunID:     input.RunID,
+		Kind:      domain.ActionKind(input.Kind),
+		Subject:   input.Subject,
+		Actor:     resolvedActor,
+		At:        at,
+		Metadata:  input.Metadata,
+		CreatedBy: actor,
+	}
+	conn, err := openConn(ctx)
+	if err != nil {
+		return mcpRecordActionOutput{}, err
+	}
+	defer closeConn(conn)
+	if err := conn.Actions.Append(ctx, action); err != nil {
+		return mcpRecordActionOutput{}, err
+	}
+	return mcpRecordActionOutput{ID: action.ID, Kind: string(action.Kind), Subject: action.Subject}, nil
+}
+
+func mcpRunRecordOutcome(ctx context.Context, actor string, input mcpRecordOutcomeInput) (mcpRecordOutcomeOutput, error) {
+	observed := time.Now().UTC()
+	if strings.TrimSpace(input.ObservedAt) != "" {
+		t, err := parseTimeArg(input.ObservedAt)
+		if err != nil {
+			return mcpRecordOutcomeOutput{}, fmt.Errorf("observedAt: %w", err)
+		}
+		observed = t
+	}
+	source := input.Source
+	if source == "" {
+		source = "push"
+	}
+	id, err := newID("oc_")
+	if err != nil {
+		return mcpRecordOutcomeOutput{}, fmt.Errorf("generate outcome id: %w", err)
+	}
+	outcome := domain.Outcome{
+		ID:         id,
+		ActionID:   input.ActionID,
+		Result:     domain.OutcomeResult(input.Result),
+		Metrics:    input.Metrics,
+		Notes:      input.Notes,
+		ObservedAt: observed,
+		Source:     source,
+		CreatedBy:  actor,
+	}
+	conn, err := openConn(ctx)
+	if err != nil {
+		return mcpRecordOutcomeOutput{}, err
+	}
+	defer closeConn(conn)
+	if err := conn.Outcomes.Append(ctx, outcome); err != nil {
+		return mcpRecordOutcomeOutput{}, err
+	}
+	return mcpRecordOutcomeOutput{ID: outcome.ID, ActionID: outcome.ActionID, Result: string(outcome.Result)}, nil
 }

@@ -169,3 +169,36 @@ CREATE TABLE IF NOT EXISTS agents (
 
 CREATE INDEX IF NOT EXISTS idx_agents_owner_id ON agents(owner_id);
 CREATE INDEX IF NOT EXISTS idx_agents_status   ON agents(status);
+
+CREATE TABLE IF NOT EXISTS actions (
+  id            text        PRIMARY KEY,
+  run_id        text        NOT NULL DEFAULT '',
+  kind          text        NOT NULL,
+  subject       text        NOT NULL,
+  actor         text        NOT NULL DEFAULT '',
+  at            timestamptz NOT NULL,
+  metadata_json jsonb       NOT NULL DEFAULT '{}'::jsonb,
+  created_by    text        NOT NULL DEFAULT '<system>',
+  created_at    timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_actions_run_id  ON actions(run_id);
+CREATE INDEX IF NOT EXISTS idx_actions_subject ON actions(subject);
+CREATE INDEX IF NOT EXISTS idx_actions_kind    ON actions(kind);
+CREATE INDEX IF NOT EXISTS idx_actions_at      ON actions(at);
+
+CREATE TABLE IF NOT EXISTS outcomes (
+  id           text        PRIMARY KEY,
+  action_id    text        NOT NULL REFERENCES actions(id),
+  result       text        NOT NULL,
+  metrics_json jsonb       NOT NULL DEFAULT '{}'::jsonb,
+  notes        text        NOT NULL DEFAULT '',
+  observed_at  timestamptz NOT NULL,
+  source       text        NOT NULL DEFAULT 'push',
+  created_by   text        NOT NULL DEFAULT '<system>',
+  created_at   timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_outcomes_action_id   ON outcomes(action_id);
+CREATE INDEX IF NOT EXISTS idx_outcomes_result      ON outcomes(result);
+CREATE INDEX IF NOT EXISTS idx_outcomes_observed_at ON outcomes(observed_at);

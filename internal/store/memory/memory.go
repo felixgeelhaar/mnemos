@@ -80,6 +80,8 @@ func openProvider(_ context.Context, dsn string) (*store.Conn, error) {
 		Agents:        AgentRepository{state: st},
 		Entities:      EntityRepository{state: st},
 		Jobs:          CompilationJobRepository{state: st},
+		Actions:       ActionRepository{state: st},
+		Outcomes:      OutcomeRepository{state: st},
 		Raw:           st,
 		Closer:        func() error { st.clear(); return nil },
 	}, nil
@@ -114,6 +116,10 @@ type state struct {
 	entityByKey   map[entityKey]string      // (normalized_name, type) -> entity_id, dedup index
 	claimEntities map[claimEntityKey]string // (claim_id, entity_id, role) -> role, dedup index
 	jobs          map[string]storedCompilationJob
+	actions       map[string]storedAction
+	actionOrder   []string
+	outcomes      map[string]storedOutcome
+	outcomeOrder  []string
 }
 
 func newState() *state {
@@ -132,6 +138,8 @@ func newState() *state {
 		entityByKey:   map[entityKey]string{},
 		claimEntities: map[claimEntityKey]string{},
 		jobs:          map[string]storedCompilationJob{},
+		actions:       map[string]storedAction{},
+		outcomes:      map[string]storedOutcome{},
 	}
 }
 
@@ -160,6 +168,10 @@ func (s *state) clear() {
 	s.entityByKey = map[entityKey]string{}
 	s.claimEntities = map[claimEntityKey]string{}
 	s.jobs = map[string]storedCompilationJob{}
+	s.actions = map[string]storedAction{}
+	s.actionOrder = nil
+	s.outcomes = map[string]storedOutcome{}
+	s.outcomeOrder = nil
 }
 
 // actorOr mirrors sqlite.actorOr: an empty actor falls back to the

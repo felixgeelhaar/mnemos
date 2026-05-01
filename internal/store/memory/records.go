@@ -51,6 +51,109 @@ func storedEventFromDomain(e domain.Event) storedEvent {
 	}
 }
 
+type storedAction struct {
+	ID        string
+	RunID     string
+	Kind      domain.ActionKind
+	Subject   string
+	Actor     string
+	At        time.Time
+	Metadata  map[string]string
+	CreatedBy string
+	CreatedAt time.Time
+}
+
+func (a storedAction) toDomain() domain.Action {
+	return domain.Action{
+		ID:        a.ID,
+		RunID:     a.RunID,
+		Kind:      a.Kind,
+		Subject:   a.Subject,
+		Actor:     a.Actor,
+		At:        a.At,
+		Metadata:  copyStringMap(a.Metadata),
+		CreatedBy: a.CreatedBy,
+		CreatedAt: a.CreatedAt,
+	}
+}
+
+func storedActionFromDomain(a domain.Action) storedAction {
+	createdAt := a.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	return storedAction{
+		ID:        a.ID,
+		RunID:     a.RunID,
+		Kind:      a.Kind,
+		Subject:   a.Subject,
+		Actor:     a.Actor,
+		At:        a.At.UTC(),
+		Metadata:  copyStringMap(a.Metadata),
+		CreatedBy: actorOr(a.CreatedBy),
+		CreatedAt: createdAt.UTC(),
+	}
+}
+
+type storedOutcome struct {
+	ID         string
+	ActionID   string
+	Result     domain.OutcomeResult
+	Metrics    map[string]float64
+	Notes      string
+	ObservedAt time.Time
+	Source     string
+	CreatedBy  string
+	CreatedAt  time.Time
+}
+
+func (o storedOutcome) toDomain() domain.Outcome {
+	return domain.Outcome{
+		ID:         o.ID,
+		ActionID:   o.ActionID,
+		Result:     o.Result,
+		Metrics:    copyFloatMap(o.Metrics),
+		Notes:      o.Notes,
+		ObservedAt: o.ObservedAt,
+		Source:     o.Source,
+		CreatedBy:  o.CreatedBy,
+		CreatedAt:  o.CreatedAt,
+	}
+}
+
+func storedOutcomeFromDomain(o domain.Outcome) storedOutcome {
+	createdAt := o.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	source := o.Source
+	if source == "" {
+		source = "push"
+	}
+	return storedOutcome{
+		ID:         o.ID,
+		ActionID:   o.ActionID,
+		Result:     o.Result,
+		Metrics:    copyFloatMap(o.Metrics),
+		Notes:      o.Notes,
+		ObservedAt: o.ObservedAt.UTC(),
+		Source:     source,
+		CreatedBy:  actorOr(o.CreatedBy),
+		CreatedAt:  createdAt.UTC(),
+	}
+}
+
+func copyFloatMap(in map[string]float64) map[string]float64 {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]float64, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
 type storedClaim struct {
 	ID         string
 	Text       string

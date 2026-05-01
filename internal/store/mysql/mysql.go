@@ -177,6 +177,8 @@ func openProvider(ctx context.Context, dsn string) (*store.Conn, error) {
 		Agents:        AgentRepository{db: db},
 		Entities:      EntityRepository{db: db},
 		Jobs:          CompilationJobRepository{db: db},
+		Actions:       ActionRepository{db: db},
+		Outcomes:      OutcomeRepository{db: db},
 		Raw:           db,
 		Closer:        db.Close,
 	}, nil

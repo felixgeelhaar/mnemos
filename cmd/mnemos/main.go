@@ -192,6 +192,10 @@ func main() {
 		handleEntities(args, flags)
 	case "extract-entities":
 		handleExtractEntities(args, flags)
+	case "action":
+		handleAction(args, flags)
+	case "outcome":
+		handleOutcome(args, flags)
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command %q\n", command)
 		if suggestion := suggestCommand(command); suggestion != "" {

@@ -8,6 +8,18 @@ import (
 	"database/sql"
 )
 
+type Action struct {
+	ID           string `json:"id"`
+	RunID        string `json:"run_id"`
+	Kind         string `json:"kind"`
+	Subject      string `json:"subject"`
+	Actor        string `json:"actor"`
+	At           string `json:"at"`
+	MetadataJson string `json:"metadata_json"`
+	CreatedBy    string `json:"created_by"`
+	CreatedAt    string `json:"created_at"`
+}
+
 type Agent struct {
 	ID              string `json:"id"`
 	Name            string `json:"name"`
@@ -91,6 +103,18 @@ type Event struct {
 	MetadataJson  string `json:"metadata_json"`
 	IngestedAt    string `json:"ingested_at"`
 	CreatedBy     string `json:"created_by"`
+}
+
+type Outcome struct {
+	ID          string `json:"id"`
+	ActionID    string `json:"action_id"`
+	Result      string `json:"result"`
+	MetricsJson string `json:"metrics_json"`
+	Notes       string `json:"notes"`
+	ObservedAt  string `json:"observed_at"`
+	Source      string `json:"source"`
+	CreatedBy   string `json:"created_by"`
+	CreatedAt   string `json:"created_at"`
 }
 
 type Relationship struct {

@@ -39,6 +39,8 @@ type Conn struct {
 	Agents        ports.AgentRepository
 	Entities      ports.EntityRepository
 	Jobs          ports.CompilationJobRepository
+	Actions       ports.ActionRepository
+	Outcomes      ports.OutcomeRepository
 
 	// Raw is the provider's underlying handle (e.g. *sql.DB for
 	// SQLite/Postgres, an in-memory state struct for memory). It is

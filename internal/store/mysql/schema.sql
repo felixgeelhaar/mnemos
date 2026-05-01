@@ -170,3 +170,38 @@ CREATE TABLE IF NOT EXISTS agents (
   KEY idx_agents_status   (status),
   CONSTRAINT fk_agents_owner FOREIGN KEY (owner_id) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+;
+
+CREATE TABLE IF NOT EXISTS actions (
+  id            VARCHAR(190) NOT NULL,
+  run_id        VARCHAR(190) NOT NULL DEFAULT '',
+  kind          VARCHAR(64)  NOT NULL,
+  subject       VARCHAR(190) NOT NULL,
+  actor         VARCHAR(190) NOT NULL DEFAULT '',
+  at            DATETIME(6)  NOT NULL,
+  metadata_json JSON         NOT NULL,
+  created_by    VARCHAR(190) NOT NULL DEFAULT '<system>',
+  created_at    DATETIME(6)  NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_actions_run_id  (run_id),
+  KEY idx_actions_subject (subject),
+  KEY idx_actions_kind    (kind),
+  KEY idx_actions_at      (at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS outcomes (
+  id           VARCHAR(190) NOT NULL,
+  action_id    VARCHAR(190) NOT NULL,
+  result       VARCHAR(32)  NOT NULL,
+  metrics_json JSON         NOT NULL,
+  notes        TEXT         NOT NULL,
+  observed_at  DATETIME(6)  NOT NULL,
+  source       VARCHAR(64)  NOT NULL DEFAULT 'push',
+  created_by   VARCHAR(190) NOT NULL DEFAULT '<system>',
+  created_at   DATETIME(6)  NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_outcomes_action_id   (action_id),
+  KEY idx_outcomes_result      (result),
+  KEY idx_outcomes_observed_at (observed_at),
+  CONSTRAINT fk_outcomes_action FOREIGN KEY (action_id) REFERENCES actions(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

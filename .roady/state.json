@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 121,
+  "version": 123,
   "task_states": {
     "task-action-outcome-recording": {
       "status": "done",
@@ -195,8 +195,10 @@
       "elapsed_minutes": 0
     },
     "task-human-editable-markdown-layer-with-system-versioned-history": {
-      "status": "pending",
+      "status": "in_progress",
       "path": "",
+      "owner": "ai-agent",
+      "started_at": "2026-05-01T11:50:22.171895+02:00",
       "elapsed_minutes": 0
     },
     "task-knowledge-browsing-mcp-tools": {
@@ -508,11 +510,15 @@
       "elapsed_minutes": 5
     },
     "task-scope-aware-memory": {
-      "status": "in_progress",
+      "status": "done",
       "path": "",
       "owner": "ai-agent",
+      "evidence": [
+        "87e5795 feat(scope): multi-tenant scope on claims and decisions (Phase 8)"
+      ],
       "started_at": "2026-05-01T11:37:08.430736+02:00",
-      "elapsed_minutes": 0
+      "completed_at": "2026-05-01T11:47:04.602801+02:00",
+      "elapsed_minutes": 9
     },
     "task-sqlc-migration-phase-2": {
       "status": "done",
@@ -570,5 +576,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-05-01T11:37:08.430736+02:00"
+  "updated_at": "2026-05-01T11:50:22.171895+02:00"
 }

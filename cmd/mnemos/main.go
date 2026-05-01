@@ -206,6 +206,10 @@ func main() {
 		handleDecision(args, flags)
 	case "playbook":
 		handlePlaybook(args, flags)
+	case "export":
+		handleExport(args, flags)
+	case "import":
+		handleImport(args, flags)
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command %q\n", command)
 		if suggestion := suggestCommand(command); suggestion != "" {

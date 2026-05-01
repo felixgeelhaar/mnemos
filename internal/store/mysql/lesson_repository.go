@@ -3,11 +3,13 @@ package mysql
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/ports"
 )
 
 // LessonRepository persists synthesised lessons in the MySQL backend.
@@ -17,9 +19,13 @@ type LessonRepository struct {
 
 // Append upserts a lesson. ON DUPLICATE KEY UPDATE refreshes the
 // confidence-bearing columns; FK-bearing columns (id) are immutable.
+// Snapshots the prior shape into lesson_versions before overwrite.
 func (r LessonRepository) Append(ctx context.Context, lesson domain.Lesson) error {
 	if err := lesson.Validate(); err != nil {
 		return fmt.Errorf("invalid lesson: %w", err)
+	}
+	if err := r.snapshotIfExists(ctx, lesson.ID); err != nil {
+		return fmt.Errorf("snapshot lesson %s: %w", lesson.ID, err)
 	}
 	source := lesson.Source
 	if source == "" {
@@ -185,6 +191,43 @@ func (r LessonRepository) collectLessonRows(ctx context.Context, rows *sql.Rows)
 		out[i].Evidence = ev
 	}
 	return out, nil
+}
+
+// ListVersions returns every snapshot row for the given lesson.
+func (r LessonRepository) ListVersions(ctx context.Context, lessonID string) ([]ports.EntityVersion, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT version_id, payload_json, valid_from, valid_to
+FROM lesson_versions WHERE lesson_id = ? ORDER BY version_id DESC`, lessonID)
+	if err != nil {
+		return nil, fmt.Errorf("list lesson versions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]ports.EntityVersion, 0)
+	for rows.Next() {
+		var v ports.EntityVersion
+		if err := rows.Scan(&v.VersionID, &v.PayloadJSON, &v.ValidFrom, &v.ValidTo); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+func (r LessonRepository) snapshotIfExists(ctx context.Context, lessonID string) error {
+	current, err := r.GetByID(ctx, lessonID)
+	if err != nil {
+		return nil //nolint:nilerr // missing prior row = no snapshot
+	}
+	payload, err := json.Marshal(current)
+	if err != nil {
+		return fmt.Errorf("marshal lesson snapshot: %w", err)
+	}
+	_, err = r.db.ExecContext(ctx, `
+INSERT INTO lesson_versions (lesson_id, payload_json, valid_from, valid_to)
+VALUES (?, CAST(? AS JSON), ?, ?)`,
+		lessonID, string(payload), current.DerivedAt.UTC(), time.Now().UTC(),
+	)
+	return err
 }
 
 func scanLessonRow(row *sql.Row) (domain.Lesson, error) {

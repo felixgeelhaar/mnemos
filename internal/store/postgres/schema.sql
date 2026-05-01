@@ -304,3 +304,21 @@ CREATE INDEX IF NOT EXISTS idx_playbook_lessons_lesson_id ON playbook_lessons(le
 ALTER TABLE decisions ADD COLUMN IF NOT EXISTS scope_service text NOT NULL DEFAULT '';
 ALTER TABLE decisions ADD COLUMN IF NOT EXISTS scope_env     text NOT NULL DEFAULT '';
 ALTER TABLE decisions ADD COLUMN IF NOT EXISTS scope_team    text NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS lesson_versions (
+  version_id   bigserial   PRIMARY KEY,
+  lesson_id    text        NOT NULL REFERENCES lessons(id),
+  payload_json jsonb       NOT NULL,
+  valid_from   timestamptz NOT NULL,
+  valid_to     timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_lesson_versions_lesson_id ON lesson_versions(lesson_id);
+
+CREATE TABLE IF NOT EXISTS playbook_versions (
+  version_id   bigserial   PRIMARY KEY,
+  playbook_id  text        NOT NULL REFERENCES playbooks(id),
+  payload_json jsonb       NOT NULL,
+  valid_from   timestamptz NOT NULL,
+  valid_to     timestamptz NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_playbook_versions_playbook_id ON playbook_versions(playbook_id);

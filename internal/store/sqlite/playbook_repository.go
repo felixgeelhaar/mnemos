@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/ports"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
 )
 
@@ -25,9 +26,13 @@ func NewPlaybookRepository(db *sql.DB) PlaybookRepository {
 }
 
 // Append upserts the playbook row plus its lesson link rows.
+// Snapshots the prior shape into playbook_versions before the write.
 func (r PlaybookRepository) Append(ctx context.Context, p domain.Playbook) error {
 	if err := p.Validate(); err != nil {
 		return fmt.Errorf("invalid playbook: %w", err)
+	}
+	if err := r.snapshotIfExists(ctx, p.ID); err != nil {
+		return fmt.Errorf("snapshot playbook %s: %w", p.ID, err)
 	}
 	source := p.Source
 	if source == "" {
@@ -167,6 +172,61 @@ func (r PlaybookRepository) hydratePlaybooks(ctx context.Context, rows []sqlcgen
 		out = append(out, p)
 	}
 	return out, nil
+}
+
+// ListVersions returns every snapshot row for the given playbook,
+// newest first.
+func (r PlaybookRepository) ListVersions(ctx context.Context, playbookID string) ([]ports.EntityVersion, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT version_id, payload_json, valid_from, valid_to
+FROM playbook_versions
+WHERE playbook_id = ?
+ORDER BY version_id DESC`, playbookID)
+	if err != nil {
+		return nil, fmt.Errorf("list playbook versions: %w", err)
+	}
+	defer closeRows(rows)
+	out := make([]ports.EntityVersion, 0)
+	for rows.Next() {
+		var v ports.EntityVersion
+		var validFrom, validTo string
+		if err := rows.Scan(&v.VersionID, &v.PayloadJSON, &validFrom, &validTo); err != nil {
+			return nil, err
+		}
+		if t, perr := time.Parse(time.RFC3339Nano, validFrom); perr == nil {
+			v.ValidFrom = t
+		}
+		if t, perr := time.Parse(time.RFC3339Nano, validTo); perr == nil {
+			v.ValidTo = t
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+func (r PlaybookRepository) snapshotIfExists(ctx context.Context, playbookID string) error {
+	row, err := r.q.GetPlaybookByID(ctx, playbookID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	current, err := mapSQLPlaybook(row)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(current)
+	if err != nil {
+		return fmt.Errorf("marshal playbook snapshot: %w", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = r.db.ExecContext(ctx, `
+INSERT INTO playbook_versions (playbook_id, payload_json, valid_from, valid_to)
+VALUES (?, ?, ?, ?)`,
+		playbookID, string(payload), current.DerivedAt.UTC().Format(time.RFC3339Nano), now,
+	)
+	return err
 }
 
 func mapSQLPlaybook(row sqlcgen.Playbook) (domain.Playbook, error) {

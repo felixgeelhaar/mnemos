@@ -313,3 +313,25 @@ ALTER TABLE claims    ADD COLUMN IF NOT EXISTS scope_team    VARCHAR(190) NOT NU
 ALTER TABLE decisions ADD COLUMN IF NOT EXISTS scope_service VARCHAR(190) NOT NULL DEFAULT '';
 ALTER TABLE decisions ADD COLUMN IF NOT EXISTS scope_env     VARCHAR(64)  NOT NULL DEFAULT '';
 ALTER TABLE decisions ADD COLUMN IF NOT EXISTS scope_team    VARCHAR(190) NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS lesson_versions (
+  version_id   BIGINT       NOT NULL AUTO_INCREMENT,
+  lesson_id    VARCHAR(190) NOT NULL,
+  payload_json JSON         NOT NULL,
+  valid_from   DATETIME(6)  NOT NULL,
+  valid_to     DATETIME(6)  NOT NULL,
+  PRIMARY KEY (version_id),
+  KEY idx_lesson_versions_lesson_id (lesson_id),
+  CONSTRAINT fk_lv_lesson FOREIGN KEY (lesson_id) REFERENCES lessons(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS playbook_versions (
+  version_id   BIGINT       NOT NULL AUTO_INCREMENT,
+  playbook_id  VARCHAR(190) NOT NULL,
+  payload_json JSON         NOT NULL,
+  valid_from   DATETIME(6)  NOT NULL,
+  valid_to     DATETIME(6)  NOT NULL,
+  PRIMARY KEY (version_id),
+  KEY idx_playbook_versions_playbook_id (playbook_id),
+  CONSTRAINT fk_pv_playbook FOREIGN KEY (playbook_id) REFERENCES playbooks(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

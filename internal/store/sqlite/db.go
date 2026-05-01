@@ -355,6 +355,27 @@ CREATE TABLE IF NOT EXISTS playbook_lessons (
 	FOREIGN KEY (lesson_id) REFERENCES lessons(id)
 );
 CREATE INDEX IF NOT EXISTS idx_playbook_lessons_lesson_id ON playbook_lessons(lesson_id);
+
+-- Phase 7 follow-up: system-versioned snapshot tables.
+CREATE TABLE IF NOT EXISTS lesson_versions (
+	version_id INTEGER PRIMARY KEY AUTOINCREMENT,
+	lesson_id TEXT NOT NULL,
+	payload_json TEXT NOT NULL,
+	valid_from TEXT NOT NULL,
+	valid_to TEXT NOT NULL,
+	FOREIGN KEY (lesson_id) REFERENCES lessons(id)
+);
+CREATE INDEX IF NOT EXISTS idx_lesson_versions_lesson_id ON lesson_versions(lesson_id);
+
+CREATE TABLE IF NOT EXISTS playbook_versions (
+	version_id INTEGER PRIMARY KEY AUTOINCREMENT,
+	playbook_id TEXT NOT NULL,
+	payload_json TEXT NOT NULL,
+	valid_from TEXT NOT NULL,
+	valid_to TEXT NOT NULL,
+	FOREIGN KEY (playbook_id) REFERENCES playbooks(id)
+);
+CREATE INDEX IF NOT EXISTS idx_playbook_versions_playbook_id ON playbook_versions(playbook_id);
 `
 
 	if _, err := db.Exec(schema); err != nil {

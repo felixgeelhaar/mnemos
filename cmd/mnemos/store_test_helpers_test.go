@@ -10,7 +10,6 @@ import (
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/store"
-	"github.com/felixgeelhaar/mnemos/internal/store/sqlite"
 )
 
 // openTestStore opens a fresh SQLite-backed Conn at a temp path,
@@ -42,30 +41,6 @@ func newServerTestStore_conn(t *testing.T) *store.Conn {
 	t.Helper()
 	_, conn := openTestStore(t)
 	return conn
-}
-
-// connFromDB wraps an existing *sql.DB into a *store.Conn so tests
-// that seeded fixtures directly through the *sql.DB can still pass a
-// Conn to handler factories that take *store.Conn. Uses the sqlite
-// repositories directly — the underlying db is shared so seeded data
-// is visible.
-//
-// The returned Conn does not close the db; the caller (or the
-// helper that opened it) retains ownership.
-func connFromDB(_ *testing.T, db *sql.DB) *store.Conn {
-	return &store.Conn{
-		Events:        sqlite.NewEventRepository(db),
-		Claims:        sqlite.NewClaimRepository(db),
-		Relationships: sqlite.NewRelationshipRepository(db),
-		Embeddings:    sqlite.NewEmbeddingRepository(db),
-		Users:         sqlite.NewUserRepository(db),
-		RevokedTokens: sqlite.NewRevokedTokenRepository(db),
-		Agents:        sqlite.NewAgentRepository(db),
-		Entities:      sqlite.NewEntityRepository(db),
-		Jobs:          sqlite.NewCompilationJobRepository(db),
-		Raw:           db,
-		Closer:        func() error { return nil },
-	}
 }
 
 // seedEventConn inserts an event through the port interface.

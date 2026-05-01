@@ -38,7 +38,7 @@ func TestOpen_DefaultNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 }
 
 func TestOpen_ExplicitNamespace(t *testing.T) {
@@ -47,7 +47,7 @@ func TestOpen_ExplicitNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 }
 
 func TestOpen_InvalidNamespaceRejected(t *testing.T) {

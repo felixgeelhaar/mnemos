@@ -245,3 +245,43 @@ func TestClaim_ScopeRoundTrip(t *testing.T) {
 		t.Fatalf("scope filter want 1 match for service=payments, got %d", matched)
 	}
 }
+
+func TestLesson_VersionSnapshot(t *testing.T) {
+	conn := openTestConn(t)
+	ctx := context.Background()
+	now := time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)
+	base := domain.Lesson{
+		ID: "ls_v1", Statement: "v1 statement", Trigger: "x_trigger",
+		Scope: domain.Scope{Service: "payments"}, Kind: "rollback",
+		Evidence: []string{"ac_1"}, Confidence: 0.7, DerivedAt: now,
+	}
+	if err := conn.Lessons.Append(ctx, base); err != nil {
+		t.Fatalf("append v1: %v", err)
+	}
+	v2 := base
+	v2.Statement = "v2 statement"
+	v2.Confidence = 0.85
+	v2.DerivedAt = now.Add(time.Hour)
+	if err := conn.Lessons.Append(ctx, v2); err != nil {
+		t.Fatalf("append v2: %v", err)
+	}
+	versions, err := conn.Lessons.ListVersions(ctx, "ls_v1")
+	if err != nil {
+		t.Fatalf("list versions: %v", err)
+	}
+	if len(versions) != 1 {
+		t.Fatalf("want 1 prior snapshot after 2 appends, got %d", len(versions))
+	}
+	if !contains(versions[0].PayloadJSON, "v1 statement") {
+		t.Fatalf("snapshot did not capture v1 statement: %s", versions[0].PayloadJSON)
+	}
+}
+
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}

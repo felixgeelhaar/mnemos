@@ -210,6 +210,8 @@ func main() {
 		handleExport(args, flags)
 	case "import":
 		handleImport(args, flags)
+	case "history":
+		handleHistory(args, flags)
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command %q\n", command)
 		if suggestion := suggestCommand(command); suggestion != "" {

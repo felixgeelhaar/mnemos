@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/ports"
 )
 
 // PlaybookRepository persists synthesised playbooks in the MySQL backend.
@@ -17,10 +18,14 @@ type PlaybookRepository struct {
 	db *sql.DB
 }
 
-// Append upserts a playbook plus its lesson link rows.
+// Append upserts a playbook plus its lesson link rows. Snapshots the
+// prior shape into playbook_versions before overwrite.
 func (r PlaybookRepository) Append(ctx context.Context, p domain.Playbook) error {
 	if err := p.Validate(); err != nil {
 		return fmt.Errorf("invalid playbook: %w", err)
+	}
+	if err := r.snapshotIfExists(ctx, p.ID); err != nil {
+		return fmt.Errorf("snapshot playbook %s: %w", p.ID, err)
 	}
 	source := p.Source
 	if source == "" {
@@ -194,6 +199,43 @@ func (r PlaybookRepository) collectPlaybookRows(ctx context.Context, rows *sql.R
 		out[i].DerivedFromLessons = ls
 	}
 	return out, nil
+}
+
+// ListVersions returns every snapshot row for the given playbook.
+func (r PlaybookRepository) ListVersions(ctx context.Context, playbookID string) ([]ports.EntityVersion, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT version_id, payload_json, valid_from, valid_to
+FROM playbook_versions WHERE playbook_id = ? ORDER BY version_id DESC`, playbookID)
+	if err != nil {
+		return nil, fmt.Errorf("list playbook versions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := make([]ports.EntityVersion, 0)
+	for rows.Next() {
+		var v ports.EntityVersion
+		if err := rows.Scan(&v.VersionID, &v.PayloadJSON, &v.ValidFrom, &v.ValidTo); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+func (r PlaybookRepository) snapshotIfExists(ctx context.Context, playbookID string) error {
+	current, err := r.GetByID(ctx, playbookID)
+	if err != nil {
+		return nil //nolint:nilerr // missing prior row = no snapshot
+	}
+	payload, err := json.Marshal(current)
+	if err != nil {
+		return fmt.Errorf("marshal playbook snapshot: %w", err)
+	}
+	_, err = r.db.ExecContext(ctx, `
+INSERT INTO playbook_versions (playbook_id, payload_json, valid_from, valid_to)
+VALUES (?, CAST(? AS JSON), ?, ?)`,
+		playbookID, string(payload), current.DerivedAt.UTC(), time.Now().UTC(),
+	)
+	return err
 }
 
 func scanPlaybookRow(row *sql.Row) (domain.Playbook, error) {

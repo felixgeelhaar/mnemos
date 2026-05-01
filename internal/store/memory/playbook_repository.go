@@ -2,11 +2,13 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/ports"
 )
 
 // PlaybookRepository is the in-memory implementation of
@@ -15,13 +17,25 @@ type PlaybookRepository struct {
 	state *state
 }
 
-// Append upserts a playbook and seeds its lesson link rows.
+// Append upserts a playbook and seeds its lesson link rows. Snapshots
+// the prior shape into playbookVersions before overwrite.
 func (r PlaybookRepository) Append(_ context.Context, p domain.Playbook) error {
 	if err := p.Validate(); err != nil {
 		return fmt.Errorf("invalid playbook: %w", err)
 	}
 	r.state.mu.Lock()
 	defer r.state.mu.Unlock()
+	if prev, ok := r.state.playbooks[p.ID]; ok {
+		domainPrev := prev.toDomain()
+		domainPrev.DerivedFromLessons = r.lessonsForLocked(p.ID)
+		if payload, err := json.Marshal(domainPrev); err == nil {
+			r.state.playbookVersions[p.ID] = append(r.state.playbookVersions[p.ID], storedEntityVersion{
+				PayloadJSON: string(payload),
+				ValidFrom:   domainPrev.DerivedAt,
+				ValidTo:     time.Now().UTC(),
+			})
+		}
+	}
 	source := p.Source
 	if source == "" {
 		source = "synthesize"
@@ -114,6 +128,24 @@ func (r PlaybookRepository) ListLessons(_ context.Context, playbookID string) ([
 	r.state.mu.RLock()
 	defer r.state.mu.RUnlock()
 	return r.lessonsForLocked(playbookID), nil
+}
+
+// ListVersions returns snapshots of prior playbook states newest first.
+func (r PlaybookRepository) ListVersions(_ context.Context, playbookID string) ([]ports.EntityVersion, error) {
+	r.state.mu.RLock()
+	defer r.state.mu.RUnlock()
+	versions := r.state.playbookVersions[playbookID]
+	out := make([]ports.EntityVersion, 0, len(versions))
+	for i := len(versions) - 1; i >= 0; i-- {
+		v := versions[i]
+		out = append(out, ports.EntityVersion{
+			VersionID:   int64(i + 1),
+			PayloadJSON: v.PayloadJSON,
+			ValidFrom:   v.ValidFrom,
+			ValidTo:     v.ValidTo,
+		})
+	}
+	return out, nil
 }
 
 func (r PlaybookRepository) listFiltered(pred func(storedPlaybook) bool) []domain.Playbook {

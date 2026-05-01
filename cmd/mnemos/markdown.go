@@ -130,6 +130,54 @@ func handleImport(args []string, _ Flags) {
 	}
 }
 
+// handleHistory routes `mnemos history --kind=lesson|playbook --id <id>`.
+// Returns prior snapshots newest first.
+func handleHistory(args []string, _ Flags) {
+	var kind, id string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--kind":
+			kind = args[i+1]
+			i++
+		case "--id":
+			id = args[i+1]
+			i++
+		default:
+			exitWithMnemosError(false, NewUserError("unknown flag %q", args[i]))
+			return
+		}
+	}
+	if strings.TrimSpace(kind) == "" || strings.TrimSpace(id) == "" {
+		exitWithMnemosError(false, NewUserError("--kind and --id are required"))
+		return
+	}
+	ctx := context.Background()
+	conn, err := openConn(ctx)
+	if err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "open store"))
+		return
+	}
+	defer closeConn(conn)
+	switch kind {
+	case "lesson":
+		vs, err := conn.Lessons.ListVersions(ctx, id)
+		if err != nil {
+			exitWithMnemosError(false, NewSystemError(err, "list lesson versions"))
+			return
+		}
+		emitJSON(vs)
+	case "playbook":
+		vs, err := conn.Playbooks.ListVersions(ctx, id)
+		if err != nil {
+			exitWithMnemosError(false, NewSystemError(err, "list playbook versions"))
+			return
+		}
+		emitJSON(vs)
+	default:
+		exitWithMnemosError(false, NewUserError("unknown kind %q", kind))
+	}
+}
+
 // ensureMarkdownDefaults backfills the fields a hand-authored
 // markdown file may legitimately omit. Confidence defaults to 0.6
 // (above the synthesis floor of 0.55 so a hand-authored entry

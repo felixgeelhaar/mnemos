@@ -2,11 +2,13 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/ports"
 )
 
 // LessonRepository is the in-memory implementation of
@@ -16,13 +18,25 @@ type LessonRepository struct {
 	state *state
 }
 
-// Append upserts a lesson and seeds its evidence rows.
+// Append upserts a lesson and seeds its evidence rows. Snapshots the
+// prior shape into lessonVersions before overwrite.
 func (r LessonRepository) Append(_ context.Context, lesson domain.Lesson) error {
 	if err := lesson.Validate(); err != nil {
 		return fmt.Errorf("invalid lesson: %w", err)
 	}
 	r.state.mu.Lock()
 	defer r.state.mu.Unlock()
+	if prev, ok := r.state.lessons[lesson.ID]; ok {
+		domainPrev := prev.toDomain()
+		domainPrev.Evidence = r.evidenceForLocked(lesson.ID)
+		if payload, err := json.Marshal(domainPrev); err == nil {
+			r.state.lessonVersions[lesson.ID] = append(r.state.lessonVersions[lesson.ID], storedEntityVersion{
+				PayloadJSON: string(payload),
+				ValidFrom:   domainPrev.DerivedAt,
+				ValidTo:     time.Now().UTC(),
+			})
+		}
+	}
 	source := lesson.Source
 	if source == "" {
 		source = "synthesize"
@@ -115,6 +129,24 @@ func (r LessonRepository) ListEvidence(_ context.Context, lessonID string) ([]st
 	r.state.mu.RLock()
 	defer r.state.mu.RUnlock()
 	return r.evidenceForLocked(lessonID), nil
+}
+
+// ListVersions returns snapshots of prior lesson states newest first.
+func (r LessonRepository) ListVersions(_ context.Context, lessonID string) ([]ports.EntityVersion, error) {
+	r.state.mu.RLock()
+	defer r.state.mu.RUnlock()
+	versions := r.state.lessonVersions[lessonID]
+	out := make([]ports.EntityVersion, 0, len(versions))
+	for i := len(versions) - 1; i >= 0; i-- {
+		v := versions[i]
+		out = append(out, ports.EntityVersion{
+			VersionID:   int64(i + 1),
+			PayloadJSON: v.PayloadJSON,
+			ValidFrom:   v.ValidFrom,
+			ValidTo:     v.ValidTo,
+		})
+	}
+	return out, nil
 }
 
 func (r LessonRepository) listFiltered(pred func(storedLesson) bool) []domain.Lesson {

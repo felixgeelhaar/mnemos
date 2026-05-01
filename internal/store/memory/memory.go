@@ -26,6 +26,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/store"
@@ -100,64 +101,77 @@ func openProvider(_ context.Context, dsn string) (*store.Conn, error) {
 type state struct {
 	mu sync.RWMutex
 
-	events          map[string]storedEvent
-	eventOrder      []string // insertion order, for ListAll
-	claims          map[string]storedClaim
-	claimOrder      []string
-	statusHistory   map[string][]storedTransition  // claim_id -> transitions in insertion order
-	evidence        map[string]map[string]struct{} // claim_id -> set of event_ids (de-duped)
-	relationships   map[string]storedRelationship
-	embeddings      map[embeddingKey]storedEmbedding
-	users           map[string]storedUser
-	userOrder       []string
-	usersByEmail    map[string]string // email -> user_id
-	revokedTokens   map[string]storedRevokedToken
-	agents          map[string]storedAgent
-	agentOrder      []string
-	entities        map[string]storedEntity
-	entityOrder     []string                  // insertion order, for List
-	entityByKey     map[entityKey]string      // (normalized_name, type) -> entity_id, dedup index
-	claimEntities   map[claimEntityKey]string // (claim_id, entity_id, role) -> role, dedup index
-	jobs            map[string]storedCompilationJob
-	actions         map[string]storedAction
-	actionOrder     []string
-	outcomes        map[string]storedOutcome
-	outcomeOrder    []string
-	lessons         map[string]storedLesson
-	lessonOrder     []string
-	lessonEvidence  map[string]map[string]struct{} // lesson_id -> set of action_ids
-	decisions       map[string]storedDecision
-	decisionOrder   []string
-	decisionBeliefs map[string]map[string]struct{} // decision_id -> set of claim_ids
-	playbooks       map[string]storedPlaybook
-	playbookOrder   []string
-	playbookLessons map[string]map[string]struct{} // playbook_id -> set of lesson_ids
+	events           map[string]storedEvent
+	eventOrder       []string // insertion order, for ListAll
+	claims           map[string]storedClaim
+	claimOrder       []string
+	statusHistory    map[string][]storedTransition  // claim_id -> transitions in insertion order
+	evidence         map[string]map[string]struct{} // claim_id -> set of event_ids (de-duped)
+	relationships    map[string]storedRelationship
+	embeddings       map[embeddingKey]storedEmbedding
+	users            map[string]storedUser
+	userOrder        []string
+	usersByEmail     map[string]string // email -> user_id
+	revokedTokens    map[string]storedRevokedToken
+	agents           map[string]storedAgent
+	agentOrder       []string
+	entities         map[string]storedEntity
+	entityOrder      []string                  // insertion order, for List
+	entityByKey      map[entityKey]string      // (normalized_name, type) -> entity_id, dedup index
+	claimEntities    map[claimEntityKey]string // (claim_id, entity_id, role) -> role, dedup index
+	jobs             map[string]storedCompilationJob
+	actions          map[string]storedAction
+	actionOrder      []string
+	outcomes         map[string]storedOutcome
+	outcomeOrder     []string
+	lessons          map[string]storedLesson
+	lessonOrder      []string
+	lessonEvidence   map[string]map[string]struct{} // lesson_id -> set of action_ids
+	decisions        map[string]storedDecision
+	decisionOrder    []string
+	decisionBeliefs  map[string]map[string]struct{} // decision_id -> set of claim_ids
+	playbooks        map[string]storedPlaybook
+	playbookOrder    []string
+	playbookLessons  map[string]map[string]struct{} // playbook_id -> set of lesson_ids
+	lessonVersions   map[string][]storedEntityVersion
+	playbookVersions map[string][]storedEntityVersion
+}
+
+// storedEntityVersion is the in-memory analogue of a row in
+// {lesson,playbook}_versions: a JSON-encoded snapshot of the prior
+// entity state plus the [valid_from, valid_to) window it covered.
+type storedEntityVersion struct {
+	PayloadJSON string
+	ValidFrom   time.Time
+	ValidTo     time.Time
 }
 
 func newState() *state {
 	return &state{
-		events:          map[string]storedEvent{},
-		claims:          map[string]storedClaim{},
-		statusHistory:   map[string][]storedTransition{},
-		evidence:        map[string]map[string]struct{}{},
-		relationships:   map[string]storedRelationship{},
-		embeddings:      map[embeddingKey]storedEmbedding{},
-		users:           map[string]storedUser{},
-		usersByEmail:    map[string]string{},
-		revokedTokens:   map[string]storedRevokedToken{},
-		agents:          map[string]storedAgent{},
-		entities:        map[string]storedEntity{},
-		entityByKey:     map[entityKey]string{},
-		claimEntities:   map[claimEntityKey]string{},
-		jobs:            map[string]storedCompilationJob{},
-		actions:         map[string]storedAction{},
-		outcomes:        map[string]storedOutcome{},
-		lessons:         map[string]storedLesson{},
-		lessonEvidence:  map[string]map[string]struct{}{},
-		decisions:       map[string]storedDecision{},
-		decisionBeliefs: map[string]map[string]struct{}{},
-		playbooks:       map[string]storedPlaybook{},
-		playbookLessons: map[string]map[string]struct{}{},
+		events:           map[string]storedEvent{},
+		claims:           map[string]storedClaim{},
+		statusHistory:    map[string][]storedTransition{},
+		evidence:         map[string]map[string]struct{}{},
+		relationships:    map[string]storedRelationship{},
+		embeddings:       map[embeddingKey]storedEmbedding{},
+		users:            map[string]storedUser{},
+		usersByEmail:     map[string]string{},
+		revokedTokens:    map[string]storedRevokedToken{},
+		agents:           map[string]storedAgent{},
+		entities:         map[string]storedEntity{},
+		entityByKey:      map[entityKey]string{},
+		claimEntities:    map[claimEntityKey]string{},
+		jobs:             map[string]storedCompilationJob{},
+		actions:          map[string]storedAction{},
+		outcomes:         map[string]storedOutcome{},
+		lessons:          map[string]storedLesson{},
+		lessonEvidence:   map[string]map[string]struct{}{},
+		decisions:        map[string]storedDecision{},
+		decisionBeliefs:  map[string]map[string]struct{}{},
+		playbooks:        map[string]storedPlaybook{},
+		playbookLessons:  map[string]map[string]struct{}{},
+		lessonVersions:   map[string][]storedEntityVersion{},
+		playbookVersions: map[string][]storedEntityVersion{},
 	}
 }
 
@@ -199,6 +213,8 @@ func (s *state) clear() {
 	s.playbooks = map[string]storedPlaybook{}
 	s.playbookOrder = nil
 	s.playbookLessons = map[string]map[string]struct{}{}
+	s.lessonVersions = map[string][]storedEntityVersion{}
+	s.playbookVersions = map[string][]storedEntityVersion{}
 }
 
 // actorOr mirrors sqlite.actorOr: an empty actor falls back to the

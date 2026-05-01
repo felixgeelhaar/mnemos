@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 123,
+  "version": 126,
   "task_states": {
     "task-action-outcome-recording": {
       "status": "done",
@@ -190,16 +190,26 @@
       "elapsed_minutes": 0
     },
     "task-grpc-api-server": {
-      "status": "pending",
-      "path": "",
-      "elapsed_minutes": 0
-    },
-    "task-human-editable-markdown-layer-with-system-versioned-history": {
-      "status": "in_progress",
+      "status": "done",
       "path": "",
       "owner": "ai-agent",
+      "evidence": [
+        "3c8c078 + grpc polish"
+      ],
+      "started_at": "2026-05-01T12:11:49.864045+02:00",
+      "completed_at": "2026-05-01T12:14:35.833868+02:00",
+      "elapsed_minutes": 2
+    },
+    "task-human-editable-markdown-layer-with-system-versioned-history": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "3d01fc5 feat(markdown): human-editable lesson + playbook round-trip (Phase 7)"
+      ],
       "started_at": "2026-05-01T11:50:22.171895+02:00",
-      "elapsed_minutes": 0
+      "completed_at": "2026-05-01T11:53:11.317976+02:00",
+      "elapsed_minutes": 2
     },
     "task-knowledge-browsing-mcp-tools": {
       "status": "done",
@@ -576,5 +586,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-05-01T11:50:22.171895+02:00"
+  "updated_at": "2026-05-01T12:14:35.833869+02:00"
 }

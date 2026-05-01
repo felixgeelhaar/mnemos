@@ -280,6 +280,11 @@ type LessonRepository interface {
 	DeleteAll(ctx context.Context) error
 	AppendEvidence(ctx context.Context, lessonID string, actionIDs []string) error
 	ListEvidence(ctx context.Context, lessonID string) ([]string, error)
+	// ListVersions returns the lesson's full snapshot history newest
+	// first. Each entry is the JSON-encoded payload that was current
+	// at the time of that snapshot, plus the [valid_from, valid_to)
+	// window the snapshot covered.
+	ListVersions(ctx context.Context, lessonID string) ([]EntityVersion, error)
 }
 
 // DecisionRepository persists records of agent (or human) decisions:
@@ -314,6 +319,21 @@ type PlaybookRepository interface {
 	DeleteAll(ctx context.Context) error
 	AppendLessons(ctx context.Context, playbookID string, lessonIDs []string) error
 	ListLessons(ctx context.Context, playbookID string) ([]string, error)
+	// ListVersions mirrors LessonRepository.ListVersions for playbooks.
+	ListVersions(ctx context.Context, playbookID string) ([]EntityVersion, error)
+}
+
+// EntityVersion is one row from a system-versioned snapshot table.
+// PayloadJSON carries the full prior shape of the entity (lesson or
+// playbook) so callers can render it without a per-version schema.
+// ValidFrom and ValidTo bound the [valid_from, valid_to) window the
+// snapshot covered; for the most recent version (still in force)
+// ValidTo is the zero value.
+type EntityVersion struct {
+	VersionID   int64
+	PayloadJSON string
+	ValidFrom   time.Time
+	ValidTo     time.Time
 }
 
 // EntityRepository persists canonicalised entities and the

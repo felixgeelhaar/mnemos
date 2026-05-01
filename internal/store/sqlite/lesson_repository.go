@@ -3,11 +3,13 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/ports"
 	"github.com/felixgeelhaar/mnemos/internal/store/sqlite/sqlcgen"
 )
 
@@ -26,10 +28,16 @@ func NewLessonRepository(db *sql.DB) LessonRepository {
 // Append upserts the lesson row. Re-appending the same id refreshes
 // statement, confidence, derived_at, and last_verified — the
 // synthesis layer relies on this to ratchet a lesson's confidence
-// upward as new evidence accumulates.
+// upward as new evidence accumulates. Before the upsert, if the row
+// already exists, its prior shape is snapshotted into lesson_versions
+// so the audit/time-travel path can replay every state the lesson
+// has been in.
 func (r LessonRepository) Append(ctx context.Context, lesson domain.Lesson) error {
 	if err := lesson.Validate(); err != nil {
 		return fmt.Errorf("invalid lesson: %w", err)
+	}
+	if err := r.snapshotIfExists(ctx, lesson.ID); err != nil {
+		return fmt.Errorf("snapshot lesson %s: %w", lesson.ID, err)
 	}
 	source := lesson.Source
 	if source == "" {
@@ -170,6 +178,65 @@ func (r LessonRepository) hydrateLessons(ctx context.Context, rows []sqlcgen.Les
 		out = append(out, l)
 	}
 	return out, nil
+}
+
+// ListVersions returns every snapshot row for the given lesson,
+// newest first. The current state is not in lesson_versions; callers
+// who want it should call GetByID alongside.
+func (r LessonRepository) ListVersions(ctx context.Context, lessonID string) ([]ports.EntityVersion, error) {
+	rows, err := r.db.QueryContext(ctx, `
+SELECT version_id, payload_json, valid_from, valid_to
+FROM lesson_versions
+WHERE lesson_id = ?
+ORDER BY version_id DESC`, lessonID)
+	if err != nil {
+		return nil, fmt.Errorf("list lesson versions: %w", err)
+	}
+	defer closeRows(rows)
+	out := make([]ports.EntityVersion, 0)
+	for rows.Next() {
+		var v ports.EntityVersion
+		var validFrom, validTo string
+		if err := rows.Scan(&v.VersionID, &v.PayloadJSON, &validFrom, &validTo); err != nil {
+			return nil, err
+		}
+		if t, perr := time.Parse(time.RFC3339Nano, validFrom); perr == nil {
+			v.ValidFrom = t
+		}
+		if t, perr := time.Parse(time.RFC3339Nano, validTo); perr == nil {
+			v.ValidTo = t
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// snapshotIfExists writes the current lesson row into lesson_versions
+// with valid_to=now before the caller's UPSERT overwrites it. No-op
+// if the lesson does not yet exist.
+func (r LessonRepository) snapshotIfExists(ctx context.Context, lessonID string) error {
+	row, err := r.q.GetLessonByID(ctx, lessonID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	current, err := mapSQLLesson(row)
+	if err != nil {
+		return err
+	}
+	payload, err := json.Marshal(current)
+	if err != nil {
+		return fmt.Errorf("marshal lesson snapshot: %w", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err = r.db.ExecContext(ctx, `
+INSERT INTO lesson_versions (lesson_id, payload_json, valid_from, valid_to)
+VALUES (?, ?, ?, ?)`,
+		lessonID, string(payload), current.DerivedAt.UTC().Format(time.RFC3339Nano), now,
+	)
+	return err
 }
 
 func mapSQLLesson(row sqlcgen.Lesson) (domain.Lesson, error) {

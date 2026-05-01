@@ -47,6 +47,7 @@ type Decision struct {
 	Beliefs      []string // claim ids
 	Alternatives []string // human-readable alternatives that were considered
 	OutcomeID    string   // optional; empty until an outcome is observed and attached
+	Scope        Scope    // optional operational context
 	ChosenAt     time.Time
 	CreatedBy    string
 	CreatedAt    time.Time

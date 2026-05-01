@@ -163,6 +163,13 @@ type Claim struct {
 	// becomes stale in 7 days vs an architectural decision good for
 	// a year.
 	HalfLifeDays float64
+
+	// Scope optionally narrows the claim to a specific operational
+	// context (service, env, team). Empty scope (the zero value)
+	// means "applies everywhere". The query engine filters by scope
+	// when Answer is requested with a non-empty filter; synthesis
+	// already routes through claim->action->lesson scope upstream.
+	Scope Scope
 }
 
 // IsValidAt reports whether the claim was in force at instant t.

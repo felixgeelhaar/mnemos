@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 119,
+  "version": 121,
   "task_states": {
     "task-action-outcome-recording": {
       "status": "done",
@@ -442,11 +442,15 @@
       "elapsed_minutes": 2
     },
     "task-playbook-synthesis": {
-      "status": "in_progress",
+      "status": "done",
       "path": "",
       "owner": "ai-agent",
+      "evidence": [
+        "5e555c9 feat(playbooks): synthesise Praxis-ready playbooks from lessons (Phase 6)"
+      ],
       "started_at": "2026-05-01T11:28:41.064274+02:00",
-      "elapsed_minutes": 0
+      "completed_at": "2026-05-01T11:36:20.102156+02:00",
+      "elapsed_minutes": 7
     },
     "task-project-scoped-database-with-init-subcommand": {
       "status": "done",
@@ -504,8 +508,10 @@
       "elapsed_minutes": 5
     },
     "task-scope-aware-memory": {
-      "status": "pending",
+      "status": "in_progress",
       "path": "",
+      "owner": "ai-agent",
+      "started_at": "2026-05-01T11:37:08.430736+02:00",
       "elapsed_minutes": 0
     },
     "task-sqlc-migration-phase-2": {
@@ -564,5 +570,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-05-01T11:28:41.064274+02:00"
+  "updated_at": "2026-05-01T11:37:08.430736+02:00"
 }

@@ -7,32 +7,58 @@ import (
 	"time"
 )
 
-// LessonScope narrows a Lesson to a specific operational context. The
-// synthesis layer clusters strictly within a scope so a "rollback
-// works for payments" lesson cannot quietly contaminate "rollback
-// works for search". Empty scope means "applies everywhere" — used
-// for the few cross-cutting truths that survive every cluster.
-type LessonScope struct {
+// Scope narrows an entity (Claim, Lesson, Playbook, Decision) to a
+// specific operational context. Synthesis and query paths cluster
+// and filter strictly within a scope so a "rollback works for
+// payments" record cannot quietly contaminate "rollback works for
+// search". Empty scope means "applies everywhere" — the small set
+// of cross-cutting truths.
+//
+// Phase 8 adds Scope to Claim and Decision; the existing
+// LessonScope alias preserves callers that already used it.
+type Scope struct {
 	Service string
 	Env     string
 	Team    string
 }
 
+// LessonScope is the original name from Phase 3. Kept as an alias so
+// existing call sites (and future ones that prefer the explicit
+// "lesson scope" reading) compile unchanged.
+type LessonScope = Scope
+
 // IsEmpty reports whether all scope fields are unset.
-func (s LessonScope) IsEmpty() bool {
+func (s Scope) IsEmpty() bool {
 	return s.Service == "" && s.Env == "" && s.Team == ""
 }
 
 // Equal compares two scopes by value. Used by the cluster grouping
 // pass so two actions with the same (service, env, team) sort into
 // the same bucket regardless of map ordering.
-func (s LessonScope) Equal(o LessonScope) bool {
+func (s Scope) Equal(o Scope) bool {
 	return s.Service == o.Service && s.Env == o.Env && s.Team == o.Team
 }
 
 // Key returns a stable string form for map indexing during synthesis.
-func (s LessonScope) Key() string {
+func (s Scope) Key() string {
 	return s.Service + "|" + s.Env + "|" + s.Team
+}
+
+// Matches reports whether s satisfies the filter f. Empty fields in
+// f are wildcards: a filter of {Service:"payments"} matches any scope
+// whose Service is "payments" regardless of Env/Team. Used by query
+// paths that accept partial-scope filters.
+func (s Scope) Matches(f Scope) bool {
+	if f.Service != "" && s.Service != f.Service {
+		return false
+	}
+	if f.Env != "" && s.Env != f.Env {
+		return false
+	}
+	if f.Team != "" && s.Team != f.Team {
+		return false
+	}
+	return true
 }
 
 // Lesson is a validated operational truth derived from one or more

@@ -48,7 +48,10 @@ CREATE TABLE IF NOT EXISTS claims (
   valid_to       timestamptz,
   last_verified  timestamptz,
   verify_count   integer          NOT NULL DEFAULT 0,
-  half_life_days double precision NOT NULL DEFAULT 0
+  half_life_days double precision NOT NULL DEFAULT 0,
+  scope_service  text             NOT NULL DEFAULT '',
+  scope_env      text             NOT NULL DEFAULT '',
+  scope_team     text             NOT NULL DEFAULT ''
 );
 
 -- Idempotent column adds for pre-existing namespaces upgraded from
@@ -56,6 +59,10 @@ CREATE TABLE IF NOT EXISTS claims (
 ALTER TABLE claims ADD COLUMN IF NOT EXISTS last_verified  timestamptz;
 ALTER TABLE claims ADD COLUMN IF NOT EXISTS verify_count   integer          NOT NULL DEFAULT 0;
 ALTER TABLE claims ADD COLUMN IF NOT EXISTS half_life_days double precision NOT NULL DEFAULT 0;
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS scope_service  text             NOT NULL DEFAULT '';
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS scope_env      text             NOT NULL DEFAULT '';
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS scope_team     text             NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_claims_scope_service ON claims(scope_service);
 
 CREATE INDEX IF NOT EXISTS idx_claims_trust_score ON claims(trust_score);
 CREATE INDEX IF NOT EXISTS idx_claims_valid_to    ON claims(valid_to);
@@ -293,3 +300,7 @@ CREATE TABLE IF NOT EXISTS playbook_lessons (
 );
 
 CREATE INDEX IF NOT EXISTS idx_playbook_lessons_lesson_id ON playbook_lessons(lesson_id);
+
+ALTER TABLE decisions ADD COLUMN IF NOT EXISTS scope_service text NOT NULL DEFAULT '';
+ALTER TABLE decisions ADD COLUMN IF NOT EXISTS scope_env     text NOT NULL DEFAULT '';
+ALTER TABLE decisions ADD COLUMN IF NOT EXISTS scope_team    text NOT NULL DEFAULT '';

@@ -237,6 +237,124 @@ END;
 CREATE TRIGGER IF NOT EXISTS claims_au_fts AFTER UPDATE OF text ON claims BEGIN
 	UPDATE claims_fts SET text = new.text WHERE claim_id = old.id;
 END;
+
+-- Phase 2: actions + outcomes
+CREATE TABLE IF NOT EXISTS actions (
+	id TEXT PRIMARY KEY,
+	run_id TEXT NOT NULL DEFAULT '',
+	kind TEXT NOT NULL,
+	subject TEXT NOT NULL,
+	actor TEXT NOT NULL DEFAULT '',
+	at TEXT NOT NULL,
+	metadata_json TEXT NOT NULL DEFAULT '{}',
+	created_by TEXT NOT NULL DEFAULT '<system>',
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_actions_run_id ON actions(run_id);
+CREATE INDEX IF NOT EXISTS idx_actions_subject ON actions(subject);
+CREATE INDEX IF NOT EXISTS idx_actions_kind ON actions(kind);
+CREATE INDEX IF NOT EXISTS idx_actions_at ON actions(at);
+
+CREATE TABLE IF NOT EXISTS outcomes (
+	id TEXT PRIMARY KEY,
+	action_id TEXT NOT NULL,
+	result TEXT NOT NULL,
+	metrics_json TEXT NOT NULL DEFAULT '{}',
+	notes TEXT NOT NULL DEFAULT '',
+	observed_at TEXT NOT NULL,
+	source TEXT NOT NULL DEFAULT 'push',
+	created_by TEXT NOT NULL DEFAULT '<system>',
+	created_at TEXT NOT NULL,
+	FOREIGN KEY (action_id) REFERENCES actions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_outcomes_action_id ON outcomes(action_id);
+CREATE INDEX IF NOT EXISTS idx_outcomes_result ON outcomes(result);
+CREATE INDEX IF NOT EXISTS idx_outcomes_observed_at ON outcomes(observed_at);
+
+-- Phase 3: lessons + lesson_evidence
+CREATE TABLE IF NOT EXISTS lessons (
+	id TEXT PRIMARY KEY,
+	statement TEXT NOT NULL,
+	scope_service TEXT NOT NULL DEFAULT '',
+	scope_env TEXT NOT NULL DEFAULT '',
+	scope_team TEXT NOT NULL DEFAULT '',
+	trigger TEXT NOT NULL DEFAULT '',
+	kind TEXT NOT NULL DEFAULT '',
+	confidence REAL NOT NULL,
+	derived_at TEXT NOT NULL,
+	last_verified TEXT NOT NULL DEFAULT '',
+	source TEXT NOT NULL DEFAULT 'synthesize',
+	created_by TEXT NOT NULL DEFAULT '<system>'
+);
+CREATE INDEX IF NOT EXISTS idx_lessons_scope_service ON lessons(scope_service);
+CREATE INDEX IF NOT EXISTS idx_lessons_scope_env ON lessons(scope_env);
+CREATE INDEX IF NOT EXISTS idx_lessons_scope_team ON lessons(scope_team);
+CREATE INDEX IF NOT EXISTS idx_lessons_kind ON lessons(kind);
+CREATE INDEX IF NOT EXISTS idx_lessons_trigger ON lessons(trigger);
+CREATE INDEX IF NOT EXISTS idx_lessons_confidence ON lessons(confidence);
+
+CREATE TABLE IF NOT EXISTS lesson_evidence (
+	lesson_id TEXT NOT NULL,
+	action_id TEXT NOT NULL,
+	PRIMARY KEY (lesson_id, action_id),
+	FOREIGN KEY (lesson_id) REFERENCES lessons(id),
+	FOREIGN KEY (action_id) REFERENCES actions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_lesson_evidence_action_id ON lesson_evidence(action_id);
+
+-- Phase 5: decisions + decision_beliefs
+CREATE TABLE IF NOT EXISTS decisions (
+	id TEXT PRIMARY KEY,
+	statement TEXT NOT NULL,
+	plan TEXT NOT NULL DEFAULT '',
+	reasoning TEXT NOT NULL DEFAULT '',
+	risk_level TEXT NOT NULL,
+	alternatives_json TEXT NOT NULL DEFAULT '[]',
+	outcome_id TEXT NOT NULL DEFAULT '',
+	chosen_at TEXT NOT NULL,
+	created_by TEXT NOT NULL DEFAULT '<system>',
+	created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_decisions_chosen_at ON decisions(chosen_at);
+CREATE INDEX IF NOT EXISTS idx_decisions_risk_level ON decisions(risk_level);
+CREATE INDEX IF NOT EXISTS idx_decisions_outcome_id ON decisions(outcome_id);
+
+CREATE TABLE IF NOT EXISTS decision_beliefs (
+	decision_id TEXT NOT NULL,
+	claim_id TEXT NOT NULL,
+	PRIMARY KEY (decision_id, claim_id),
+	FOREIGN KEY (decision_id) REFERENCES decisions(id),
+	FOREIGN KEY (claim_id) REFERENCES claims(id)
+);
+CREATE INDEX IF NOT EXISTS idx_decision_beliefs_claim_id ON decision_beliefs(claim_id);
+
+-- Phase 6: playbooks + playbook_lessons
+CREATE TABLE IF NOT EXISTS playbooks (
+	id TEXT PRIMARY KEY,
+	trigger TEXT NOT NULL,
+	statement TEXT NOT NULL,
+	scope_service TEXT NOT NULL DEFAULT '',
+	scope_env TEXT NOT NULL DEFAULT '',
+	scope_team TEXT NOT NULL DEFAULT '',
+	steps_json TEXT NOT NULL DEFAULT '[]',
+	confidence REAL NOT NULL,
+	derived_at TEXT NOT NULL,
+	last_verified TEXT NOT NULL DEFAULT '',
+	source TEXT NOT NULL DEFAULT 'synthesize',
+	created_by TEXT NOT NULL DEFAULT '<system>'
+);
+CREATE INDEX IF NOT EXISTS idx_playbooks_trigger ON playbooks(trigger);
+CREATE INDEX IF NOT EXISTS idx_playbooks_scope_service ON playbooks(scope_service);
+CREATE INDEX IF NOT EXISTS idx_playbooks_confidence ON playbooks(confidence);
+
+CREATE TABLE IF NOT EXISTS playbook_lessons (
+	playbook_id TEXT NOT NULL,
+	lesson_id TEXT NOT NULL,
+	PRIMARY KEY (playbook_id, lesson_id),
+	FOREIGN KEY (playbook_id) REFERENCES playbooks(id),
+	FOREIGN KEY (lesson_id) REFERENCES lessons(id)
+);
+CREATE INDEX IF NOT EXISTS idx_playbook_lessons_lesson_id ON playbook_lessons(lesson_id);
 `
 
 	if _, err := db.Exec(schema); err != nil {
@@ -253,7 +371,7 @@ END;
 // currentSchemaVersion is the schema generation this binary expects.
 // Bump whenever a column or table is added; pair the bump with a step
 // in addMissingColumns so existing DBs upgrade in place.
-const currentSchemaVersion = 6
+const currentSchemaVersion = 7
 
 // addMissingColumn declares one defensive column-add. Each entry is
 // idempotent: if the column already exists in the table we skip it,
@@ -298,6 +416,15 @@ var expectedColumns = []addMissingColumn{
 	{"claims", "last_verified", "TEXT NOT NULL DEFAULT ''"},
 	{"claims", "verify_count", "INTEGER NOT NULL DEFAULT 0"},
 	{"claims", "half_life_days", "REAL NOT NULL DEFAULT 0"},
+	// v7 — Phase 8 multi-tenant scope. Three lightweight TEXT
+	// columns instead of a JSON blob so SQLite can index them
+	// without json_extract acrobatics.
+	{"claims", "scope_service", "TEXT NOT NULL DEFAULT ''"},
+	{"claims", "scope_env", "TEXT NOT NULL DEFAULT ''"},
+	{"claims", "scope_team", "TEXT NOT NULL DEFAULT ''"},
+	{"decisions", "scope_service", "TEXT NOT NULL DEFAULT ''"},
+	{"decisions", "scope_env", "TEXT NOT NULL DEFAULT ''"},
+	{"decisions", "scope_team", "TEXT NOT NULL DEFAULT ''"},
 }
 
 // v1Columns is the legacy alias kept for any external callers (and for

@@ -98,6 +98,12 @@ type AnswerOptions struct {
 	// to walk a single semantic family of edges (e.g. only the causal
 	// graph, not contradictions).
 	HopKinds []domain.RelationshipType
+	// Scope, when non-empty, narrows the answer to claims whose
+	// per-claim Scope matches the supplied filter. Empty fields in
+	// the filter act as wildcards (Scope.Matches semantics): a
+	// filter of {Service:"payments"} matches any claim with
+	// Service="payments" regardless of Env/Team.
+	Scope domain.Scope
 }
 
 // Answer searches all stored events for the best answer to the given question.
@@ -171,6 +177,19 @@ func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents
 		filtered := make([]domain.Claim, 0, len(claims))
 		for _, c := range claims {
 			if _, ok := opts.AllowedClaimIDs[c.ID]; ok {
+				filtered = append(filtered, c)
+			}
+		}
+		claims = filtered
+	}
+
+	// Scope filter: narrow the candidate set to claims whose Scope
+	// matches the caller's filter before any ranking. Empty filter
+	// is a no-op so single-tenant deployments see no change.
+	if !opts.Scope.IsEmpty() {
+		filtered := make([]domain.Claim, 0, len(claims))
+		for _, c := range claims {
+			if c.Scope.Matches(opts.Scope) {
 				filtered = append(filtered, c)
 			}
 		}

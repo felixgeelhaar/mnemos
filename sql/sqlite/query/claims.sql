@@ -3,8 +3,8 @@
 -- separately via UpdateClaimTrust and SetClaimValidity), but does
 -- refresh valid_from: re-extracting a claim with newer evidence is
 -- a legitimate "this fact is observed again from <ts>" signal.
-INSERT INTO claims (id, text, type, confidence, status, created_at, created_by, valid_from)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO claims (id, text, type, confidence, status, created_at, created_by, valid_from, scope_service, scope_env, scope_team)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   text = excluded.text,
   type = excluded.type,
@@ -12,7 +12,10 @@ ON CONFLICT(id) DO UPDATE SET
   status = excluded.status,
   created_at = excluded.created_at,
   created_by = excluded.created_by,
-  valid_from = excluded.valid_from;
+  valid_from = excluded.valid_from,
+  scope_service = excluded.scope_service,
+  scope_env = excluded.scope_env,
+  scope_team = excluded.scope_team;
 
 -- name: SetClaimValidity :exec
 -- Atomic supersession primitive: mark a claim as no longer valid as
@@ -38,7 +41,8 @@ ON CONFLICT(claim_id, event_id) DO NOTHING;
 
 -- name: ListAllClaims :many
 SELECT id, text, type, confidence, status, created_at, created_by, trust_score,
-       valid_from, valid_to, last_verified, verify_count, half_life_days
+       valid_from, valid_to, last_verified, verify_count, half_life_days,
+       scope_service, scope_env, scope_team
 FROM claims
 ORDER BY created_at ASC;
 

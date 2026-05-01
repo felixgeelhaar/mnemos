@@ -57,8 +57,8 @@ func (q *Queries) CountDecisions(ctx context.Context) (int64, error) {
 }
 
 const createDecision = `-- name: CreateDecision :exec
-INSERT INTO decisions (id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO decisions (id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at, scope_service, scope_env, scope_team)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   statement = excluded.statement,
   plan = excluded.plan,
@@ -79,6 +79,9 @@ type CreateDecisionParams struct {
 	ChosenAt         string `json:"chosen_at"`
 	CreatedBy        string `json:"created_by"`
 	CreatedAt        string `json:"created_at"`
+	ScopeService     string `json:"scope_service"`
+	ScopeEnv         string `json:"scope_env"`
+	ScopeTeam        string `json:"scope_team"`
 }
 
 // Idempotent on id. Re-recording the same decision id refreshes
@@ -97,6 +100,9 @@ func (q *Queries) CreateDecision(ctx context.Context, arg CreateDecisionParams) 
 		arg.ChosenAt,
 		arg.CreatedBy,
 		arg.CreatedAt,
+		arg.ScopeService,
+		arg.ScopeEnv,
+		arg.ScopeTeam,
 	)
 	return err
 }
@@ -137,7 +143,7 @@ func (q *Queries) DeleteDecisionBeliefs(ctx context.Context, decisionID string) 
 const getDecisionByID = `-- name: GetDecisionByID :one
 d;
 
-SELECT id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at
+SELECT id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at, scope_service, scope_env, scope_team
 FROM decisions
 WHERE id =
 `
@@ -156,6 +162,9 @@ func (q *Queries) GetDecisionByID(ctx context.Context, id string) (Decision, err
 		&i.ChosenAt,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.ScopeService,
+		&i.ScopeEnv,
+		&i.ScopeTeam,
 	)
 	return i, err
 }
@@ -163,7 +172,7 @@ func (q *Queries) GetDecisionByID(ctx context.Context, id string) (Decision, err
 const listAllDecisions = `-- name: ListAllDecisions :many
 ?;
 
-SELECT id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at
+SELECT id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at, scope_service, scope_env, scope_team
 FROM decisions
 ORDER BY chosen_at DE
 `
@@ -188,6 +197,9 @@ func (q *Queries) ListAllDecisions(ctx context.Context) ([]Decision, error) {
 			&i.ChosenAt,
 			&i.CreatedBy,
 			&i.CreatedAt,
+			&i.ScopeService,
+			&i.ScopeEnv,
+			&i.ScopeTeam,
 		); err != nil {
 			return nil, err
 		}
@@ -236,7 +248,7 @@ func (q *Queries) ListDecisionBeliefs(ctx context.Context, decisionID string) ([
 const listDecisionsByRiskLevel = `-- name: ListDecisionsByRiskLevel :many
 C;
 
-SELECT id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at
+SELECT id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at, scope_service, scope_env, scope_team
 FROM decisions
 WHERE risk_level = ?
 ORDER BY chosen_at DE
@@ -262,6 +274,9 @@ func (q *Queries) ListDecisionsByRiskLevel(ctx context.Context, riskLevel string
 			&i.ChosenAt,
 			&i.CreatedBy,
 			&i.CreatedAt,
+			&i.ScopeService,
+			&i.ScopeEnv,
+			&i.ScopeTeam,
 		); err != nil {
 			return nil, err
 		}

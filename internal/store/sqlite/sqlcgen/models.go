@@ -44,6 +44,9 @@ type Claim struct {
 	LastVerified string         `json:"last_verified"`
 	VerifyCount  int64          `json:"verify_count"`
 	HalfLifeDays float64        `json:"half_life_days"`
+	ScopeService string         `json:"scope_service"`
+	ScopeEnv     string         `json:"scope_env"`
+	ScopeTeam    string         `json:"scope_team"`
 }
 
 type ClaimEntity struct {
@@ -88,6 +91,9 @@ type Decision struct {
 	ChosenAt         string `json:"chosen_at"`
 	CreatedBy        string `json:"created_by"`
 	CreatedAt        string `json:"created_at"`
+	ScopeService     string `json:"scope_service"`
+	ScopeEnv         string `json:"scope_env"`
+	ScopeTeam        string `json:"scope_team"`
 }
 
 type DecisionBelief struct {

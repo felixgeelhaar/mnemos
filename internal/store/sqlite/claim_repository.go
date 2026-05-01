@@ -81,14 +81,17 @@ func (r ClaimRepository) upsertWithReason(ctx context.Context, claims []domain.C
 			validFrom = claim.CreatedAt
 		}
 		err = qtx.UpsertClaim(ctx, sqlcgen.UpsertClaimParams{
-			ID:         claim.ID,
-			Text:       claim.Text,
-			Type:       string(claim.Type),
-			Confidence: claim.Confidence,
-			Status:     string(claim.Status),
-			CreatedAt:  claim.CreatedAt.UTC().Format(time.RFC3339Nano),
-			CreatedBy:  actorOr(claim.CreatedBy),
-			ValidFrom:  validFrom.UTC().Format(time.RFC3339Nano),
+			ID:           claim.ID,
+			Text:         claim.Text,
+			Type:         string(claim.Type),
+			Confidence:   claim.Confidence,
+			Status:       string(claim.Status),
+			CreatedAt:    claim.CreatedAt.UTC().Format(time.RFC3339Nano),
+			CreatedBy:    actorOr(claim.CreatedBy),
+			ValidFrom:    validFrom.UTC().Format(time.RFC3339Nano),
+			ScopeService: claim.Scope.Service,
+			ScopeEnv:     claim.Scope.Env,
+			ScopeTeam:    claim.Scope.Team,
 		})
 		if err != nil {
 			return fmt.Errorf("upsert claim %s: %w", claim.ID, err)
@@ -173,7 +176,7 @@ func (r ClaimRepository) ListByEventIDs(ctx context.Context, eventIDs []string) 
 	}
 
 	query := fmt.Sprintf(`
-SELECT DISTINCT c.id, c.text, c.type, c.confidence, c.status, c.created_at, c.created_by, c.trust_score, c.valid_from, c.valid_to
+SELECT DISTINCT c.id, c.text, c.type, c.confidence, c.status, c.created_at, c.created_by, c.trust_score, c.valid_from, c.valid_to, c.last_verified, c.verify_count, c.half_life_days, c.scope_service, c.scope_env, c.scope_team
 FROM claims c
 JOIN claim_evidence ce ON ce.claim_id = c.id
 WHERE ce.event_id IN (%s)
@@ -304,7 +307,7 @@ func (r ClaimRepository) ListByIDs(ctx context.Context, claimIDs []string) ([]do
 	}
 
 	query := fmt.Sprintf(`
-SELECT id, text, type, confidence, status, created_at, created_by, trust_score, valid_from, valid_to
+SELECT id, text, type, confidence, status, created_at, created_by, trust_score, valid_from, valid_to, last_verified, verify_count, half_life_days, scope_service, scope_env, scope_team
 FROM claims
 WHERE id IN (%s)`, strings.Join(placeholders, ",")) //nolint:gosec // G201: placeholders are literal "?" strings, not user input
 
@@ -615,6 +618,7 @@ func mapSQLClaim(row sqlcgen.Claim) (domain.Claim, error) {
 		TrustScore:   row.TrustScore,
 		VerifyCount:  int(row.VerifyCount),
 		HalfLifeDays: row.HalfLifeDays,
+		Scope:        domain.Scope{Service: row.ScopeService, Env: row.ScopeEnv, Team: row.ScopeTeam},
 	}
 	if lv, perr := parseOptionalTime(row.LastVerified); perr != nil {
 		return domain.Claim{}, fmt.Errorf("parse claim last_verified: %w", perr)
@@ -666,12 +670,18 @@ type claimRowScanner interface {
 
 func scanClaim(scanner claimRowScanner) (domain.Claim, error) {
 	var (
-		claim     domain.Claim
-		claimType string
-		status    string
-		createdAt string
-		validFrom string
-		validTo   sql.NullString
+		claim        domain.Claim
+		claimType    string
+		status       string
+		createdAt    string
+		validFrom    string
+		validTo      sql.NullString
+		lastVerified string
+		verifyCount  int64
+		halfLifeDays float64
+		scopeService string
+		scopeEnv     string
+		scopeTeam    string
 	)
 
 	if err := scanner.Scan(
@@ -685,8 +695,22 @@ func scanClaim(scanner claimRowScanner) (domain.Claim, error) {
 		&claim.TrustScore,
 		&validFrom,
 		&validTo,
+		&lastVerified,
+		&verifyCount,
+		&halfLifeDays,
+		&scopeService,
+		&scopeEnv,
+		&scopeTeam,
 	); err != nil {
 		return domain.Claim{}, err
+	}
+	claim.VerifyCount = int(verifyCount)
+	claim.HalfLifeDays = halfLifeDays
+	claim.Scope = domain.Scope{Service: scopeService, Env: scopeEnv, Team: scopeTeam}
+	if lastVerified != "" {
+		if t, perr := time.Parse(time.RFC3339Nano, lastVerified); perr == nil {
+			claim.LastVerified = t
+		}
 	}
 
 	claim.Type = domain.ClaimType(claimType)

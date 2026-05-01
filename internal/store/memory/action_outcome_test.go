@@ -205,3 +205,43 @@ func TestDecisionRepository_AppendListAttachOutcome(t *testing.T) {
 		t.Fatalf("want 1 high-risk decision, got %d", len(high))
 	}
 }
+
+func TestClaim_ScopeRoundTrip(t *testing.T) {
+	conn := openTestConn(t)
+	ctx := context.Background()
+	ts := time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)
+	if err := conn.Claims.Upsert(ctx, []domain.Claim{{
+		ID: "cl_payments", Text: "deploy works on payments", Type: domain.ClaimTypeFact,
+		Confidence: 0.7, Status: domain.ClaimStatusActive, CreatedAt: ts, ValidFrom: ts,
+		Scope: domain.Scope{Service: "payments", Env: "prod"},
+	}, {
+		ID: "cl_search", Text: "deploy works on search", Type: domain.ClaimTypeFact,
+		Confidence: 0.7, Status: domain.ClaimStatusActive, CreatedAt: ts, ValidFrom: ts,
+		Scope: domain.Scope{Service: "search", Env: "prod"},
+	}}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	got, err := conn.Claims.ListByIDs(ctx, []string{"cl_payments", "cl_search"})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, c := range got {
+		if c.ID == "cl_payments" && c.Scope.Service != "payments" {
+			t.Fatalf("payments scope lost: %+v", c.Scope)
+		}
+		if c.ID == "cl_search" && c.Scope.Service != "search" {
+			t.Fatalf("search scope lost: %+v", c.Scope)
+		}
+	}
+	// Filter via Scope.Matches.
+	want := domain.Scope{Service: "payments"}
+	matched := 0
+	for _, c := range got {
+		if c.Scope.Matches(want) {
+			matched++
+		}
+	}
+	if matched != 1 {
+		t.Fatalf("scope filter want 1 match for service=payments, got %d", matched)
+	}
+}

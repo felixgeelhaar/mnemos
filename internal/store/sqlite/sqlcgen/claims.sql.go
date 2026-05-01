@@ -88,7 +88,8 @@ func (q *Queries) DeleteClaimStatusHistoryByClaimID(ctx context.Context, claimID
 
 const listAllClaims = `-- name: ListAllClaims :many
 SELECT id, text, type, confidence, status, created_at, created_by, trust_score,
-       valid_from, valid_to, last_verified, verify_count, half_life_days
+       valid_from, valid_to, last_verified, verify_count, half_life_days,
+       scope_service, scope_env, scope_team
 FROM claims
 ORDER BY created_at ASC
 `
@@ -116,6 +117,9 @@ func (q *Queries) ListAllClaims(ctx context.Context) ([]Claim, error) {
 			&i.LastVerified,
 			&i.VerifyCount,
 			&i.HalfLifeDays,
+			&i.ScopeService,
+			&i.ScopeEnv,
+			&i.ScopeTeam,
 		); err != nil {
 			return nil, err
 		}
@@ -242,8 +246,8 @@ func (q *Queries) UpdateClaimTrust(ctx context.Context, arg UpdateClaimTrustPara
 }
 
 const upsertClaim = `-- name: UpsertClaim :exec
-INSERT INTO claims (id, text, type, confidence, status, created_at, created_by, valid_from)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO claims (id, text, type, confidence, status, created_at, created_by, valid_from, scope_service, scope_env, scope_team)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   text = excluded.text,
   type = excluded.type,
@@ -251,18 +255,24 @@ ON CONFLICT(id) DO UPDATE SET
   status = excluded.status,
   created_at = excluded.created_at,
   created_by = excluded.created_by,
-  valid_from = excluded.valid_from
+  valid_from = excluded.valid_from,
+  scope_service = excluded.scope_service,
+  scope_env = excluded.scope_env,
+  scope_team = excluded.scope_team
 `
 
 type UpsertClaimParams struct {
-	ID         string  `json:"id"`
-	Text       string  `json:"text"`
-	Type       string  `json:"type"`
-	Confidence float64 `json:"confidence"`
-	Status     string  `json:"status"`
-	CreatedAt  string  `json:"created_at"`
-	CreatedBy  string  `json:"created_by"`
-	ValidFrom  string  `json:"valid_from"`
+	ID           string  `json:"id"`
+	Text         string  `json:"text"`
+	Type         string  `json:"type"`
+	Confidence   float64 `json:"confidence"`
+	Status       string  `json:"status"`
+	CreatedAt    string  `json:"created_at"`
+	CreatedBy    string  `json:"created_by"`
+	ValidFrom    string  `json:"valid_from"`
+	ScopeService string  `json:"scope_service"`
+	ScopeEnv     string  `json:"scope_env"`
+	ScopeTeam    string  `json:"scope_team"`
 }
 
 // ON CONFLICT preserves trust_score and valid_to (computed/managed
@@ -279,6 +289,9 @@ func (q *Queries) UpsertClaim(ctx context.Context, arg UpsertClaimParams) error 
 		arg.CreatedAt,
 		arg.CreatedBy,
 		arg.ValidFrom,
+		arg.ScopeService,
+		arg.ScopeEnv,
+		arg.ScopeTeam,
 	)
 	return err
 }

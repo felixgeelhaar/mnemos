@@ -28,8 +28,13 @@ CREATE TABLE IF NOT EXISTS claims (
   valid_to TEXT,
   last_verified TEXT NOT NULL DEFAULT '',
   verify_count INTEGER NOT NULL DEFAULT 0,
-  half_life_days REAL NOT NULL DEFAULT 0
+  half_life_days REAL NOT NULL DEFAULT 0,
+  scope_service TEXT NOT NULL DEFAULT '',
+  scope_env TEXT NOT NULL DEFAULT '',
+  scope_team TEXT NOT NULL DEFAULT ''
 );
+
+CREATE INDEX IF NOT EXISTS idx_claims_scope_service ON claims(scope_service);
 
 CREATE INDEX IF NOT EXISTS idx_claims_trust_score ON claims(trust_score);
 CREATE INDEX IF NOT EXISTS idx_claims_valid_to ON claims(valid_to);
@@ -232,7 +237,10 @@ CREATE TABLE IF NOT EXISTS decisions (
   outcome_id TEXT NOT NULL DEFAULT '',
   chosen_at TEXT NOT NULL,
   created_by TEXT NOT NULL DEFAULT '<system>',
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  scope_service TEXT NOT NULL DEFAULT '',
+  scope_env TEXT NOT NULL DEFAULT '',
+  scope_team TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_decisions_chosen_at ON decisions(chosen_at);

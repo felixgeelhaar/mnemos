@@ -3,8 +3,8 @@
 -- statement, plan, reasoning, risk_level, alternatives, and
 -- outcome_id but preserves chosen_at and created_at — the original
 -- decision moment is the load-bearing fact.
-INSERT INTO decisions (id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO decisions (id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at, scope_service, scope_env, scope_team)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   statement = excluded.statement,
   plan = excluded.plan,
@@ -14,17 +14,17 @@ ON CONFLICT(id) DO UPDATE SET
   outcome_id = excluded.outcome_id;
 
 -- name: GetDecisionByID :one
-SELECT id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at
+SELECT id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at, scope_service, scope_env, scope_team
 FROM decisions
 WHERE id = ?;
 
 -- name: ListAllDecisions :many
-SELECT id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at
+SELECT id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at, scope_service, scope_env, scope_team
 FROM decisions
 ORDER BY chosen_at DESC;
 
 -- name: ListDecisionsByRiskLevel :many
-SELECT id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at
+SELECT id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at, scope_service, scope_env, scope_team
 FROM decisions
 WHERE risk_level = ?
 ORDER BY chosen_at DESC;

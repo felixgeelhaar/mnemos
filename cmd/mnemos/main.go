@@ -431,6 +431,7 @@ func handleQuery(args []string, f Flags) {
 		opts := query.AnswerOptions{
 			Hops:           hops,
 			HopKinds:       qa.hopKinds,
+			Scope:          qa.scope,
 			MinTrust:       minTrust,
 			AsOf:           asOf,
 			IncludeHistory: includeHistory,
@@ -1167,6 +1168,7 @@ type queryArgs struct {
 	includeHistory bool
 	entity         string // filter answer to claims linked to this entity (id or name)
 	hopKinds       []domain.RelationshipType
+	scope          domain.Scope
 }
 
 func parseQueryArgs(args []string) (queryArgs, error) {
@@ -1235,6 +1237,24 @@ func parseQueryArgs(args []string) (queryArgs, error) {
 				return queryArgs{}, NewUserError("--kind: %v", err)
 			}
 			out.hopKinds = kinds
+			questionArgs = questionArgs[2:]
+		case "--service":
+			if len(questionArgs) < 2 {
+				return queryArgs{}, NewUserError("--service requires a value")
+			}
+			out.scope.Service = strings.TrimSpace(questionArgs[1])
+			questionArgs = questionArgs[2:]
+		case "--env":
+			if len(questionArgs) < 2 {
+				return queryArgs{}, NewUserError("--env requires a value")
+			}
+			out.scope.Env = strings.TrimSpace(questionArgs[1])
+			questionArgs = questionArgs[2:]
+		case "--team":
+			if len(questionArgs) < 2 {
+				return queryArgs{}, NewUserError("--team requires a value")
+			}
+			out.scope.Team = strings.TrimSpace(questionArgs[1])
 			questionArgs = questionArgs[2:]
 		default:
 			goto done

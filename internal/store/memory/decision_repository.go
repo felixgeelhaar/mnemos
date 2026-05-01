@@ -34,6 +34,7 @@ func (r DecisionRepository) Append(_ context.Context, decision domain.Decision) 
 		RiskLevel:    decision.RiskLevel,
 		Alternatives: append([]string(nil), decision.Alternatives...),
 		OutcomeID:    decision.OutcomeID,
+		Scope:        decision.Scope,
 		ChosenAt:     decision.ChosenAt.UTC(),
 		CreatedBy:    actorOr(decision.CreatedBy),
 		CreatedAt:    createdAt.UTC(),
@@ -162,6 +163,7 @@ type storedDecision struct {
 	RiskLevel    domain.RiskLevel
 	Alternatives []string
 	OutcomeID    string
+	Scope        domain.Scope
 	ChosenAt     time.Time
 	CreatedBy    string
 	CreatedAt    time.Time
@@ -176,6 +178,7 @@ func (s storedDecision) toDomain() domain.Decision {
 		RiskLevel:    s.RiskLevel,
 		Alternatives: append([]string(nil), s.Alternatives...),
 		OutcomeID:    s.OutcomeID,
+		Scope:        s.Scope,
 		ChosenAt:     s.ChosenAt,
 		CreatedBy:    s.CreatedBy,
 		CreatedAt:    s.CreatedAt,

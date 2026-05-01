@@ -49,16 +49,23 @@ CREATE TABLE IF NOT EXISTS claims (
   last_verified  DATETIME(6)      NULL,
   verify_count   INT              NOT NULL DEFAULT 0,
   half_life_days DOUBLE           NOT NULL DEFAULT 0,
+  scope_service  VARCHAR(190)     NOT NULL DEFAULT '',
+  scope_env      VARCHAR(64)      NOT NULL DEFAULT '',
+  scope_team     VARCHAR(190)     NOT NULL DEFAULT '',
   PRIMARY KEY (id),
-  KEY idx_claims_trust_score (trust_score),
-  KEY idx_claims_valid_to    (valid_to)
+  KEY idx_claims_trust_score   (trust_score),
+  KEY idx_claims_valid_to      (valid_to),
+  KEY idx_claims_scope_service (scope_service)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Idempotent column adds for pre-existing databases upgraded from
 -- earlier schema generations. MySQL 8.0.29+ supports IF NOT EXISTS.
-ALTER TABLE claims ADD COLUMN IF NOT EXISTS last_verified  DATETIME(6) NULL;
-ALTER TABLE claims ADD COLUMN IF NOT EXISTS verify_count   INT         NOT NULL DEFAULT 0;
-ALTER TABLE claims ADD COLUMN IF NOT EXISTS half_life_days DOUBLE      NOT NULL DEFAULT 0;
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS last_verified  DATETIME(6)  NULL;
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS verify_count   INT          NOT NULL DEFAULT 0;
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS half_life_days DOUBLE       NOT NULL DEFAULT 0;
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS scope_service  VARCHAR(190) NOT NULL DEFAULT '';
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS scope_env      VARCHAR(64)  NOT NULL DEFAULT '';
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS scope_team     VARCHAR(190) NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS entities (
   id              VARCHAR(190) NOT NULL,
@@ -299,3 +306,10 @@ CREATE TABLE IF NOT EXISTS playbook_lessons (
   CONSTRAINT fk_pl_playbook FOREIGN KEY (playbook_id) REFERENCES playbooks(id),
   CONSTRAINT fk_pl_lesson   FOREIGN KEY (lesson_id)   REFERENCES lessons(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE claims    ADD COLUMN IF NOT EXISTS scope_service VARCHAR(190) NOT NULL DEFAULT '';
+ALTER TABLE claims    ADD COLUMN IF NOT EXISTS scope_env     VARCHAR(64)  NOT NULL DEFAULT '';
+ALTER TABLE claims    ADD COLUMN IF NOT EXISTS scope_team    VARCHAR(190) NOT NULL DEFAULT '';
+ALTER TABLE decisions ADD COLUMN IF NOT EXISTS scope_service VARCHAR(190) NOT NULL DEFAULT '';
+ALTER TABLE decisions ADD COLUMN IF NOT EXISTS scope_env     VARCHAR(64)  NOT NULL DEFAULT '';
+ALTER TABLE decisions ADD COLUMN IF NOT EXISTS scope_team    VARCHAR(190) NOT NULL DEFAULT '';

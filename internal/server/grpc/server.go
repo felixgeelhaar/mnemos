@@ -615,9 +615,9 @@ func (s *Server) Metrics(ctx context.Context, _ *mnemosv1.MetricsRequest) (*mnem
 // ---------------------------------------------------------------------------
 
 const (
-	maxBatchRecords     = 1000
-	defaultServeLimit   = 50
-	maxServePageLimit   = 200
+	maxBatchRecords   = 1000
+	defaultServeLimit = 50
+	maxServePageLimit = 200
 )
 
 func normalizePagination(p *mnemosv1.Pagination) (int, int) {

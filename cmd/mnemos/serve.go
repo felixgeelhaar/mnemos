@@ -19,8 +19,8 @@ import (
 	"github.com/felixgeelhaar/bolt"
 	"github.com/felixgeelhaar/mnemos/internal/auth"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
-	"github.com/felixgeelhaar/mnemos/internal/store"
 	mnemosgrpc "github.com/felixgeelhaar/mnemos/internal/server/grpc"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 	"google.golang.org/grpc"
 )
 

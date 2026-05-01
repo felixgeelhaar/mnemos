@@ -419,7 +419,6 @@ func printResetSummary(c resetCounts, keepEvents bool) {
 	}
 }
 
-
 func confirm(prompt string) bool {
 	fmt.Printf("%s [y/N]: ", prompt)
 	reader := bufio.NewReader(os.Stdin)

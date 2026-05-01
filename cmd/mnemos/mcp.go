@@ -202,6 +202,27 @@ type mcpQueryDecisionsOutput struct {
 	Decisions []domain.Decision `json:"decisions"`
 }
 
+type mcpQueryPlaybookInput struct {
+	Trigger string `json:"trigger,omitempty" jsonschema:"description=Trigger label to look up"`
+	Service string `json:"service,omitempty" jsonschema:"description=Service scope to filter by"`
+}
+
+type mcpQueryPlaybookOutput struct {
+	Playbooks []domain.Playbook `json:"playbooks"`
+}
+
+type mcpSynthesizePlaybooksInput struct {
+	MinLessons    int     `json:"minLessons,omitempty" jsonschema:"description=Minimum corroborating lessons per cluster (default 1)"`
+	MinConfidence float64 `json:"minConfidence,omitempty" jsonschema:"description=Minimum confidence floor in [0, 1] (default 0.55)"`
+}
+
+type mcpSynthesizePlaybooksOutput struct {
+	TriggerClusters  int      `json:"trigger_clusters"`
+	PlaybooksEmitted int      `json:"playbooks_emitted"`
+	Skipped          int      `json:"skipped"`
+	PlaybookIDs      []string `json:"playbook_ids"`
+}
+
 // handleMCP starts the MCP server over stdio. This is a long-lived process
 // that blocks until the connection is closed.
 func handleMCP() {
@@ -411,6 +432,22 @@ func handleMCP() {
 		ValidateInput().
 		Handler(func(ctx context.Context, input mcpQueryDecisionsInput) (mcpQueryDecisionsOutput, error) {
 			return mcpRunQueryDecisions(ctx, input)
+		})
+
+	srv.Tool("query_playbook").
+		Description("Return playbooks (steps-only operational intelligence) by trigger or service scope. Mnemos returns steps; execution is the caller's responsibility — Praxis consumes this contract.").
+		OutputSchema(mcpQueryPlaybookOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpQueryPlaybookInput) (mcpQueryPlaybookOutput, error) {
+			return mcpRunQueryPlaybook(ctx, input)
+		})
+
+	srv.Tool("synthesize_playbooks").
+		Description("Run one full playbook-synthesis pass over the lessons store and emit derived Playbooks. Idempotent: re-running on the same lessons refreshes confidence without churning ids.").
+		OutputSchema(mcpSynthesizePlaybooksOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpSynthesizePlaybooksInput) (mcpSynthesizePlaybooksOutput, error) {
+			return mcpRunSynthesizePlaybooks(ctx, input)
 		})
 
 	srv.Tool("watch_file").
@@ -909,6 +946,48 @@ func mcpRunRecordDecision(ctx context.Context, actor string, input mcpRecordDeci
 		return mcpRecordDecisionOutput{}, err
 	}
 	return mcpRecordDecisionOutput{ID: d.ID, Statement: d.Statement, RiskLevel: string(d.RiskLevel)}, nil
+}
+
+func mcpRunQueryPlaybook(ctx context.Context, input mcpQueryPlaybookInput) (mcpQueryPlaybookOutput, error) {
+	conn, err := openConn(ctx)
+	if err != nil {
+		return mcpQueryPlaybookOutput{}, err
+	}
+	defer closeConn(conn)
+	var ps []domain.Playbook
+	switch {
+	case input.Trigger != "":
+		ps, err = conn.Playbooks.ListByTrigger(ctx, input.Trigger)
+	case input.Service != "":
+		ps, err = conn.Playbooks.ListByService(ctx, input.Service)
+	default:
+		ps, err = conn.Playbooks.ListAll(ctx)
+	}
+	if err != nil {
+		return mcpQueryPlaybookOutput{}, err
+	}
+	return mcpQueryPlaybookOutput{Playbooks: ps}, nil
+}
+
+func mcpRunSynthesizePlaybooks(ctx context.Context, input mcpSynthesizePlaybooksInput) (mcpSynthesizePlaybooksOutput, error) {
+	conn, err := openConn(ctx)
+	if err != nil {
+		return mcpSynthesizePlaybooksOutput{}, err
+	}
+	defer closeConn(conn)
+	res, err := synthesize.Playbooks(ctx, conn.Lessons, conn.Playbooks, synthesize.PlaybookOptions{
+		MinLessons:    input.MinLessons,
+		MinConfidence: input.MinConfidence,
+	})
+	if err != nil {
+		return mcpSynthesizePlaybooksOutput{}, err
+	}
+	return mcpSynthesizePlaybooksOutput{
+		TriggerClusters:  res.TriggerClusters,
+		PlaybooksEmitted: res.PlaybooksEmitted,
+		Skipped:          res.Skipped,
+		PlaybookIDs:      res.PlaybookIDs,
+	}, nil
 }
 
 func mcpRunQueryDecisions(ctx context.Context, input mcpQueryDecisionsInput) (mcpQueryDecisionsOutput, error) {

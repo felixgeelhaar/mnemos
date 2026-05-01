@@ -154,6 +154,7 @@ func openProvider(ctx context.Context, dsn string) (*store.Conn, error) {
 		Outcomes:      OutcomeRepository{db: db, ns: parsed.Namespace},
 		Lessons:       LessonRepository{db: db, ns: parsed.Namespace},
 		Decisions:     DecisionRepository{db: db, ns: parsed.Namespace},
+		Playbooks:     PlaybookRepository{db: db, ns: parsed.Namespace},
 		Raw:           db,
 		Closer:        db.Close,
 	}, nil

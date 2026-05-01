@@ -181,6 +181,7 @@ func openProvider(ctx context.Context, dsn string) (*store.Conn, error) {
 		Outcomes:      OutcomeRepository{db: db},
 		Lessons:       LessonRepository{db: db},
 		Decisions:     DecisionRepository{db: db},
+		Playbooks:     PlaybookRepository{db: db},
 		Raw:           db,
 		Closer:        db.Close,
 	}, nil

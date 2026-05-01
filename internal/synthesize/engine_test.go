@@ -190,3 +190,96 @@ func TestSynthesize_ConfidenceDecaysWithAge(t *testing.T) {
 		t.Fatalf("expected aged-out cluster to be skipped, got %d emitted", res.LessonsEmitted)
 	}
 }
+
+func TestSynthesizePlaybooks_EmitsFromLessonCluster(t *testing.T) {
+	conn := openTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+
+	// Seed two high-confidence lessons sharing the same trigger.
+	for i, statement := range []string{"rollback recovers payments fast", "rollback succeeded again"} {
+		if err := conn.Lessons.Append(ctx, domain.Lesson{
+			ID:         "ls_" + itoa(i),
+			Statement:  statement,
+			Scope:      domain.LessonScope{Service: "payments"},
+			Trigger:    "latency_spike_after_deploy",
+			Kind:       "rollback",
+			Evidence:   []string{"ac_" + itoa(i)},
+			Confidence: 0.78,
+			DerivedAt:  now,
+		}); err != nil {
+			t.Fatalf("seed lesson: %v", err)
+		}
+	}
+
+	res, err := Playbooks(ctx, conn.Lessons, conn.Playbooks, PlaybookOptions{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatalf("synthesize playbooks: %v", err)
+	}
+	if res.PlaybooksEmitted != 1 {
+		t.Fatalf("want 1 playbook, got %d (clusters=%d skipped=%d)", res.PlaybooksEmitted, res.TriggerClusters, res.Skipped)
+	}
+	got, err := conn.Playbooks.ListByTrigger(ctx, "latency_spike_after_deploy")
+	if err != nil {
+		t.Fatalf("list by trigger: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 playbook stored, got %d", len(got))
+	}
+	pb := got[0]
+	if pb.Trigger != "latency_spike_after_deploy" || pb.Scope.Service != "payments" {
+		t.Fatalf("trigger/scope mismatch: %+v", pb)
+	}
+	if len(pb.Steps) < 3 {
+		t.Fatalf("want at least 3 steps, got %d", len(pb.Steps))
+	}
+	if pb.Confidence < domain.PlaybookConfidenceMin {
+		t.Fatalf("confidence below floor: %v", pb.Confidence)
+	}
+	if len(pb.DerivedFromLessons) != 2 {
+		t.Fatalf("want 2 lesson links, got %d", len(pb.DerivedFromLessons))
+	}
+}
+
+func TestSynthesizePlaybooks_SkipsTriggerlessLessons(t *testing.T) {
+	conn := openTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	if err := conn.Lessons.Append(ctx, domain.Lesson{
+		ID: "ls_a", Statement: "no trigger", Scope: domain.LessonScope{Service: "payments"},
+		Kind: "rollback", Evidence: []string{"ac_a"}, Confidence: 0.9, DerivedAt: now,
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	res, err := Playbooks(ctx, conn.Lessons, conn.Playbooks, PlaybookOptions{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatalf("synthesize: %v", err)
+	}
+	if res.PlaybooksEmitted != 0 {
+		t.Fatalf("want 0 playbooks (no trigger label), got %d", res.PlaybooksEmitted)
+	}
+}
+
+func TestSynthesizePlaybooks_IsIdempotent(t *testing.T) {
+	conn := openTestStore(t)
+	ctx := context.Background()
+	now := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	if err := conn.Lessons.Append(ctx, domain.Lesson{
+		ID: "ls_a", Statement: "x", Scope: domain.LessonScope{Service: "payments"},
+		Trigger: "x_trigger", Kind: "rollback", Evidence: []string{"ac_a"}, Confidence: 0.8, DerivedAt: now,
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := Playbooks(ctx, conn.Lessons, conn.Playbooks, PlaybookOptions{Now: func() time.Time { return now }}); err != nil {
+			t.Fatalf("synthesize iter %d: %v", i, err)
+		}
+	}
+	count, err := conn.Playbooks.CountAll(ctx)
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("want 1 playbook after 3 runs, got %d", count)
+	}
+}

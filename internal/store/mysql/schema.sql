@@ -271,3 +271,31 @@ CREATE TABLE IF NOT EXISTS decision_beliefs (
   CONSTRAINT fk_db_decision FOREIGN KEY (decision_id) REFERENCES decisions(id),
   CONSTRAINT fk_db_claim    FOREIGN KEY (claim_id)    REFERENCES claims(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS playbooks (
+  id            VARCHAR(190) NOT NULL,
+  trigger       VARCHAR(190) NOT NULL,
+  statement     TEXT         NOT NULL,
+  scope_service VARCHAR(190) NOT NULL DEFAULT '',
+  scope_env     VARCHAR(64)  NOT NULL DEFAULT '',
+  scope_team    VARCHAR(190) NOT NULL DEFAULT '',
+  steps_json    JSON         NOT NULL,
+  confidence    DOUBLE       NOT NULL,
+  derived_at    DATETIME(6)  NOT NULL,
+  last_verified DATETIME(6)  NULL,
+  source        VARCHAR(32)  NOT NULL DEFAULT 'synthesize',
+  created_by    VARCHAR(190) NOT NULL DEFAULT '<system>',
+  PRIMARY KEY (id),
+  KEY idx_playbooks_trigger       (trigger),
+  KEY idx_playbooks_scope_service (scope_service),
+  KEY idx_playbooks_confidence    (confidence)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS playbook_lessons (
+  playbook_id VARCHAR(190) NOT NULL,
+  lesson_id   VARCHAR(190) NOT NULL,
+  PRIMARY KEY (playbook_id, lesson_id),
+  KEY idx_playbook_lessons_lesson_id (lesson_id),
+  CONSTRAINT fk_pl_playbook FOREIGN KEY (playbook_id) REFERENCES playbooks(id),
+  CONSTRAINT fk_pl_lesson   FOREIGN KEY (lesson_id)   REFERENCES lessons(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

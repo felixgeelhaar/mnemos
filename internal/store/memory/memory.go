@@ -84,6 +84,7 @@ func openProvider(_ context.Context, dsn string) (*store.Conn, error) {
 		Outcomes:      OutcomeRepository{state: st},
 		Lessons:       LessonRepository{state: st},
 		Decisions:     DecisionRepository{state: st},
+		Playbooks:     PlaybookRepository{state: st},
 		Raw:           st,
 		Closer:        func() error { st.clear(); return nil },
 	}, nil
@@ -128,6 +129,9 @@ type state struct {
 	decisions       map[string]storedDecision
 	decisionOrder   []string
 	decisionBeliefs map[string]map[string]struct{} // decision_id -> set of claim_ids
+	playbooks       map[string]storedPlaybook
+	playbookOrder   []string
+	playbookLessons map[string]map[string]struct{} // playbook_id -> set of lesson_ids
 }
 
 func newState() *state {
@@ -152,6 +156,8 @@ func newState() *state {
 		lessonEvidence:  map[string]map[string]struct{}{},
 		decisions:       map[string]storedDecision{},
 		decisionBeliefs: map[string]map[string]struct{}{},
+		playbooks:       map[string]storedPlaybook{},
+		playbookLessons: map[string]map[string]struct{}{},
 	}
 }
 
@@ -190,6 +196,9 @@ func (s *state) clear() {
 	s.decisions = map[string]storedDecision{}
 	s.decisionOrder = nil
 	s.decisionBeliefs = map[string]map[string]struct{}{}
+	s.playbooks = map[string]storedPlaybook{}
+	s.playbookOrder = nil
+	s.playbookLessons = map[string]map[string]struct{}{}
 }
 
 // actorOr mirrors sqlite.actorOr: an empty actor falls back to the

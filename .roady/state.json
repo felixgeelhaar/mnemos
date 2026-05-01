@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 117,
+  "version": 119,
   "task_states": {
     "task-action-outcome-recording": {
       "status": "done",
@@ -102,11 +102,15 @@
       "elapsed_minutes": 11
     },
     "task-decision-memory": {
-      "status": "in_progress",
+      "status": "done",
       "path": "",
       "owner": "ai-agent",
+      "evidence": [
+        "daeef5a feat(decisions): record agent decisions with belief evidence (Phase 5)"
+      ],
       "started_at": "2026-05-01T11:22:11.704161+02:00",
-      "elapsed_minutes": 0
+      "completed_at": "2026-05-01T11:28:13.893969+02:00",
+      "elapsed_minutes": 6
     },
     "task-documentation-ingestion-pipeline": {
       "status": "done",
@@ -438,8 +442,10 @@
       "elapsed_minutes": 2
     },
     "task-playbook-synthesis": {
-      "status": "pending",
+      "status": "in_progress",
       "path": "",
+      "owner": "ai-agent",
+      "started_at": "2026-05-01T11:28:41.064274+02:00",
       "elapsed_minutes": 0
     },
     "task-project-scoped-database-with-init-subcommand": {
@@ -558,5 +564,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-05-01T11:22:11.704161+02:00"
+  "updated_at": "2026-05-01T11:28:41.064274+02:00"
 }

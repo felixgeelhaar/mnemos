@@ -158,6 +158,26 @@ type Outcome struct {
 	CreatedAt   string `json:"created_at"`
 }
 
+type Playbook struct {
+	ID           string  `json:"id"`
+	Trigger      string  `json:"trigger"`
+	Statement    string  `json:"statement"`
+	ScopeService string  `json:"scope_service"`
+	ScopeEnv     string  `json:"scope_env"`
+	ScopeTeam    string  `json:"scope_team"`
+	StepsJson    string  `json:"steps_json"`
+	Confidence   float64 `json:"confidence"`
+	DerivedAt    string  `json:"derived_at"`
+	LastVerified string  `json:"last_verified"`
+	Source       string  `json:"source"`
+	CreatedBy    string  `json:"created_by"`
+}
+
+type PlaybookLesson struct {
+	PlaybookID string `json:"playbook_id"`
+	LessonID   string `json:"lesson_id"`
+}
+
 type Relationship struct {
 	ID          string `json:"id"`
 	Type        string `json:"type"`

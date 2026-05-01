@@ -266,3 +266,30 @@ CREATE TABLE IF NOT EXISTS decision_beliefs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_decision_beliefs_claim_id ON decision_beliefs(claim_id);
+
+CREATE TABLE IF NOT EXISTS playbooks (
+  id            text             PRIMARY KEY,
+  trigger       text             NOT NULL,
+  statement     text             NOT NULL,
+  scope_service text             NOT NULL DEFAULT '',
+  scope_env     text             NOT NULL DEFAULT '',
+  scope_team    text             NOT NULL DEFAULT '',
+  steps_json    jsonb            NOT NULL DEFAULT '[]'::jsonb,
+  confidence    double precision NOT NULL,
+  derived_at    timestamptz      NOT NULL,
+  last_verified timestamptz,
+  source        text             NOT NULL DEFAULT 'synthesize',
+  created_by    text             NOT NULL DEFAULT '<system>'
+);
+
+CREATE INDEX IF NOT EXISTS idx_playbooks_trigger       ON playbooks(trigger);
+CREATE INDEX IF NOT EXISTS idx_playbooks_scope_service ON playbooks(scope_service);
+CREATE INDEX IF NOT EXISTS idx_playbooks_confidence    ON playbooks(confidence);
+
+CREATE TABLE IF NOT EXISTS playbook_lessons (
+  playbook_id text NOT NULL REFERENCES playbooks(id),
+  lesson_id   text NOT NULL REFERENCES lessons(id),
+  PRIMARY KEY (playbook_id, lesson_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_playbook_lessons_lesson_id ON playbook_lessons(lesson_id);

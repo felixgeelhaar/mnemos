@@ -300,6 +300,22 @@ type DecisionRepository interface {
 	ListBeliefs(ctx context.Context, decisionID string) ([]string, error)
 }
 
+// PlaybookRepository persists synthesised playbooks and their link
+// table back to the lessons that justified them. Playbooks are
+// upsert-by-id so re-synthesis ratchets confidence and last_verified
+// without churning identity.
+type PlaybookRepository interface {
+	Append(ctx context.Context, playbook domain.Playbook) error
+	GetByID(ctx context.Context, id string) (domain.Playbook, error)
+	ListByTrigger(ctx context.Context, trigger string) ([]domain.Playbook, error)
+	ListByService(ctx context.Context, service string) ([]domain.Playbook, error)
+	ListAll(ctx context.Context) ([]domain.Playbook, error)
+	CountAll(ctx context.Context) (int64, error)
+	DeleteAll(ctx context.Context) error
+	AppendLessons(ctx context.Context, playbookID string, lessonIDs []string) error
+	ListLessons(ctx context.Context, playbookID string) ([]string, error)
+}
+
 // EntityRepository persists canonicalised entities and the
 // claim_entities link table. The interface mirrors the SQLite
 // implementation's public surface so cmd/mnemos and internal/pipeline

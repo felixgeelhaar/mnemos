@@ -204,6 +204,8 @@ func main() {
 		handleVerify(args, flags)
 	case "decision":
 		handleDecision(args, flags)
+	case "playbook":
+		handlePlaybook(args, flags)
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command %q\n", command)
 		if suggestion := suggestCommand(command); suggestion != "" {

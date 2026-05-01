@@ -1,13 +1,17 @@
 {
   "project_id": "Mnemos",
-  "version": 111,
+  "version": 113,
   "task_states": {
     "task-action-outcome-recording": {
-      "status": "in_progress",
+      "status": "done",
       "path": "",
       "owner": "ai-agent",
+      "evidence": [
+        "1787048 feat(action+outcome): record operational actions and their outcomes (Phase 2)"
+      ],
       "started_at": "2026-05-01T10:26:20.332954+02:00",
-      "elapsed_minutes": 0
+      "completed_at": "2026-05-01T10:49:30.47828+02:00",
+      "elapsed_minutes": 23
     },
     "task-append-only-event-store": {
       "status": "done",
@@ -212,8 +216,10 @@
       "elapsed_minutes": 24
     },
     "task-lessons-synthesis-engine": {
-      "status": "pending",
+      "status": "in_progress",
       "path": "",
+      "owner": "ai-agent",
+      "started_at": "2026-05-01T10:50:12.255484+02:00",
       "elapsed_minutes": 0
     },
     "task-llm-powered-claim-extraction": {
@@ -540,5 +546,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-05-01T10:26:20.332954+02:00"
+  "updated_at": "2026-05-01T10:50:12.255484+02:00"
 }

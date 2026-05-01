@@ -205,3 +205,34 @@ CREATE TABLE IF NOT EXISTS outcomes (
   KEY idx_outcomes_observed_at (observed_at),
   CONSTRAINT fk_outcomes_action FOREIGN KEY (action_id) REFERENCES actions(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS lessons (
+  id            VARCHAR(190) NOT NULL,
+  statement     TEXT         NOT NULL,
+  scope_service VARCHAR(190) NOT NULL DEFAULT '',
+  scope_env     VARCHAR(64)  NOT NULL DEFAULT '',
+  scope_team    VARCHAR(190) NOT NULL DEFAULT '',
+  trigger       VARCHAR(190) NOT NULL DEFAULT '',
+  kind          VARCHAR(64)  NOT NULL DEFAULT '',
+  confidence    DOUBLE       NOT NULL,
+  derived_at    DATETIME(6)  NOT NULL,
+  last_verified DATETIME(6)  NULL,
+  source        VARCHAR(32)  NOT NULL DEFAULT 'synthesize',
+  created_by    VARCHAR(190) NOT NULL DEFAULT '<system>',
+  PRIMARY KEY (id),
+  KEY idx_lessons_scope_service (scope_service),
+  KEY idx_lessons_scope_env     (scope_env),
+  KEY idx_lessons_scope_team    (scope_team),
+  KEY idx_lessons_kind          (kind),
+  KEY idx_lessons_trigger       (trigger),
+  KEY idx_lessons_confidence    (confidence)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS lesson_evidence (
+  lesson_id VARCHAR(190) NOT NULL,
+  action_id VARCHAR(190) NOT NULL,
+  PRIMARY KEY (lesson_id, action_id),
+  KEY idx_lesson_evidence_action_id (action_id),
+  CONSTRAINT fk_le_lesson FOREIGN KEY (lesson_id) REFERENCES lessons(id),
+  CONSTRAINT fk_le_action FOREIGN KEY (action_id) REFERENCES actions(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

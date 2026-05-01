@@ -257,6 +257,23 @@ type OutcomeRepository interface {
 	DeleteAll(ctx context.Context) error
 }
 
+// LessonRepository persists synthesised lessons and the link table
+// back to the actions that corroborated them. Lessons are upsert-by-id
+// so re-running synthesis with fresh evidence ratchets confidence and
+// last_verified forward without churning identity. Evidence rows are
+// idempotent on (lesson_id, action_id).
+type LessonRepository interface {
+	Append(ctx context.Context, lesson domain.Lesson) error
+	GetByID(ctx context.Context, id string) (domain.Lesson, error)
+	ListByService(ctx context.Context, service string) ([]domain.Lesson, error)
+	ListByTrigger(ctx context.Context, trigger string) ([]domain.Lesson, error)
+	ListAll(ctx context.Context) ([]domain.Lesson, error)
+	CountAll(ctx context.Context) (int64, error)
+	DeleteAll(ctx context.Context) error
+	AppendEvidence(ctx context.Context, lessonID string, actionIDs []string) error
+	ListEvidence(ctx context.Context, lessonID string) ([]string, error)
+}
+
 // EntityRepository persists canonicalised entities and the
 // claim_entities link table. The interface mirrors the SQLite
 // implementation's public surface so cmd/mnemos and internal/pipeline

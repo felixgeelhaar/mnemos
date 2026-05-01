@@ -202,3 +202,33 @@ CREATE TABLE IF NOT EXISTS outcomes (
 CREATE INDEX IF NOT EXISTS idx_outcomes_action_id   ON outcomes(action_id);
 CREATE INDEX IF NOT EXISTS idx_outcomes_result      ON outcomes(result);
 CREATE INDEX IF NOT EXISTS idx_outcomes_observed_at ON outcomes(observed_at);
+
+CREATE TABLE IF NOT EXISTS lessons (
+  id            text        PRIMARY KEY,
+  statement     text        NOT NULL,
+  scope_service text        NOT NULL DEFAULT '',
+  scope_env     text        NOT NULL DEFAULT '',
+  scope_team    text        NOT NULL DEFAULT '',
+  trigger       text        NOT NULL DEFAULT '',
+  kind          text        NOT NULL DEFAULT '',
+  confidence    double precision NOT NULL,
+  derived_at    timestamptz NOT NULL,
+  last_verified timestamptz,
+  source        text        NOT NULL DEFAULT 'synthesize',
+  created_by    text        NOT NULL DEFAULT '<system>'
+);
+
+CREATE INDEX IF NOT EXISTS idx_lessons_scope_service ON lessons(scope_service);
+CREATE INDEX IF NOT EXISTS idx_lessons_scope_env     ON lessons(scope_env);
+CREATE INDEX IF NOT EXISTS idx_lessons_scope_team    ON lessons(scope_team);
+CREATE INDEX IF NOT EXISTS idx_lessons_kind          ON lessons(kind);
+CREATE INDEX IF NOT EXISTS idx_lessons_trigger       ON lessons(trigger);
+CREATE INDEX IF NOT EXISTS idx_lessons_confidence    ON lessons(confidence);
+
+CREATE TABLE IF NOT EXISTS lesson_evidence (
+  lesson_id text NOT NULL REFERENCES lessons(id),
+  action_id text NOT NULL REFERENCES actions(id),
+  PRIMARY KEY (lesson_id, action_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lesson_evidence_action_id ON lesson_evidence(action_id);

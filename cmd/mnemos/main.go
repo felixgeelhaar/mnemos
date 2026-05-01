@@ -196,6 +196,10 @@ func main() {
 		handleAction(args, flags)
 	case "outcome":
 		handleOutcome(args, flags)
+	case "synthesize":
+		handleSynthesize(args, flags)
+	case "lessons":
+		handleLessons(args, flags)
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command %q\n", command)
 		if suggestion := suggestCommand(command); suggestion != "" {

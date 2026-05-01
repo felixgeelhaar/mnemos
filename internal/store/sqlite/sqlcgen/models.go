@@ -105,6 +105,26 @@ type Event struct {
 	CreatedBy     string `json:"created_by"`
 }
 
+type Lesson struct {
+	ID           string  `json:"id"`
+	Statement    string  `json:"statement"`
+	ScopeService string  `json:"scope_service"`
+	ScopeEnv     string  `json:"scope_env"`
+	ScopeTeam    string  `json:"scope_team"`
+	Trigger      string  `json:"trigger"`
+	Kind         string  `json:"kind"`
+	Confidence   float64 `json:"confidence"`
+	DerivedAt    string  `json:"derived_at"`
+	LastVerified string  `json:"last_verified"`
+	Source       string  `json:"source"`
+	CreatedBy    string  `json:"created_by"`
+}
+
+type LessonEvidence struct {
+	LessonID string `json:"lesson_id"`
+	ActionID string `json:"action_id"`
+}
+
 type Outcome struct {
 	ID          string `json:"id"`
 	ActionID    string `json:"action_id"`

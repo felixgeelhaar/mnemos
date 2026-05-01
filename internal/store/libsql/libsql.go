@@ -83,6 +83,7 @@ func openProvider(ctx context.Context, dsn string) (*store.Conn, error) {
 		Jobs:          sqlite.NewCompilationJobRepository(db),
 		Actions:       sqlite.NewActionRepository(db),
 		Outcomes:      sqlite.NewOutcomeRepository(db),
+		Lessons:       sqlite.NewLessonRepository(db),
 		Raw:           db,
 		Closer:        db.Close,
 	}, nil

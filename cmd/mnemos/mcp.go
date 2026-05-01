@@ -23,6 +23,7 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/query"
 	"github.com/felixgeelhaar/mnemos/internal/relate"
 	"github.com/felixgeelhaar/mnemos/internal/store"
+	"github.com/felixgeelhaar/mnemos/internal/synthesize"
 	"github.com/felixgeelhaar/mnemos/internal/workflow"
 )
 
@@ -153,6 +154,27 @@ type mcpRecordOutcomeOutput struct {
 	ID       string `json:"id"`
 	ActionID string `json:"action_id"`
 	Result   string `json:"result"`
+}
+
+type mcpQueryLessonsInput struct {
+	Service string `json:"service,omitempty" jsonschema:"description=Filter to lessons scoped to this service"`
+	Trigger string `json:"trigger,omitempty" jsonschema:"description=Filter to lessons matching this trigger label"`
+}
+
+type mcpQueryLessonsOutput struct {
+	Lessons []domain.Lesson `json:"lessons"`
+}
+
+type mcpSynthesizeInput struct {
+	MinCorroboration int     `json:"minCorroboration,omitempty" jsonschema:"description=Override the minimum cluster size before a lesson is emitted"`
+	MinConfidence    float64 `json:"minConfidence,omitempty" jsonschema:"description=Override the minimum confidence floor in [0, 1]"`
+}
+
+type mcpSynthesizeOutput struct {
+	Clusters       int      `json:"clusters"`
+	LessonsEmitted int      `json:"lessons_emitted"`
+	Skipped        int      `json:"skipped"`
+	LessonIDs      []string `json:"lesson_ids"`
 }
 
 // handleMCP starts the MCP server over stdio. This is a long-lived process
@@ -332,6 +354,22 @@ func handleMCP() {
 		ValidateInput().
 		Handler(func(ctx context.Context, input mcpRecordOutcomeInput) (mcpRecordOutcomeOutput, error) {
 			return mcpRunRecordOutcome(ctx, mcpActor, input)
+		})
+
+	srv.Tool("synthesize_lessons").
+		Description("Run one full synthesis pass over actions+outcomes and emit derived Lessons. Idempotent: re-running on the same data refreshes confidence without churning ids.").
+		OutputSchema(mcpSynthesizeOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpSynthesizeInput) (mcpSynthesizeOutput, error) {
+			return mcpRunSynthesize(ctx, input)
+		})
+
+	srv.Tool("query_lessons").
+		Description("Return validated lessons (synthesised operational knowledge) optionally filtered by service or trigger. Lessons are evidence-backed: each carries the action ids that corroborated it and a confidence in [0, 1].").
+		OutputSchema(mcpQueryLessonsOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpQueryLessonsInput) (mcpQueryLessonsOutput, error) {
+			return mcpRunQueryLessons(ctx, input)
 		})
 
 	srv.Tool("watch_file").
@@ -794,6 +832,48 @@ func mcpRunRecordAction(ctx context.Context, actor string, input mcpRecordAction
 		return mcpRecordActionOutput{}, err
 	}
 	return mcpRecordActionOutput{ID: action.ID, Kind: string(action.Kind), Subject: action.Subject}, nil
+}
+
+func mcpRunQueryLessons(ctx context.Context, input mcpQueryLessonsInput) (mcpQueryLessonsOutput, error) {
+	conn, err := openConn(ctx)
+	if err != nil {
+		return mcpQueryLessonsOutput{}, err
+	}
+	defer closeConn(conn)
+	var ls []domain.Lesson
+	switch {
+	case input.Service != "":
+		ls, err = conn.Lessons.ListByService(ctx, input.Service)
+	case input.Trigger != "":
+		ls, err = conn.Lessons.ListByTrigger(ctx, input.Trigger)
+	default:
+		ls, err = conn.Lessons.ListAll(ctx)
+	}
+	if err != nil {
+		return mcpQueryLessonsOutput{}, err
+	}
+	return mcpQueryLessonsOutput{Lessons: ls}, nil
+}
+
+func mcpRunSynthesize(ctx context.Context, input mcpSynthesizeInput) (mcpSynthesizeOutput, error) {
+	conn, err := openConn(ctx)
+	if err != nil {
+		return mcpSynthesizeOutput{}, err
+	}
+	defer closeConn(conn)
+	res, err := synthesize.Synthesize(ctx, conn.Actions, conn.Outcomes, conn.Lessons, synthesize.Options{
+		MinCorroboration: input.MinCorroboration,
+		MinConfidence:    input.MinConfidence,
+	})
+	if err != nil {
+		return mcpSynthesizeOutput{}, err
+	}
+	return mcpSynthesizeOutput{
+		Clusters:       res.Clusters,
+		LessonsEmitted: res.LessonsEmitted,
+		Skipped:        res.Skipped,
+		LessonIDs:      res.LessonIDs,
+	}, nil
 }
 
 func mcpRunRecordOutcome(ctx context.Context, actor string, input mcpRecordOutcomeInput) (mcpRecordOutcomeOutput, error) {

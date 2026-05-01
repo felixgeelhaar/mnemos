@@ -36,7 +36,7 @@ func (r LessonRepository) Append(ctx context.Context, lesson domain.Lesson) erro
 		lastVerified = lesson.LastVerified.UTC()
 	}
 	_, err := r.db.ExecContext(ctx, `
-INSERT INTO lessons (id, statement, scope_service, scope_env, scope_team, trigger, kind, confidence, derived_at, last_verified, source, created_by)
+INSERT INTO lessons (id, statement, scope_service, scope_env, scope_team, `+"`trigger`"+`, kind, confidence, derived_at, last_verified, source, created_by)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON DUPLICATE KEY UPDATE
   statement = VALUES(statement),
@@ -66,7 +66,7 @@ ON DUPLICATE KEY UPDATE
 // GetByID returns the lesson plus its evidence.
 func (r LessonRepository) GetByID(ctx context.Context, id string) (domain.Lesson, error) {
 	row := r.db.QueryRowContext(ctx, `
-SELECT id, statement, scope_service, scope_env, scope_team, trigger, kind, confidence, derived_at, last_verified, source, created_by
+SELECT id, statement, scope_service, scope_env, scope_team, `+"`trigger`"+`, kind, confidence, derived_at, last_verified, source, created_by
 FROM lessons WHERE id = ?`, id)
 	l, err := scanLessonRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -86,7 +86,7 @@ FROM lessons WHERE id = ?`, id)
 // ListByService returns lessons scoped to the given service.
 func (r LessonRepository) ListByService(ctx context.Context, service string) ([]domain.Lesson, error) {
 	rows, err := r.db.QueryContext(ctx, `
-SELECT id, statement, scope_service, scope_env, scope_team, trigger, kind, confidence, derived_at, last_verified, source, created_by
+SELECT id, statement, scope_service, scope_env, scope_team, `+"`trigger`"+`, kind, confidence, derived_at, last_verified, source, created_by
 FROM lessons WHERE scope_service = ? ORDER BY confidence DESC, derived_at DESC`, service)
 	if err != nil {
 		return nil, fmt.Errorf("list lessons by service: %w", err)
@@ -98,8 +98,8 @@ FROM lessons WHERE scope_service = ? ORDER BY confidence DESC, derived_at DESC`,
 // ListByTrigger returns lessons matching a trigger label.
 func (r LessonRepository) ListByTrigger(ctx context.Context, trigger string) ([]domain.Lesson, error) {
 	rows, err := r.db.QueryContext(ctx, `
-SELECT id, statement, scope_service, scope_env, scope_team, trigger, kind, confidence, derived_at, last_verified, source, created_by
-FROM lessons WHERE trigger = ? ORDER BY confidence DESC, derived_at DESC`, trigger)
+SELECT id, statement, scope_service, scope_env, scope_team, `+"`trigger`"+`, kind, confidence, derived_at, last_verified, source, created_by
+FROM lessons WHERE `+"`trigger`"+` = ? ORDER BY confidence DESC, derived_at DESC`, trigger)
 	if err != nil {
 		return nil, fmt.Errorf("list lessons by trigger: %w", err)
 	}
@@ -110,7 +110,7 @@ FROM lessons WHERE trigger = ? ORDER BY confidence DESC, derived_at DESC`, trigg
 // ListAll returns every lesson, highest confidence first.
 func (r LessonRepository) ListAll(ctx context.Context) ([]domain.Lesson, error) {
 	rows, err := r.db.QueryContext(ctx, `
-SELECT id, statement, scope_service, scope_env, scope_team, trigger, kind, confidence, derived_at, last_verified, source, created_by
+SELECT id, statement, scope_service, scope_env, scope_team, `+"`trigger`"+`, kind, confidence, derived_at, last_verified, source, created_by
 FROM lessons ORDER BY confidence DESC, derived_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list all lessons: %w", err)

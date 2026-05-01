@@ -40,10 +40,10 @@ func (r PlaybookRepository) Append(ctx context.Context, p domain.Playbook) error
 		lastVerified = p.LastVerified.UTC()
 	}
 	_, err = r.db.ExecContext(ctx, `
-INSERT INTO playbooks (id, trigger, statement, scope_service, scope_env, scope_team, steps_json, confidence, derived_at, last_verified, source, created_by)
+INSERT INTO playbooks (id, `+"`trigger`"+`, statement, scope_service, scope_env, scope_team, steps_json, confidence, derived_at, last_verified, source, created_by)
 VALUES (?, ?, ?, ?, ?, ?, CAST(? AS JSON), ?, ?, ?, ?, ?)
 ON DUPLICATE KEY UPDATE
-  trigger = VALUES(trigger),
+  `+"`trigger`"+` = VALUES(`+"`trigger`"+`),
   statement = VALUES(statement),
   steps_json = VALUES(steps_json),
   confidence = VALUES(confidence),
@@ -72,7 +72,7 @@ ON DUPLICATE KEY UPDATE
 // GetByID returns the playbook plus its lesson provenance.
 func (r PlaybookRepository) GetByID(ctx context.Context, id string) (domain.Playbook, error) {
 	row := r.db.QueryRowContext(ctx, `
-SELECT id, trigger, statement, scope_service, scope_env, scope_team, steps_json, confidence, derived_at, last_verified, source, created_by
+SELECT id, `+"`trigger`"+`, statement, scope_service, scope_env, scope_team, steps_json, confidence, derived_at, last_verified, source, created_by
 FROM playbooks WHERE id = ?`, id)
 	p, err := scanPlaybookRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -92,8 +92,8 @@ FROM playbooks WHERE id = ?`, id)
 // ListByTrigger returns playbooks matching a trigger label.
 func (r PlaybookRepository) ListByTrigger(ctx context.Context, trigger string) ([]domain.Playbook, error) {
 	rows, err := r.db.QueryContext(ctx, `
-SELECT id, trigger, statement, scope_service, scope_env, scope_team, steps_json, confidence, derived_at, last_verified, source, created_by
-FROM playbooks WHERE trigger = ? ORDER BY confidence DESC, derived_at DESC`, trigger)
+SELECT id, `+"`trigger`"+`, statement, scope_service, scope_env, scope_team, steps_json, confidence, derived_at, last_verified, source, created_by
+FROM playbooks WHERE `+"`trigger`"+` = ? ORDER BY confidence DESC, derived_at DESC`, trigger)
 	if err != nil {
 		return nil, fmt.Errorf("list playbooks by trigger: %w", err)
 	}
@@ -104,7 +104,7 @@ FROM playbooks WHERE trigger = ? ORDER BY confidence DESC, derived_at DESC`, tri
 // ListByService returns playbooks scoped to the given service.
 func (r PlaybookRepository) ListByService(ctx context.Context, service string) ([]domain.Playbook, error) {
 	rows, err := r.db.QueryContext(ctx, `
-SELECT id, trigger, statement, scope_service, scope_env, scope_team, steps_json, confidence, derived_at, last_verified, source, created_by
+SELECT id, `+"`trigger`"+`, statement, scope_service, scope_env, scope_team, steps_json, confidence, derived_at, last_verified, source, created_by
 FROM playbooks WHERE scope_service = ? ORDER BY confidence DESC, derived_at DESC`, service)
 	if err != nil {
 		return nil, fmt.Errorf("list playbooks by service: %w", err)
@@ -116,7 +116,7 @@ FROM playbooks WHERE scope_service = ? ORDER BY confidence DESC, derived_at DESC
 // ListAll returns every playbook newest-first by confidence.
 func (r PlaybookRepository) ListAll(ctx context.Context) ([]domain.Playbook, error) {
 	rows, err := r.db.QueryContext(ctx, `
-SELECT id, trigger, statement, scope_service, scope_env, scope_team, steps_json, confidence, derived_at, last_verified, source, created_by
+SELECT id, `+"`trigger`"+`, statement, scope_service, scope_env, scope_team, steps_json, confidence, derived_at, last_verified, source, created_by
 FROM playbooks ORDER BY confidence DESC, derived_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list all playbooks: %w", err)

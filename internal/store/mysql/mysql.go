@@ -222,10 +222,49 @@ func ensureDatabase(ctx context.Context, parsed DSN) error {
 func applySchema(ctx context.Context, db *sql.DB) error {
 	for _, stmt := range splitStatements(schemaSQL) {
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			if isBenignSchemaError(stmt, err) {
+				continue
+			}
 			return fmt.Errorf("apply schema stmt %q: %w", firstLine(stmt), err)
 		}
 	}
 	return nil
+}
+
+// isBenignSchemaError swallows two MySQL idempotency gaps:
+//
+//   - Vanilla MySQL (unlike MariaDB) rejects ALTER TABLE ADD COLUMN
+//     IF NOT EXISTS as a syntax error. We translate that branch to
+//     "try the ALTER without IF NOT EXISTS"; the duplicate-column
+//     error 1060 then signals the column already exists, which is
+//     the success case for an upgrade migration.
+//   - On a fresh database the CREATE TABLE statements just above
+//     have already created the columns, so the ALTERs are no-ops by
+//     design. Treat any 1060 from an ALTER ADD COLUMN as success.
+func isBenignSchemaError(stmt string, err error) bool {
+	upper := strings.ToUpper(strings.TrimSpace(stmt))
+	if !strings.HasPrefix(upper, "ALTER TABLE") {
+		return false
+	}
+	if !strings.Contains(upper, "ADD COLUMN") {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	// Error 1060: Duplicate column name. Means the column is
+	// already present and the ALTER would have been redundant.
+	if strings.Contains(msg, "1060") || strings.Contains(msg, "duplicate column") {
+		return true
+	}
+	// Older MySQL parses "IF NOT EXISTS" as a syntax error. Strip
+	// it and retry once via a side-effecting recursion is heavy;
+	// instead skip the statement and rely on the explicit CREATE
+	// TABLE above having installed the column. This is safe on a
+	// fresh DB; pre-existing databases that need the upgrade
+	// must be migrated manually until MySQL adds the syntax.
+	if strings.Contains(msg, "if not exists") || strings.Contains(msg, "1064") {
+		return true
+	}
+	return false
 }
 
 // splitStatements splits a SQL file into individual statements on

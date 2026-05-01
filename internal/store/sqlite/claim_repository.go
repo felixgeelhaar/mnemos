@@ -343,6 +343,22 @@ func (r ClaimRepository) SetValidity(ctx context.Context, claimID string, validT
 	})
 }
 
+// MarkVerified bumps last_verified to verifiedAt and increments
+// verify_count. A non-zero halfLifeDays writes the per-claim
+// override; zero leaves any existing override untouched (the SQL
+// CASE branch keeps the column's prior value).
+func (r ClaimRepository) MarkVerified(ctx context.Context, claimID string, verifiedAt time.Time, halfLifeDays float64) error {
+	if verifiedAt.IsZero() {
+		verifiedAt = time.Now().UTC()
+	}
+	return r.q.MarkClaimVerified(ctx, sqlcgen.MarkClaimVerifiedParams{
+		LastVerified: verifiedAt.UTC().Format(time.RFC3339Nano),
+		Column2:      halfLifeDays,
+		HalfLifeDays: halfLifeDays,
+		ID:           claimID,
+	})
+}
+
 // RecomputeTrust recalculates trust_score for every claim based on its
 // confidence, the count of distinct corroborating events, and the
 // freshness of the most recent evidence. Returns the number of claims
@@ -590,13 +606,20 @@ func (r ClaimRepository) ListAll(ctx context.Context) ([]domain.Claim, error) {
 
 func mapSQLClaim(row sqlcgen.Claim) (domain.Claim, error) {
 	claim := domain.Claim{
-		ID:         row.ID,
-		Text:       row.Text,
-		Type:       domain.ClaimType(row.Type),
-		Confidence: row.Confidence,
-		Status:     domain.ClaimStatus(row.Status),
-		CreatedBy:  row.CreatedBy,
-		TrustScore: row.TrustScore,
+		ID:           row.ID,
+		Text:         row.Text,
+		Type:         domain.ClaimType(row.Type),
+		Confidence:   row.Confidence,
+		Status:       domain.ClaimStatus(row.Status),
+		CreatedBy:    row.CreatedBy,
+		TrustScore:   row.TrustScore,
+		VerifyCount:  int(row.VerifyCount),
+		HalfLifeDays: row.HalfLifeDays,
+	}
+	if lv, perr := parseOptionalTime(row.LastVerified); perr != nil {
+		return domain.Claim{}, fmt.Errorf("parse claim last_verified: %w", perr)
+	} else {
+		claim.LastVerified = lv
 	}
 
 	t, err := time.Parse(time.RFC3339Nano, row.CreatedAt)

@@ -55,6 +55,9 @@ func (f fakeClaimRepo) ListAll(_ context.Context) ([]domain.Claim, error) { retu
 func (f fakeClaimRepo) SetValidity(_ context.Context, _ string, _ time.Time) error {
 	return nil
 }
+func (f fakeClaimRepo) MarkVerified(_ context.Context, _ string, _ time.Time, _ float64) error {
+	return nil
+}
 func (f fakeClaimRepo) RepointEvidence(_ context.Context, _, _ string) error { return nil }
 func (f fakeClaimRepo) DeleteCascade(_ context.Context, _ string) error      { return nil }
 func (f fakeClaimRepo) ListByEventIDs(_ context.Context, _ []string) ([]domain.Claim, error) {

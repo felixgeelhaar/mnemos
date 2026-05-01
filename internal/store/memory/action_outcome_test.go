@@ -96,3 +96,53 @@ func TestOutcomeRepository_AppendListByAction(t *testing.T) {
 		t.Fatalf("source default: want push, got %q", got[0].Source)
 	}
 }
+
+func TestClaimRepository_MarkVerified(t *testing.T) {
+	conn := openTestConn(t)
+	ctx := context.Background()
+	createdAt := time.Date(2026, 4, 15, 9, 0, 0, 0, time.UTC)
+	if err := conn.Claims.Upsert(ctx, []domain.Claim{{
+		ID:         "cl_1",
+		Text:       "deploy succeeded",
+		Type:       domain.ClaimTypeFact,
+		Confidence: 0.8,
+		Status:     domain.ClaimStatusActive,
+		CreatedAt:  createdAt,
+		ValidFrom:  createdAt,
+	}}); err != nil {
+		t.Fatalf("seed claim: %v", err)
+	}
+	verifiedAt := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	if err := conn.Claims.MarkVerified(ctx, "cl_1", verifiedAt, 30); err != nil {
+		t.Fatalf("mark verified: %v", err)
+	}
+	got, err := conn.Claims.ListByIDs(ctx, []string{"cl_1"})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 claim, got %d", len(got))
+	}
+	if !got[0].LastVerified.Equal(verifiedAt.UTC()) {
+		t.Fatalf("LastVerified: want %v, got %v", verifiedAt.UTC(), got[0].LastVerified)
+	}
+	if got[0].VerifyCount != 1 {
+		t.Fatalf("VerifyCount: want 1, got %d", got[0].VerifyCount)
+	}
+	if got[0].HalfLifeDays != 30 {
+		t.Fatalf("HalfLifeDays: want 30, got %v", got[0].HalfLifeDays)
+	}
+
+	// Idempotent re-verification preserves half_life override when caller passes 0.
+	verifiedAt2 := verifiedAt.Add(time.Hour)
+	if err := conn.Claims.MarkVerified(ctx, "cl_1", verifiedAt2, 0); err != nil {
+		t.Fatalf("re-mark: %v", err)
+	}
+	got, _ = conn.Claims.ListByIDs(ctx, []string{"cl_1"})
+	if got[0].VerifyCount != 2 {
+		t.Fatalf("VerifyCount after re-mark: want 2, got %d", got[0].VerifyCount)
+	}
+	if got[0].HalfLifeDays != 30 {
+		t.Fatalf("HalfLifeDays should not be reset by zero arg, got %v", got[0].HalfLifeDays)
+	}
+}

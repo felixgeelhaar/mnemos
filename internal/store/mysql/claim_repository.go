@@ -361,6 +361,29 @@ FROM claim_status_history WHERE claim_id = ? ORDER BY id ASC`, claimID)
 	return out, rows.Err()
 }
 
+// MarkVerified bumps last_verified and increments verify_count.
+// Optional half_life_days override applies when the caller passes a
+// non-zero value.
+func (r ClaimRepository) MarkVerified(ctx context.Context, claimID string, verifiedAt time.Time, halfLifeDays float64) error {
+	if verifiedAt.IsZero() {
+		verifiedAt = time.Now().UTC()
+	}
+	res, err := r.db.ExecContext(ctx, `
+UPDATE claims
+SET last_verified = ?,
+    verify_count = verify_count + 1,
+    half_life_days = CASE WHEN ? > 0 THEN ? ELSE half_life_days END
+WHERE id = ?`, verifiedAt.UTC(), halfLifeDays, halfLifeDays, claimID)
+	if err != nil {
+		return fmt.Errorf("mark verified %s: %w", claimID, err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("claim %s: %w", claimID, sql.ErrNoRows)
+	}
+	return nil
+}
+
 // SetValidity updates the claim's valid_to.
 func (r ClaimRepository) SetValidity(ctx context.Context, claimID string, validTo time.Time) error {
 	var args []any

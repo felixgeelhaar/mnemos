@@ -52,6 +52,14 @@ type ClaimRepository interface {
 	ListStatusHistoryByClaimID(ctx context.Context, claimID string) ([]domain.ClaimStatusTransition, error)
 	SetValidity(ctx context.Context, claimID string, validTo time.Time) error
 
+	// MarkVerified bumps the claim's last_verified to verifiedAt and
+	// increments verify_count by one. Optional halfLifeDays > 0 also
+	// rewrites the claim's per-claim freshness override; pass 0 to
+	// leave whatever override was already on the row in place. Used by
+	// `mnemos verify` and the MCP equivalent so re-confirming a claim
+	// against fresh evidence is a single repository call.
+	MarkVerified(ctx context.Context, claimID string, verifiedAt time.Time, halfLifeDays float64) error
+
 	// RepointEvidence rewrites every claim_evidence row pointing at
 	// fromClaimID to point at toClaimID instead, then deletes the
 	// original rows. Idempotent on the (claim_id, event_id) dedup

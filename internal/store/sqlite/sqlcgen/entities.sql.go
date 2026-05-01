@@ -7,6 +7,7 @@ package sqlcgen
 
 import (
 	"context"
+	"database/sql"
 )
 
 const claimIDsMissingEntityLinks = `-- name: ClaimIDsMissingEntityLinks :many
@@ -131,15 +132,28 @@ WHERE ce.entity_id = ?
 ORDER BY c.created_at ASC
 `
 
-func (q *Queries) ListClaimsByEntityID(ctx context.Context, entityID string) ([]Claim, error) {
+type ListClaimsByEntityIDRow struct {
+	ID         string         `json:"id"`
+	Text       string         `json:"text"`
+	Type       string         `json:"type"`
+	Confidence float64        `json:"confidence"`
+	Status     string         `json:"status"`
+	CreatedAt  string         `json:"created_at"`
+	CreatedBy  string         `json:"created_by"`
+	TrustScore float64        `json:"trust_score"`
+	ValidFrom  string         `json:"valid_from"`
+	ValidTo    sql.NullString `json:"valid_to"`
+}
+
+func (q *Queries) ListClaimsByEntityID(ctx context.Context, entityID string) ([]ListClaimsByEntityIDRow, error) {
 	rows, err := q.db.QueryContext(ctx, listClaimsByEntityID, entityID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Claim
+	var items []ListClaimsByEntityIDRow
 	for rows.Next() {
-		var i Claim
+		var i ListClaimsByEntityIDRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Text,

@@ -36,20 +36,29 @@ CREATE TABLE IF NOT EXISTS events (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS claims (
-  id          VARCHAR(190)     NOT NULL,
-  text        MEDIUMTEXT       NOT NULL,
-  type        VARCHAR(32)      NOT NULL,
-  confidence  DOUBLE           NOT NULL,
-  status      VARCHAR(32)      NOT NULL,
-  created_at  DATETIME(6)      NOT NULL,
-  created_by  VARCHAR(190)     NOT NULL DEFAULT '<system>',
-  trust_score DOUBLE           NOT NULL DEFAULT 0,
-  valid_from  DATETIME(6)      NULL,
-  valid_to    DATETIME(6)      NULL,
+  id             VARCHAR(190)     NOT NULL,
+  text           MEDIUMTEXT       NOT NULL,
+  type           VARCHAR(32)      NOT NULL,
+  confidence     DOUBLE           NOT NULL,
+  status         VARCHAR(32)      NOT NULL,
+  created_at     DATETIME(6)      NOT NULL,
+  created_by     VARCHAR(190)     NOT NULL DEFAULT '<system>',
+  trust_score    DOUBLE           NOT NULL DEFAULT 0,
+  valid_from     DATETIME(6)      NULL,
+  valid_to       DATETIME(6)      NULL,
+  last_verified  DATETIME(6)      NULL,
+  verify_count   INT              NOT NULL DEFAULT 0,
+  half_life_days DOUBLE           NOT NULL DEFAULT 0,
   PRIMARY KEY (id),
   KEY idx_claims_trust_score (trust_score),
   KEY idx_claims_valid_to    (valid_to)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Idempotent column adds for pre-existing databases upgraded from
+-- earlier schema generations. MySQL 8.0.29+ supports IF NOT EXISTS.
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS last_verified  DATETIME(6) NULL;
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS verify_count   INT         NOT NULL DEFAULT 0;
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS half_life_days DOUBLE      NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS entities (
   id              VARCHAR(190) NOT NULL,

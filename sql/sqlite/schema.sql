@@ -25,7 +25,10 @@ CREATE TABLE IF NOT EXISTS claims (
   created_by TEXT NOT NULL DEFAULT '<system>',
   trust_score REAL NOT NULL DEFAULT 0,
   valid_from TEXT NOT NULL DEFAULT '',
-  valid_to TEXT
+  valid_to TEXT,
+  last_verified TEXT NOT NULL DEFAULT '',
+  verify_count INTEGER NOT NULL DEFAULT 0,
+  half_life_days REAL NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_claims_trust_score ON claims(trust_score);

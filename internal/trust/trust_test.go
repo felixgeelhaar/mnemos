@@ -114,3 +114,58 @@ func TestScore_StayInUnitInterval(t *testing.T) {
 		}
 	}
 }
+
+func TestScoreWithHalfLife_DefaultsWhenZero(t *testing.T) {
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	latest := now.AddDate(0, -1, 0)
+	a := Score(0.9, 3, latest, now)
+	b := ScoreWithHalfLife(0.9, 3, latest, now, 0)
+	if math.Abs(a-b) > 1e-9 {
+		t.Fatalf("zero half-life should match Score: %v vs %v", a, b)
+	}
+}
+
+func TestScoreWithHalfLife_CustomDecays(t *testing.T) {
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	latest := now.AddDate(0, 0, -7)
+	short := ScoreWithHalfLife(0.9, 3, latest, now, 7)
+	long := ScoreWithHalfLife(0.9, 3, latest, now, 90)
+	if !(short < long) {
+		t.Fatalf("shorter half-life should produce lower score: short=%v long=%v", short, long)
+	}
+}
+
+func TestIsStale_FreshClaim(t *testing.T) {
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	if IsStale(now, time.Time{}, now, 0, 0) {
+		t.Fatal("zero-age claim must not be stale")
+	}
+}
+
+func TestIsStale_AgedClaimWithDefaultHalfLife(t *testing.T) {
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	old := now.AddDate(-2, 0, 0)
+	if !IsStale(old, time.Time{}, now, 0, 0) {
+		t.Fatalf("two-year-old claim with default half-life should be stale")
+	}
+}
+
+func TestIsStale_LastVerifiedRescuesFreshness(t *testing.T) {
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	old := now.AddDate(-2, 0, 0)
+	verified := now.AddDate(0, 0, -1)
+	if IsStale(old, verified, now, 0, 0) {
+		t.Fatalf("recent verification should refresh freshness even with old evidence")
+	}
+}
+
+func TestIsStale_PerClaimHalfLifeShortensDecay(t *testing.T) {
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	latest := now.AddDate(0, 0, -10)
+	if IsStale(latest, time.Time{}, now, 0, 0) {
+		t.Fatal("default half-life should not flag a 10-day-old claim as stale")
+	}
+	if !IsStale(latest, time.Time{}, now, 5, 0) {
+		t.Fatal("5-day half-life should flag a 10-day-old claim as stale")
+	}
+}

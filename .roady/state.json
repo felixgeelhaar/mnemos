@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 113,
+  "version": 115,
   "task_states": {
     "task-action-outcome-recording": {
       "status": "done",
@@ -216,11 +216,15 @@
       "elapsed_minutes": 24
     },
     "task-lessons-synthesis-engine": {
-      "status": "in_progress",
+      "status": "done",
       "path": "",
       "owner": "ai-agent",
+      "evidence": [
+        "07e0d5a feat(lessons): synthesise validated lessons from action+outcome chains (Phase 3)"
+      ],
       "started_at": "2026-05-01T10:50:12.255484+02:00",
-      "elapsed_minutes": 0
+      "completed_at": "2026-05-01T10:57:28.101994+02:00",
+      "elapsed_minutes": 7
     },
     "task-llm-powered-claim-extraction": {
       "status": "done",
@@ -519,8 +523,10 @@
       "elapsed_minutes": 3
     },
     "task-temporal-validity-hardening": {
-      "status": "pending",
+      "status": "in_progress",
       "path": "",
+      "owner": "ai-agent",
+      "started_at": "2026-05-01T10:59:27.872711+02:00",
       "elapsed_minutes": 0
     },
     "task-web-interface-on-registry-api": {
@@ -546,5 +552,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-05-01T10:50:12.255484+02:00"
+  "updated_at": "2026-05-01T10:59:27.872711+02:00"
 }

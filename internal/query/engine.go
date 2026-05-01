@@ -12,6 +12,7 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/embedding"
 	"github.com/felixgeelhaar/mnemos/internal/llm"
 	"github.com/felixgeelhaar/mnemos/internal/ports"
+	"github.com/felixgeelhaar/mnemos/internal/trust"
 )
 
 type eventLister interface {
@@ -250,6 +251,8 @@ func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents
 		}
 	}
 
+	stale := computeStaleClaims(claims, time.Now().UTC())
+
 	return domain.Answer{
 		AnswerText:       answerText,
 		Claims:           claims,
@@ -257,7 +260,28 @@ func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents
 		TimelineEventIDs: eventIDs,
 		ClaimProvenance:  provenance,
 		ClaimHopDistance: hopDistance,
+		StaleClaimIDs:    stale,
 	}, nil
+}
+
+// computeStaleClaims returns the ids of claims whose freshness factor
+// has decayed below the trust floor. The reference timestamp is the
+// later of LastVerified and ValidFrom (validFrom is set from the
+// source event timestamp by the pipeline, so it doubles as a
+// "latest evidence" proxy when LastVerified is unset). Claims
+// without any usable timestamp are treated as not-stale rather than
+// flagged with a false signal.
+func computeStaleClaims(claims []domain.Claim, now time.Time) []string {
+	if len(claims) == 0 {
+		return nil
+	}
+	out := make([]string, 0)
+	for _, c := range claims {
+		if trust.IsStale(c.ValidFrom, c.LastVerified, now, c.HalfLifeDays, 0) {
+			out = append(out, c.ID)
+		}
+	}
+	return out
 }
 
 // expandClaimsByHops does a BFS through the relationship graph from the

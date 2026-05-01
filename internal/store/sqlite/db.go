@@ -253,7 +253,7 @@ END;
 // currentSchemaVersion is the schema generation this binary expects.
 // Bump whenever a column or table is added; pair the bump with a step
 // in addMissingColumns so existing DBs upgrade in place.
-const currentSchemaVersion = 5
+const currentSchemaVersion = 6
 
 // addMissingColumn declares one defensive column-add. Each entry is
 // idempotent: if the column already exists in the table we skip it,
@@ -290,6 +290,14 @@ var expectedColumns = []addMissingColumn{
 	// still valid".
 	{"claims", "valid_from", "TEXT NOT NULL DEFAULT ''"},
 	{"claims", "valid_to", "TEXT"},
+	// v6 — temporal validity hardening: per-claim last_verified
+	// (RFC3339 string, empty until a `mnemos verify` lands), an
+	// integer verify_count, and a per-claim half_life_days override
+	// of the default in internal/trust. Zero half_life_days falls
+	// back to FreshnessHalfLifeDays at scoring time.
+	{"claims", "last_verified", "TEXT NOT NULL DEFAULT ''"},
+	{"claims", "verify_count", "INTEGER NOT NULL DEFAULT 0"},
+	{"claims", "half_life_days", "REAL NOT NULL DEFAULT 0"},
 }
 
 // v1Columns is the legacy alias kept for any external callers (and for

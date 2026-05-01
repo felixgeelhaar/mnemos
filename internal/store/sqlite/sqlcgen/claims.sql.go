@@ -88,7 +88,7 @@ func (q *Queries) DeleteClaimStatusHistoryByClaimID(ctx context.Context, claimID
 
 const listAllClaims = `-- name: ListAllClaims :many
 SELECT id, text, type, confidence, status, created_at, created_by, trust_score,
-       valid_from, valid_to
+       valid_from, valid_to, last_verified, verify_count, half_life_days
 FROM claims
 ORDER BY created_at ASC
 `
@@ -113,6 +113,9 @@ func (q *Queries) ListAllClaims(ctx context.Context) ([]Claim, error) {
 			&i.TrustScore,
 			&i.ValidFrom,
 			&i.ValidTo,
+			&i.LastVerified,
+			&i.VerifyCount,
+			&i.HalfLifeDays,
 		); err != nil {
 			return nil, err
 		}
@@ -176,6 +179,35 @@ func (q *Queries) ListClaimTrustInputs(ctx context.Context) ([]ListClaimTrustInp
 		return nil, err
 	}
 	return items, nil
+}
+
+const markClaimVerified = `-- name: MarkClaimVerified :exec
+UPDATE claims
+SET last_verified = ?,
+    verify_count = verify_count + 1,
+    half_life_days = CASE WHEN ? > 0 THEN ? ELSE half_life_days END
+WHERE id = ?
+`
+
+type MarkClaimVerifiedParams struct {
+	LastVerified string      `json:"last_verified"`
+	Column2      interface{} `json:"column_2"`
+	HalfLifeDays float64     `json:"half_life_days"`
+	ID           string      `json:"id"`
+}
+
+// Bumps last_verified to the supplied timestamp and increments
+// verify_count by one. The half_life_days COALESCE keeps any
+// existing override when the caller passes 0 (sqlc binds it as the
+// third parameter); a non-zero value replaces the override.
+func (q *Queries) MarkClaimVerified(ctx context.Context, arg MarkClaimVerifiedParams) error {
+	_, err := q.db.ExecContext(ctx, markClaimVerified,
+		arg.LastVerified,
+		arg.Column2,
+		arg.HalfLifeDays,
+		arg.ID,
+	)
+	return err
 }
 
 const setClaimValidity = `-- name: SetClaimValidity :exec

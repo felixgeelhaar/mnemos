@@ -31,16 +31,19 @@ type Agent struct {
 }
 
 type Claim struct {
-	ID         string         `json:"id"`
-	Text       string         `json:"text"`
-	Type       string         `json:"type"`
-	Confidence float64        `json:"confidence"`
-	Status     string         `json:"status"`
-	CreatedAt  string         `json:"created_at"`
-	CreatedBy  string         `json:"created_by"`
-	TrustScore float64        `json:"trust_score"`
-	ValidFrom  string         `json:"valid_from"`
-	ValidTo    sql.NullString `json:"valid_to"`
+	ID           string         `json:"id"`
+	Text         string         `json:"text"`
+	Type         string         `json:"type"`
+	Confidence   float64        `json:"confidence"`
+	Status       string         `json:"status"`
+	CreatedAt    string         `json:"created_at"`
+	CreatedBy    string         `json:"created_by"`
+	TrustScore   float64        `json:"trust_score"`
+	ValidFrom    string         `json:"valid_from"`
+	ValidTo      sql.NullString `json:"valid_to"`
+	LastVerified string         `json:"last_verified"`
+	VerifyCount  int64          `json:"verify_count"`
+	HalfLifeDays float64        `json:"half_life_days"`
 }
 
 type ClaimEntity struct {

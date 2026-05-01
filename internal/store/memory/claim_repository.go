@@ -328,6 +328,30 @@ func (r ClaimRepository) ListStatusHistoryByClaimID(_ context.Context, claimID s
 	return out, nil
 }
 
+// MarkVerified bumps last_verified, increments verify_count, and
+// optionally writes a per-claim half-life override. Returns an error
+// when the claim does not exist (the SQLite UPDATE is silent on a
+// missing row; the in-memory variant is stricter to make tests fail
+// loudly when an id typo escapes).
+func (r ClaimRepository) MarkVerified(_ context.Context, claimID string, verifiedAt time.Time, halfLifeDays float64) error {
+	if verifiedAt.IsZero() {
+		verifiedAt = time.Now().UTC()
+	}
+	r.state.mu.Lock()
+	defer r.state.mu.Unlock()
+	c, ok := r.state.claims[claimID]
+	if !ok {
+		return fmt.Errorf("claim %s: not found", claimID)
+	}
+	c.LastVerified = verifiedAt.UTC()
+	c.VerifyCount++
+	if halfLifeDays > 0 {
+		c.HalfLifeDays = halfLifeDays
+	}
+	r.state.claims[claimID] = c
+	return nil
+}
+
 // SetValidity sets (or, with a zero validTo, clears) the claim's
 // upper validity bound. Returns an error if the claim does not exist.
 func (r ClaimRepository) SetValidity(_ context.Context, claimID string, validTo time.Time) error {

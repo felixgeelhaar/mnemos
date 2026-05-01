@@ -155,30 +155,36 @@ func copyFloatMap(in map[string]float64) map[string]float64 {
 }
 
 type storedClaim struct {
-	ID         string
-	Text       string
-	Type       domain.ClaimType
-	Confidence float64
-	Status     domain.ClaimStatus
-	CreatedAt  time.Time
-	CreatedBy  string
-	TrustScore float64
-	ValidFrom  time.Time
-	ValidTo    time.Time
+	ID           string
+	Text         string
+	Type         domain.ClaimType
+	Confidence   float64
+	Status       domain.ClaimStatus
+	CreatedAt    time.Time
+	CreatedBy    string
+	TrustScore   float64
+	ValidFrom    time.Time
+	ValidTo      time.Time
+	LastVerified time.Time
+	VerifyCount  int
+	HalfLifeDays float64
 }
 
 func (c storedClaim) toDomain() domain.Claim {
 	return domain.Claim{
-		ID:         c.ID,
-		Text:       c.Text,
-		Type:       c.Type,
-		Confidence: c.Confidence,
-		Status:     c.Status,
-		CreatedAt:  c.CreatedAt,
-		CreatedBy:  c.CreatedBy,
-		TrustScore: c.TrustScore,
-		ValidFrom:  c.ValidFrom,
-		ValidTo:    c.ValidTo,
+		ID:           c.ID,
+		Text:         c.Text,
+		Type:         c.Type,
+		Confidence:   c.Confidence,
+		Status:       c.Status,
+		CreatedAt:    c.CreatedAt,
+		CreatedBy:    c.CreatedBy,
+		TrustScore:   c.TrustScore,
+		ValidFrom:    c.ValidFrom,
+		ValidTo:      c.ValidTo,
+		LastVerified: c.LastVerified,
+		VerifyCount:  c.VerifyCount,
+		HalfLifeDays: c.HalfLifeDays,
 	}
 }
 

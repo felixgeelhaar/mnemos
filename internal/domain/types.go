@@ -147,6 +147,22 @@ type Claim struct {
 	// force". Set by `mnemos resolve --supersedes` or by future
 	// auto-supersession detection.
 	ValidTo time.Time
+
+	// LastVerified ticks forward each time `mnemos verify` (or the
+	// MCP equivalent) re-confirms the claim against fresh evidence.
+	// Zero value means "never explicitly verified" — the freshness
+	// factor falls back to the latest evidence event's timestamp.
+	LastVerified time.Time
+	// VerifyCount counts every successful re-verification. Used as a
+	// secondary trust input when ranking near-tied claims.
+	VerifyCount int
+	// HalfLifeDays optionally overrides the global trust freshness
+	// half-life on a per-claim basis. Zero falls back to the
+	// internal/trust default. Useful for facts whose decay profile
+	// genuinely differs from the project default — e.g. a SLA that
+	// becomes stale in 7 days vs an architectural decision good for
+	// a year.
+	HalfLifeDays float64
 }
 
 // IsValidAt reports whether the claim was in force at instant t.
@@ -440,6 +456,13 @@ type Answer struct {
 	// edge from a hop-0 claim, etc. Empty when hop expansion was not
 	// requested.
 	ClaimHopDistance map[string]int
+	// StaleClaimIDs lists claim ids whose freshness factor has
+	// decayed below the trust floor — i.e. the most recent evidence
+	// or last_verified signal is old enough that the claim should
+	// not be acted on without re-verification. Empty when no claims
+	// in the answer are stale; nil when the engine could not compute
+	// staleness (e.g. timestamps absent).
+	StaleClaimIDs []string
 }
 
 // Validate checks that the Claim has a non-empty ID and text, a confidence

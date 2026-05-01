@@ -369,6 +369,30 @@ FROM %s WHERE claim_id = $1 ORDER BY id ASC`, qualify(r.ns, "claim_status_histor
 	return out, rows.Err()
 }
 
+// MarkVerified bumps last_verified, increments verify_count, and
+// optionally rewrites half_life_days when the caller supplies a
+// non-zero override.
+func (r ClaimRepository) MarkVerified(ctx context.Context, claimID string, verifiedAt time.Time, halfLifeDays float64) error {
+	if verifiedAt.IsZero() {
+		verifiedAt = time.Now().UTC()
+	}
+	stmt := fmt.Sprintf(`
+UPDATE %s
+SET last_verified = $1,
+    verify_count = verify_count + 1,
+    half_life_days = CASE WHEN $2 > 0 THEN $2 ELSE half_life_days END
+WHERE id = $3`, qualify(r.ns, "claims"))
+	res, err := r.db.ExecContext(ctx, stmt, verifiedAt.UTC(), halfLifeDays, claimID)
+	if err != nil {
+		return fmt.Errorf("mark verified %s: %w", claimID, err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("claim %s: %w", claimID, sql.ErrNoRows)
+	}
+	return nil
+}
+
 // SetValidity satisfies the corresponding ports method.
 func (r ClaimRepository) SetValidity(ctx context.Context, claimID string, validTo time.Time) error {
 	var args []any

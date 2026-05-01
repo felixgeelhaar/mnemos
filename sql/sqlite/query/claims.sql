@@ -20,6 +20,17 @@ ON CONFLICT(id) DO UPDATE SET
 -- the claim), useful when a resolution is reverted.
 UPDATE claims SET valid_to = ? WHERE id = ?;
 
+-- name: MarkClaimVerified :exec
+-- Bumps last_verified to the supplied timestamp and increments
+-- verify_count by one. The half_life_days COALESCE keeps any
+-- existing override when the caller passes 0 (sqlc binds it as the
+-- third parameter); a non-zero value replaces the override.
+UPDATE claims
+SET last_verified = ?,
+    verify_count = verify_count + 1,
+    half_life_days = CASE WHEN ? > 0 THEN ? ELSE half_life_days END
+WHERE id = ?;
+
 -- name: UpsertClaimEvidence :exec
 INSERT INTO claim_evidence (claim_id, event_id)
 VALUES (?, ?)
@@ -27,7 +38,7 @@ ON CONFLICT(claim_id, event_id) DO NOTHING;
 
 -- name: ListAllClaims :many
 SELECT id, text, type, confidence, status, created_at, created_by, trust_score,
-       valid_from, valid_to
+       valid_from, valid_to, last_verified, verify_count, half_life_days
 FROM claims
 ORDER BY created_at ASC;
 

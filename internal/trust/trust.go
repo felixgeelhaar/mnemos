@@ -39,6 +39,64 @@ const FreshnessFloor = 0.3
 // Logarithmic so adding the 100th source doesn't dwarf the 10th.
 const CorroborationCoefficient = 0.2
 
+// ScoreWithHalfLife is the per-claim variant of Score: it uses the
+// supplied halfLifeDays for the freshness factor, falling back to
+// FreshnessHalfLifeDays when halfLifeDays <= 0. Lets callers honour
+// the per-claim override added in Phase 4 without forcing every
+// existing call site to pass an extra argument.
+func ScoreWithHalfLife(confidence float64, evidenceCount int, latestEvidence, now time.Time, halfLifeDays float64) float64 {
+	c := clamp01(confidence)
+	if evidenceCount < 1 {
+		evidenceCount = 1
+	}
+	hl := halfLifeDays
+	if hl <= 0 {
+		hl = FreshnessHalfLifeDays
+	}
+	corroboration := 1 + math.Log(float64(evidenceCount))*CorroborationCoefficient
+	freshness := freshnessFactorWithHalfLife(latestEvidence, now, hl)
+	return clamp01(c * corroboration * freshness)
+}
+
+// IsStale reports whether a claim's freshness factor has decayed
+// below the supplied threshold (default FreshnessFloor). The age
+// reference is the most recent of LastVerified or latestEvidence,
+// since either signal counts as "we still believe this is true".
+// Zero references return false (no signal => not stale).
+func IsStale(latestEvidence, lastVerified, now time.Time, halfLifeDays, threshold float64) bool {
+	if threshold <= 0 {
+		threshold = FreshnessFloor
+	}
+	hl := halfLifeDays
+	if hl <= 0 {
+		hl = FreshnessHalfLifeDays
+	}
+	ref := latestEvidence
+	if !lastVerified.IsZero() && lastVerified.After(ref) {
+		ref = lastVerified
+	}
+	if ref.IsZero() {
+		return false
+	}
+	f := freshnessFactorWithHalfLife(ref, now, hl)
+	return f <= threshold
+}
+
+func freshnessFactorWithHalfLife(latest, now time.Time, halfLifeDays float64) float64 {
+	if latest.IsZero() {
+		return 1.0
+	}
+	days := now.Sub(latest).Hours() / 24
+	if days <= 0 {
+		return 1.0
+	}
+	f := math.Exp(-days / halfLifeDays)
+	if f < FreshnessFloor {
+		return FreshnessFloor
+	}
+	return f
+}
+
 // Score returns a trust_score in [0, 1] from the three signals.
 // `now` is injected so callers can test against a fixed clock; in
 // production code pass time.Now().UTC().

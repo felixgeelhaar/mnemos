@@ -36,17 +36,26 @@ CREATE INDEX IF NOT EXISTS idx_events_source_input_id ON events(source_input_id)
 CREATE INDEX IF NOT EXISTS idx_events_run_id          ON events(run_id);
 
 CREATE TABLE IF NOT EXISTS claims (
-  id          text             PRIMARY KEY,
-  text        text             NOT NULL,
-  type        text             NOT NULL,
-  confidence  double precision NOT NULL,
-  status      text             NOT NULL,
-  created_at  timestamptz      NOT NULL,
-  created_by  text             NOT NULL DEFAULT '<system>',
-  trust_score double precision NOT NULL DEFAULT 0,
-  valid_from  timestamptz,
-  valid_to    timestamptz
+  id             text             PRIMARY KEY,
+  text           text             NOT NULL,
+  type           text             NOT NULL,
+  confidence     double precision NOT NULL,
+  status         text             NOT NULL,
+  created_at     timestamptz      NOT NULL,
+  created_by     text             NOT NULL DEFAULT '<system>',
+  trust_score    double precision NOT NULL DEFAULT 0,
+  valid_from     timestamptz,
+  valid_to       timestamptz,
+  last_verified  timestamptz,
+  verify_count   integer          NOT NULL DEFAULT 0,
+  half_life_days double precision NOT NULL DEFAULT 0
 );
+
+-- Idempotent column adds for pre-existing namespaces upgraded from
+-- earlier schema generations.
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS last_verified  timestamptz;
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS verify_count   integer          NOT NULL DEFAULT 0;
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS half_life_days double precision NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS idx_claims_trust_score ON claims(trust_score);
 CREATE INDEX IF NOT EXISTS idx_claims_valid_to    ON claims(valid_to);

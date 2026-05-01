@@ -41,11 +41,17 @@ All implementations are behind these interfaces, enabling clean testing and prov
 ### Domain Model (`internal/domain/`)
 
 - **Event** — immutable, append-only knowledge unit (tagged with `run_id` for isolation)
-- **Claim** — derived assertion with type (fact/hypothesis/decision), confidence (0–1), status (active/contested/deprecated)
+- **Claim** — derived assertion with type (fact/hypothesis/decision), confidence (0–1), status (active/contested/deprecated), per-claim `LastVerified` / `VerifyCount` / `HalfLifeDays`, optional `Scope{Service, Env, Team}`
 - **ClaimEvidence** — links claims to source events (≥1 per claim)
-- **Relationship** — claim-to-claim edge: `supports` or `contradicts`
+- **Relationship** — claim-to-claim edge: `supports`, `contradicts`, plus the causal+outcome family from Phase 1 (`causes`, `caused_by`, `action_of`, `outcome_of`, `validates`, `refutes`, `derived_from`)
 - **EmbeddingRecord** — stored vector embedding with metadata
-- **Answer** — query result bundling claims, contradictions, and timeline
+- **Action** — recorded operational change (kind, subject, actor, at, run_id, metadata)
+- **Outcome** — observed result of an Action (action_id, result, metrics map, source push|pull:*)
+- **Lesson** — synthesised operational truth (statement, scope, evidence []ActionID, confidence, trigger, kind, source synthesize|human)
+- **Decision** — agent decision audit record (statement, plan, reasoning, risk_level, beliefs []ClaimID, alternatives, outcome_id)
+- **Playbook** — Praxis-ready response (trigger, scope, steps []PlaybookStep, derived_from_lessons, confidence)
+- **Scope** — multi-tenant filter primitive: {Service, Env, Team} (LessonScope is an alias kept for back-compat)
+- **Answer** — query result bundling claims, contradictions, timeline, hop distances, claim provenance, and `StaleClaimIDs`
 
 All domain types have `Validate()` methods. Contradictions are first-class concepts, not afterthoughts.
 
@@ -56,18 +62,28 @@ All domain types have `Validate()` methods. Contradictions are first-class conce
 | `internal/ingest/` | Multi-format input → events |
 | `internal/parser/` | Input normalization |
 | `internal/extract/` | Rule-based and LLM-powered claim extraction |
-| `internal/relate/` | Pairwise relationship detection with stop-word filtering and overlap thresholds |
-| `internal/query/` | Question answering with ranking (embeddings or token overlap fallback) |
+| `internal/relate/` | Pairwise relationship detection with stop-word filtering and overlap thresholds; `DetectCausal` heuristic + `DetectCausalLLM` LLM augmentation for borderline pairs |
+| `internal/query/` | Question answering with ranking (embeddings or token overlap fallback); scope filter; stale-claim surfacing |
 | `internal/embedding/` | Vector embedding client abstraction (openai, gemini, ollama, openai-compat) |
 | `internal/llm/` | LLM client abstraction (anthropic, openai, gemini, ollama, openai-compat) |
 | `internal/store/sqlite/` | SQLite repositories with foreign key enforcement; sqlc-generated queries in `sqlcgen/` |
 | `internal/pipeline/` | Shared orchestration: `Extractor`, `PersistArtifacts`, `GenerateEmbeddings`, `GenerateClaimEmbeddings` (used by both CLI and MCP) |
 | `internal/workflow/` | Job runner with statekit state machine, retry, and timeout |
+| `internal/synthesize/` | Cluster action→outcome chains into Lessons; cluster Lessons by trigger into Playbooks |
+| `internal/markdown/` | Round-trip Lessons + Playbooks to YAML-frontmatter markdown for the human-editable layer |
+| `internal/adapters/outcomes/` | Pull-based Outcome sources; first impl: Prometheus instant-query adapter |
 
 ### Entrypoints
 
-- `cmd/mnemos/` — CLI with subcommands: `ingest`, `extract` (supports `--run`), `relate`, `process`, `query`, `metrics`
-- `mnemos mcp` — MCP server subcommand exposing `query_knowledge`, `process_text`, and `knowledge_metrics` over stdio
+- `cmd/mnemos/` — CLI subcommands:
+  - Core: `ingest`, `extract` (supports `--run`), `relate`, `process`, `query`, `metrics`, `verify`
+  - Phase 2: `action record/list`, `outcome record/list`
+  - Phase 3: `synthesize`, `lessons [--service|--trigger]`
+  - Phase 5: `decision record/list/show/attach-outcome`
+  - Phase 6: `playbook synthesize/list/show/<trigger>`
+  - Phase 7: `export --kind=lesson|playbook`, `import <file.md>`, `history --kind=lesson|playbook`
+- `mnemos mcp` — MCP server exposing `query_knowledge`, `process_text`, `knowledge_metrics`, `record_action`, `record_outcome`, `synthesize_lessons`, `query_lessons`, `record_decision`, `query_decisions`, `query_playbook`, `synthesize_playbooks`, `list_claims`, `list_decisions`, `list_contradictions`, `watch_file`, `ingest_git_log`, `ingest_git_prs` over stdio
+- `mnemos serve [--grpc-port N]` — HTTP REST + optional gRPC API alongside
 
 ### Internal Libraries (owned by same author)
 

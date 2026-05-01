@@ -157,7 +157,47 @@ mnemos mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over
 | `mnemos recompute-trust` | Rebuild `trust_score` for every claim (confidence × corroboration × freshness) |
 | `mnemos dedup [--threshold T] [--force]` | Merge near-duplicate claims by embedding cosine similarity (dry-run by default) |
 | `mnemos query --min-trust X "..."` | Only return claims whose `trust_score` ≥ X |
+| `mnemos query --kind causes,validates "..."` | Restrict hop expansion to specific edge kinds (causes, caused_by, supports, contradicts, validates, refutes, action_of, outcome_of, derived_from) |
+| `mnemos query --service X --env prod --team Y "..."` | Multi-tenant scope filter on the answer claims |
 | `mnemos process --no-relate ...` | Skip the relate stage for fast ingest; relate later in batch |
+| `mnemos verify <claim-id> [--half-life-days N]` | Bump `last_verified` and `verify_count`; optional per-claim freshness override |
+
+### Action + Outcome (v0.13+)
+
+Record real operational changes and their observed results so the synthesis layer can derive Lessons.
+
+| Command | Description |
+|---------|-------------|
+| `mnemos action record --kind <K> --subject <name> [--actor X] [--run R]` | Record an operational action (deploy, rollback, scale, ...) |
+| `mnemos action list [--subject X\|--run R]` | List recorded actions |
+| `mnemos outcome record --action <id> --result <success\|failure\|partial\|unknown> [--metric k=v]...` | Attach an observed outcome to an action |
+| `mnemos outcome list [--action <id>]` | List outcomes |
+
+### Synthesis: Lessons + Playbooks (v0.13+)
+
+| Command | Description |
+|---------|-------------|
+| `mnemos synthesize [--min-corroboration N] [--min-confidence X]` | Cluster action→outcome chains into Lessons |
+| `mnemos lessons [--service X\|--trigger T]` | List validated lessons |
+| `mnemos playbook synthesize` | Derive Playbooks from Lessons sharing a trigger |
+| `mnemos playbook list [--service X]` / `mnemos playbook <trigger>` | Browse playbooks |
+| `mnemos playbook show <id>` | Full playbook with steps |
+
+### Decisions (v0.13+)
+
+| Command | Description |
+|---------|-------------|
+| `mnemos decision record --statement "..." --risk <low\|medium\|high\|critical> [--belief cl_id]... [--alternative "..."]...` | Record an agent decision with its belief evidence |
+| `mnemos decision list [--risk X]` / `mnemos decision show <id>` | Audit recorded decisions |
+| `mnemos decision attach-outcome <decision-id> <outcome-id>` | Wire an outcome onto a previously recorded decision |
+
+### Markdown round-trip + history (v0.13+)
+
+| Command | Description |
+|---------|-------------|
+| `mnemos export --kind <lesson\|playbook> --id <id> [--out file.md]` | Export to YAML-frontmatter markdown |
+| `mnemos import <file.md>` | Re-upsert a hand-edited markdown file |
+| `mnemos history --kind <lesson\|playbook> --id <id>` | List prior snapshots from `*_versions` |
 
 ### Claim lifecycle
 
@@ -474,6 +514,21 @@ Phase 1: Developer Primitive — Available now.
 - Embeddings for semantic search
 - CLI + MCP server entrypoints
 - 78 extraction eval cases
+
+### Evidence + Causality + Outcomes (v0.13+)
+
+Mnemos has shipped a self-learning loop on top of the evidence layer:
+
+- **Causal edges** — `causes`, `caused_by`, `action_of`, `outcome_of`, `validates`, `refutes`, `derived_from` extend the relationship graph beyond logical agreement. `relate.DetectCausal` infers these from event-time + shared-entity signals; the optional `relate.DetectCausalLLM` augments borderline pairs via LLM disambiguation.
+- **Action + Outcome recording** — `mnemos action record` / `mnemos outcome record` capture operational changes and their observed metrics. The Prometheus pull adapter (`internal/adapters/outcomes/prometheus.go`) scrapes metrics and produces Outcomes automatically.
+- **Lessons synthesis** — `mnemos synthesize` clusters action→outcome chains into validated Lessons (confidence = corroboration × consistency × recency).
+- **Playbooks** — `mnemos playbook synthesize` derives steps-only operational intelligence from Lesson clusters; Praxis (or any execution layer) consumes them.
+- **Decisions** — `mnemos decision record` audits agent reasoning with belief claims, alternatives, and risk level; outcomes attach later via `decision attach-outcome`.
+- **Temporal hardening** — per-claim `last_verified`, `verify_count`, `half_life_days`. `mnemos verify` re-confirms a claim; `Answer.StaleClaimIDs` surfaces decay below the trust floor.
+- **Multi-tenant scope** — `Scope{Service, Env, Team}` on Claims, Lessons, Decisions, Playbooks; `mnemos query --service X --env prod` filters the answer.
+- **Human-editable layer** — `mnemos export` + `mnemos import` round-trip Lessons/Playbooks to Git-friendly YAML+markdown; `mnemos history` lists snapshots from system-versioned `*_versions` tables.
+
+Marketing claim: *"evidence-based memory that learns from actions over time, with provable causality, scoped multi-tenancy, and a human-editable corrections loop."*
 
 ## Contributing
 

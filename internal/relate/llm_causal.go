@@ -2,8 +2,6 @@ package relate
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -169,15 +167,4 @@ func formatTimeOrUnknown(t time.Time) string {
 		return "unknown"
 	}
 	return t.UTC().Format(time.RFC3339)
-}
-
-// causalEdgeID is exported so callers that want to round-trip ids
-// through their own testing harness can. Mirrors newRelationshipID
-// shape.
-func causalEdgeID() (string, error) {
-	buf := make([]byte, 8)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	return "rl_" + hex.EncodeToString(buf), nil
 }

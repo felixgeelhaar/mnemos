@@ -177,6 +177,31 @@ type mcpSynthesizeOutput struct {
 	LessonIDs      []string `json:"lesson_ids"`
 }
 
+type mcpRecordDecisionInput struct {
+	Statement    string   `json:"statement" jsonschema:"required,description=Short statement of the decision being recorded"`
+	Plan         string   `json:"plan,omitempty" jsonschema:"description=Plan or chosen course of action"`
+	Reasoning    string   `json:"reasoning,omitempty" jsonschema:"description=Free-form rationale for choosing this plan"`
+	RiskLevel    string   `json:"riskLevel" jsonschema:"required,description=low | medium | high | critical"`
+	Beliefs      []string `json:"beliefs,omitempty" jsonschema:"description=Claim ids that justified this decision"`
+	Alternatives []string `json:"alternatives,omitempty" jsonschema:"description=Plans considered but not chosen"`
+	OutcomeID    string   `json:"outcomeId,omitempty" jsonschema:"description=Optional Outcome id when the result is already known"`
+	ChosenAt     string   `json:"chosenAt,omitempty" jsonschema:"description=When the decision was made (RFC3339 / 'now', defaults to now)"`
+}
+
+type mcpRecordDecisionOutput struct {
+	ID        string `json:"id"`
+	Statement string `json:"statement"`
+	RiskLevel string `json:"risk_level"`
+}
+
+type mcpQueryDecisionsInput struct {
+	RiskLevel string `json:"riskLevel,omitempty" jsonschema:"description=Filter to decisions matching this risk level"`
+}
+
+type mcpQueryDecisionsOutput struct {
+	Decisions []domain.Decision `json:"decisions"`
+}
+
 // handleMCP starts the MCP server over stdio. This is a long-lived process
 // that blocks until the connection is closed.
 func handleMCP() {
@@ -370,6 +395,22 @@ func handleMCP() {
 		ValidateInput().
 		Handler(func(ctx context.Context, input mcpQueryLessonsInput) (mcpQueryLessonsOutput, error) {
 			return mcpRunQueryLessons(ctx, input)
+		})
+
+	srv.Tool("record_decision").
+		Description("Record a decision: the belief claims that justified it, the plan chosen, the alternatives considered, and the risk level. Optional outcomeId attaches an already-observed Outcome.").
+		OutputSchema(mcpRecordDecisionOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpRecordDecisionInput) (mcpRecordDecisionOutput, error) {
+			return mcpRunRecordDecision(ctx, mcpActor, input)
+		})
+
+	srv.Tool("query_decisions").
+		Description("Return recorded decisions newest-first, optionally filtered by risk level. Each decision carries its belief claim ids, alternatives, and (when attached) the linked Outcome.").
+		OutputSchema(mcpQueryDecisionsOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpQueryDecisionsInput) (mcpQueryDecisionsOutput, error) {
+			return mcpRunQueryDecisions(ctx, input)
 		})
 
 	srv.Tool("watch_file").
@@ -832,6 +873,60 @@ func mcpRunRecordAction(ctx context.Context, actor string, input mcpRecordAction
 		return mcpRecordActionOutput{}, err
 	}
 	return mcpRecordActionOutput{ID: action.ID, Kind: string(action.Kind), Subject: action.Subject}, nil
+}
+
+func mcpRunRecordDecision(ctx context.Context, actor string, input mcpRecordDecisionInput) (mcpRecordDecisionOutput, error) {
+	chosenAt := time.Now().UTC()
+	if strings.TrimSpace(input.ChosenAt) != "" {
+		t, err := parseTimeArg(input.ChosenAt)
+		if err != nil {
+			return mcpRecordDecisionOutput{}, fmt.Errorf("chosenAt: %w", err)
+		}
+		chosenAt = t
+	}
+	id, err := newID("dc_")
+	if err != nil {
+		return mcpRecordDecisionOutput{}, fmt.Errorf("generate decision id: %w", err)
+	}
+	d := domain.Decision{
+		ID:           id,
+		Statement:    input.Statement,
+		Plan:         input.Plan,
+		Reasoning:    input.Reasoning,
+		RiskLevel:    domain.RiskLevel(input.RiskLevel),
+		Beliefs:      input.Beliefs,
+		Alternatives: input.Alternatives,
+		OutcomeID:    input.OutcomeID,
+		ChosenAt:     chosenAt,
+		CreatedBy:    actor,
+	}
+	conn, err := openConn(ctx)
+	if err != nil {
+		return mcpRecordDecisionOutput{}, err
+	}
+	defer closeConn(conn)
+	if err := conn.Decisions.Append(ctx, d); err != nil {
+		return mcpRecordDecisionOutput{}, err
+	}
+	return mcpRecordDecisionOutput{ID: d.ID, Statement: d.Statement, RiskLevel: string(d.RiskLevel)}, nil
+}
+
+func mcpRunQueryDecisions(ctx context.Context, input mcpQueryDecisionsInput) (mcpQueryDecisionsOutput, error) {
+	conn, err := openConn(ctx)
+	if err != nil {
+		return mcpQueryDecisionsOutput{}, err
+	}
+	defer closeConn(conn)
+	var ds []domain.Decision
+	if input.RiskLevel != "" {
+		ds, err = conn.Decisions.ListByRiskLevel(ctx, input.RiskLevel)
+	} else {
+		ds, err = conn.Decisions.ListAll(ctx)
+	}
+	if err != nil {
+		return mcpQueryDecisionsOutput{}, err
+	}
+	return mcpQueryDecisionsOutput{Decisions: ds}, nil
 }
 
 func mcpRunQueryLessons(ctx context.Context, input mcpQueryLessonsInput) (mcpQueryLessonsOutput, error) {

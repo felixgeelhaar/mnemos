@@ -83,6 +83,7 @@ func openProvider(_ context.Context, dsn string) (*store.Conn, error) {
 		Actions:       ActionRepository{state: st},
 		Outcomes:      OutcomeRepository{state: st},
 		Lessons:       LessonRepository{state: st},
+		Decisions:     DecisionRepository{state: st},
 		Raw:           st,
 		Closer:        func() error { st.clear(); return nil },
 	}, nil
@@ -98,54 +99,59 @@ func openProvider(_ context.Context, dsn string) (*store.Conn, error) {
 type state struct {
 	mu sync.RWMutex
 
-	events         map[string]storedEvent
-	eventOrder     []string // insertion order, for ListAll
-	claims         map[string]storedClaim
-	claimOrder     []string
-	statusHistory  map[string][]storedTransition  // claim_id -> transitions in insertion order
-	evidence       map[string]map[string]struct{} // claim_id -> set of event_ids (de-duped)
-	relationships  map[string]storedRelationship
-	embeddings     map[embeddingKey]storedEmbedding
-	users          map[string]storedUser
-	userOrder      []string
-	usersByEmail   map[string]string // email -> user_id
-	revokedTokens  map[string]storedRevokedToken
-	agents         map[string]storedAgent
-	agentOrder     []string
-	entities       map[string]storedEntity
-	entityOrder    []string                  // insertion order, for List
-	entityByKey    map[entityKey]string      // (normalized_name, type) -> entity_id, dedup index
-	claimEntities  map[claimEntityKey]string // (claim_id, entity_id, role) -> role, dedup index
-	jobs           map[string]storedCompilationJob
-	actions        map[string]storedAction
-	actionOrder    []string
-	outcomes       map[string]storedOutcome
-	outcomeOrder   []string
-	lessons        map[string]storedLesson
-	lessonOrder    []string
-	lessonEvidence map[string]map[string]struct{} // lesson_id -> set of action_ids
+	events          map[string]storedEvent
+	eventOrder      []string // insertion order, for ListAll
+	claims          map[string]storedClaim
+	claimOrder      []string
+	statusHistory   map[string][]storedTransition  // claim_id -> transitions in insertion order
+	evidence        map[string]map[string]struct{} // claim_id -> set of event_ids (de-duped)
+	relationships   map[string]storedRelationship
+	embeddings      map[embeddingKey]storedEmbedding
+	users           map[string]storedUser
+	userOrder       []string
+	usersByEmail    map[string]string // email -> user_id
+	revokedTokens   map[string]storedRevokedToken
+	agents          map[string]storedAgent
+	agentOrder      []string
+	entities        map[string]storedEntity
+	entityOrder     []string                  // insertion order, for List
+	entityByKey     map[entityKey]string      // (normalized_name, type) -> entity_id, dedup index
+	claimEntities   map[claimEntityKey]string // (claim_id, entity_id, role) -> role, dedup index
+	jobs            map[string]storedCompilationJob
+	actions         map[string]storedAction
+	actionOrder     []string
+	outcomes        map[string]storedOutcome
+	outcomeOrder    []string
+	lessons         map[string]storedLesson
+	lessonOrder     []string
+	lessonEvidence  map[string]map[string]struct{} // lesson_id -> set of action_ids
+	decisions       map[string]storedDecision
+	decisionOrder   []string
+	decisionBeliefs map[string]map[string]struct{} // decision_id -> set of claim_ids
 }
 
 func newState() *state {
 	return &state{
-		events:         map[string]storedEvent{},
-		claims:         map[string]storedClaim{},
-		statusHistory:  map[string][]storedTransition{},
-		evidence:       map[string]map[string]struct{}{},
-		relationships:  map[string]storedRelationship{},
-		embeddings:     map[embeddingKey]storedEmbedding{},
-		users:          map[string]storedUser{},
-		usersByEmail:   map[string]string{},
-		revokedTokens:  map[string]storedRevokedToken{},
-		agents:         map[string]storedAgent{},
-		entities:       map[string]storedEntity{},
-		entityByKey:    map[entityKey]string{},
-		claimEntities:  map[claimEntityKey]string{},
-		jobs:           map[string]storedCompilationJob{},
-		actions:        map[string]storedAction{},
-		outcomes:       map[string]storedOutcome{},
-		lessons:        map[string]storedLesson{},
-		lessonEvidence: map[string]map[string]struct{}{},
+		events:          map[string]storedEvent{},
+		claims:          map[string]storedClaim{},
+		statusHistory:   map[string][]storedTransition{},
+		evidence:        map[string]map[string]struct{}{},
+		relationships:   map[string]storedRelationship{},
+		embeddings:      map[embeddingKey]storedEmbedding{},
+		users:           map[string]storedUser{},
+		usersByEmail:    map[string]string{},
+		revokedTokens:   map[string]storedRevokedToken{},
+		agents:          map[string]storedAgent{},
+		entities:        map[string]storedEntity{},
+		entityByKey:     map[entityKey]string{},
+		claimEntities:   map[claimEntityKey]string{},
+		jobs:            map[string]storedCompilationJob{},
+		actions:         map[string]storedAction{},
+		outcomes:        map[string]storedOutcome{},
+		lessons:         map[string]storedLesson{},
+		lessonEvidence:  map[string]map[string]struct{}{},
+		decisions:       map[string]storedDecision{},
+		decisionBeliefs: map[string]map[string]struct{}{},
 	}
 }
 
@@ -181,6 +187,9 @@ func (s *state) clear() {
 	s.lessons = map[string]storedLesson{}
 	s.lessonOrder = nil
 	s.lessonEvidence = map[string]map[string]struct{}{}
+	s.decisions = map[string]storedDecision{}
+	s.decisionOrder = nil
+	s.decisionBeliefs = map[string]map[string]struct{}{}
 }
 
 // actorOr mirrors sqlite.actorOr: an empty actor falls back to the

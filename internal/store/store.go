@@ -42,6 +42,7 @@ type Conn struct {
 	Actions       ports.ActionRepository
 	Outcomes      ports.OutcomeRepository
 	Lessons       ports.LessonRepository
+	Decisions     ports.DecisionRepository
 
 	// Raw is the provider's underlying handle (e.g. *sql.DB for
 	// SQLite/Postgres, an in-memory state struct for memory). It is

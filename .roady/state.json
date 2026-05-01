@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 115,
+  "version": 117,
   "task_states": {
     "task-action-outcome-recording": {
       "status": "done",
@@ -102,8 +102,10 @@
       "elapsed_minutes": 11
     },
     "task-decision-memory": {
-      "status": "pending",
+      "status": "in_progress",
       "path": "",
+      "owner": "ai-agent",
+      "started_at": "2026-05-01T11:22:11.704161+02:00",
       "elapsed_minutes": 0
     },
     "task-documentation-ingestion-pipeline": {
@@ -523,11 +525,15 @@
       "elapsed_minutes": 3
     },
     "task-temporal-validity-hardening": {
-      "status": "in_progress",
+      "status": "done",
       "path": "",
       "owner": "ai-agent",
+      "evidence": [
+        "45e6ffb feat(temporal): per-claim verification + stale surfacing (Phase 4)"
+      ],
       "started_at": "2026-05-01T10:59:27.872711+02:00",
-      "elapsed_minutes": 0
+      "completed_at": "2026-05-01T11:21:41.947498+02:00",
+      "elapsed_minutes": 22
     },
     "task-web-interface-on-registry-api": {
       "status": "done",
@@ -552,5 +558,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-05-01T10:59:27.872711+02:00"
+  "updated_at": "2026-05-01T11:22:11.704161+02:00"
 }

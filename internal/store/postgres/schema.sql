@@ -241,3 +241,28 @@ CREATE TABLE IF NOT EXISTS lesson_evidence (
 );
 
 CREATE INDEX IF NOT EXISTS idx_lesson_evidence_action_id ON lesson_evidence(action_id);
+
+CREATE TABLE IF NOT EXISTS decisions (
+  id                text        PRIMARY KEY,
+  statement         text        NOT NULL,
+  plan              text        NOT NULL DEFAULT '',
+  reasoning         text        NOT NULL DEFAULT '',
+  risk_level        text        NOT NULL,
+  alternatives_json jsonb       NOT NULL DEFAULT '[]'::jsonb,
+  outcome_id        text        NOT NULL DEFAULT '',
+  chosen_at         timestamptz NOT NULL,
+  created_by        text        NOT NULL DEFAULT '<system>',
+  created_at        timestamptz NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_decisions_chosen_at  ON decisions(chosen_at);
+CREATE INDEX IF NOT EXISTS idx_decisions_risk_level ON decisions(risk_level);
+CREATE INDEX IF NOT EXISTS idx_decisions_outcome_id ON decisions(outcome_id);
+
+CREATE TABLE IF NOT EXISTS decision_beliefs (
+  decision_id text NOT NULL REFERENCES decisions(id),
+  claim_id    text NOT NULL REFERENCES claims(id),
+  PRIMARY KEY (decision_id, claim_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_decision_beliefs_claim_id ON decision_beliefs(claim_id);

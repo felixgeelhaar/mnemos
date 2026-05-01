@@ -146,3 +146,62 @@ func TestClaimRepository_MarkVerified(t *testing.T) {
 		t.Fatalf("HalfLifeDays should not be reset by zero arg, got %v", got[0].HalfLifeDays)
 	}
 }
+
+func TestDecisionRepository_AppendListAttachOutcome(t *testing.T) {
+	conn := openTestConn(t)
+	ctx := context.Background()
+	chosen := time.Date(2026, 4, 30, 10, 0, 0, 0, time.UTC)
+
+	// Seed beliefs as claims so FK-style listing works.
+	if err := conn.Claims.Upsert(ctx, []domain.Claim{{
+		ID: "cl_a", Text: "deploys often regress payments", Type: domain.ClaimTypeFact,
+		Confidence: 0.7, Status: domain.ClaimStatusActive, CreatedAt: chosen, ValidFrom: chosen,
+	}, {
+		ID: "cl_b", Text: "rollback recovers latency in <5min", Type: domain.ClaimTypeFact,
+		Confidence: 0.85, Status: domain.ClaimStatusActive, CreatedAt: chosen, ValidFrom: chosen,
+	}}); err != nil {
+		t.Fatalf("seed claims: %v", err)
+	}
+
+	d := domain.Decision{
+		ID: "dc_1", Statement: "Roll back payments deploy", Plan: "rollback to v1.41",
+		Reasoning: "high latency correlated with deploy", RiskLevel: domain.RiskLevelHigh,
+		Beliefs: []string{"cl_a", "cl_b"}, Alternatives: []string{"hotfix", "wait-and-see"},
+		ChosenAt: chosen,
+	}
+	if err := conn.Decisions.Append(ctx, d); err != nil {
+		t.Fatalf("append decision: %v", err)
+	}
+
+	got, err := conn.Decisions.GetByID(ctx, "dc_1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(got.Beliefs) != 2 {
+		t.Fatalf("want 2 beliefs, got %d", len(got.Beliefs))
+	}
+	if len(got.Alternatives) != 2 {
+		t.Fatalf("want 2 alternatives, got %d", len(got.Alternatives))
+	}
+	if got.RiskLevel != domain.RiskLevelHigh {
+		t.Fatalf("risk: want high, got %s", got.RiskLevel)
+	}
+
+	// Attach an outcome and confirm round-trip.
+	if err := conn.Decisions.AttachOutcome(ctx, "dc_1", "oc_xyz"); err != nil {
+		t.Fatalf("attach outcome: %v", err)
+	}
+	got, _ = conn.Decisions.GetByID(ctx, "dc_1")
+	if got.OutcomeID != "oc_xyz" {
+		t.Fatalf("outcome_id: want oc_xyz, got %q", got.OutcomeID)
+	}
+
+	// ListByRiskLevel.
+	high, err := conn.Decisions.ListByRiskLevel(ctx, "high")
+	if err != nil {
+		t.Fatalf("list by risk: %v", err)
+	}
+	if len(high) != 1 {
+		t.Fatalf("want 1 high-risk decision, got %d", len(high))
+	}
+}

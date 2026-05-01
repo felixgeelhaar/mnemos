@@ -282,6 +282,24 @@ type LessonRepository interface {
 	ListEvidence(ctx context.Context, lessonID string) ([]string, error)
 }
 
+// DecisionRepository persists records of agent (or human) decisions:
+// the belief claims that justified a chosen plan, the alternatives
+// that were considered, and — once observed — the outcome that
+// validated or refuted the bet. Decisions are upsert-by-id so
+// retrying with stronger evidence rewrites the row without churning
+// the original chosen_at moment.
+type DecisionRepository interface {
+	Append(ctx context.Context, decision domain.Decision) error
+	GetByID(ctx context.Context, id string) (domain.Decision, error)
+	ListAll(ctx context.Context) ([]domain.Decision, error)
+	ListByRiskLevel(ctx context.Context, level string) ([]domain.Decision, error)
+	AttachOutcome(ctx context.Context, decisionID, outcomeID string) error
+	CountAll(ctx context.Context) (int64, error)
+	DeleteAll(ctx context.Context) error
+	AppendBeliefs(ctx context.Context, decisionID string, claimIDs []string) error
+	ListBeliefs(ctx context.Context, decisionID string) ([]string, error)
+}
+
 // EntityRepository persists canonicalised entities and the
 // claim_entities link table. The interface mirrors the SQLite
 // implementation's public surface so cmd/mnemos and internal/pipeline

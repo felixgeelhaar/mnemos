@@ -77,6 +77,24 @@ type CompilationJob struct {
 	Error     string `json:"error"`
 }
 
+type Decision struct {
+	ID               string `json:"id"`
+	Statement        string `json:"statement"`
+	Plan             string `json:"plan"`
+	Reasoning        string `json:"reasoning"`
+	RiskLevel        string `json:"risk_level"`
+	AlternativesJson string `json:"alternatives_json"`
+	OutcomeID        string `json:"outcome_id"`
+	ChosenAt         string `json:"chosen_at"`
+	CreatedBy        string `json:"created_by"`
+	CreatedAt        string `json:"created_at"`
+}
+
+type DecisionBelief struct {
+	DecisionID string `json:"decision_id"`
+	ClaimID    string `json:"claim_id"`
+}
+
 type Embedding struct {
 	EntityID   string `json:"entity_id"`
 	EntityType string `json:"entity_type"`

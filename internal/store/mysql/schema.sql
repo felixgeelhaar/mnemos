@@ -245,3 +245,29 @@ CREATE TABLE IF NOT EXISTS lesson_evidence (
   CONSTRAINT fk_le_lesson FOREIGN KEY (lesson_id) REFERENCES lessons(id),
   CONSTRAINT fk_le_action FOREIGN KEY (action_id) REFERENCES actions(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS decisions (
+  id                VARCHAR(190) NOT NULL,
+  statement         TEXT         NOT NULL,
+  plan              TEXT         NOT NULL,
+  reasoning         TEXT         NOT NULL,
+  risk_level        VARCHAR(32)  NOT NULL,
+  alternatives_json JSON         NOT NULL,
+  outcome_id        VARCHAR(190) NOT NULL DEFAULT '',
+  chosen_at         DATETIME(6)  NOT NULL,
+  created_by        VARCHAR(190) NOT NULL DEFAULT '<system>',
+  created_at        DATETIME(6)  NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_decisions_chosen_at  (chosen_at),
+  KEY idx_decisions_risk_level (risk_level),
+  KEY idx_decisions_outcome_id (outcome_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS decision_beliefs (
+  decision_id VARCHAR(190) NOT NULL,
+  claim_id    VARCHAR(190) NOT NULL,
+  PRIMARY KEY (decision_id, claim_id),
+  KEY idx_decision_beliefs_claim_id (claim_id),
+  CONSTRAINT fk_db_decision FOREIGN KEY (decision_id) REFERENCES decisions(id),
+  CONSTRAINT fk_db_claim    FOREIGN KEY (claim_id)    REFERENCES claims(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

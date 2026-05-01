@@ -228,7 +228,7 @@ CREATE TABLE IF NOT EXISTS lessons (
   scope_service VARCHAR(190) NOT NULL DEFAULT '',
   scope_env     VARCHAR(64)  NOT NULL DEFAULT '',
   scope_team    VARCHAR(190) NOT NULL DEFAULT '',
-  trigger       VARCHAR(190) NOT NULL DEFAULT '',
+  `trigger`     VARCHAR(190) NOT NULL DEFAULT '',
   kind          VARCHAR(64)  NOT NULL DEFAULT '',
   confidence    DOUBLE       NOT NULL,
   derived_at    DATETIME(6)  NOT NULL,
@@ -240,7 +240,7 @@ CREATE TABLE IF NOT EXISTS lessons (
   KEY idx_lessons_scope_env     (scope_env),
   KEY idx_lessons_scope_team    (scope_team),
   KEY idx_lessons_kind          (kind),
-  KEY idx_lessons_trigger       (trigger),
+  KEY idx_lessons_trigger       (`trigger`),
   KEY idx_lessons_confidence    (confidence)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -281,7 +281,7 @@ CREATE TABLE IF NOT EXISTS decision_beliefs (
 
 CREATE TABLE IF NOT EXISTS playbooks (
   id            VARCHAR(190) NOT NULL,
-  trigger       VARCHAR(190) NOT NULL,
+  `trigger`     VARCHAR(190) NOT NULL,
   statement     TEXT         NOT NULL,
   scope_service VARCHAR(190) NOT NULL DEFAULT '',
   scope_env     VARCHAR(64)  NOT NULL DEFAULT '',
@@ -293,7 +293,7 @@ CREATE TABLE IF NOT EXISTS playbooks (
   source        VARCHAR(32)  NOT NULL DEFAULT 'synthesize',
   created_by    VARCHAR(190) NOT NULL DEFAULT '<system>',
   PRIMARY KEY (id),
-  KEY idx_playbooks_trigger       (trigger),
+  KEY idx_playbooks_trigger       (`trigger`),
   KEY idx_playbooks_scope_service (scope_service),
   KEY idx_playbooks_confidence    (confidence)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

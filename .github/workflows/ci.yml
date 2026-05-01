@@ -38,7 +38,21 @@ jobs:
           version: v2.11
 
       - name: Test
-        run: go test -race -count=1 ./...
+        run: go test -race -count=1 -coverprofile=coverage.out ./...
+
+      - name: Install coverctl
+        run: go install github.com/felixgeelhaar/coverctl@latest
+
+      - name: Enforce coverage policy
+        run: coverctl check --from-profile coverage.out -o json
+
+      - name: Install nox
+        run: go install github.com/felixgeelhaar/nox/cmd/nox@latest
+
+      - name: Security baseline scan
+        run: nox scan .
+        # Compares the working tree against findings.json. New findings
+        # (anything not present in the baseline) fail the build.
 
       - name: Build
         run: make build

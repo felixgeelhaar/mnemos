@@ -1,0 +1,99 @@
+# Coverage policy for Mnemos.
+#
+# Thresholds match current coverage minus a 2pp buffer so flaky tail
+# effects don't fail CI. Ratchet up via
+# `coverctl suggest --strategy current --apply --force` after coverage
+# rises. The buffer is intentional — coverage is a no-regression
+# floor, not an aspirational target. Several domains start low after
+# the v0.13 expansion (new bias, federation, glob/quota); raise as
+# tests catch up.
+version: 1
+language: go
+policy:
+  default:
+    min: 50
+  domains:
+    - name: cmd
+      match:
+        - ./cmd/...
+      min: 25
+    - name: adapters
+      match:
+        - ./internal/adapters/...
+      min: 60
+    - name: auth
+      match:
+        - ./internal/auth/...
+      min: 70
+    - name: autoedge
+      match:
+        - ./internal/autoedge/...
+      min: 73
+    - name: bias
+      match:
+        - ./internal/bias/...
+      min: 90
+    - name: domain
+      match:
+        - ./internal/domain/...
+      min: 35
+    - name: embedding
+      match:
+        - ./internal/embedding/...
+      min: 50
+    - name: extract
+      match:
+        - ./internal/extract/...
+      min: 80
+    - name: ingest
+      match:
+        - ./internal/ingest/...
+      min: 60
+    - name: llm
+      match:
+        - ./internal/llm/...
+      min: 70
+    - name: markdown
+      match:
+        - ./internal/markdown/...
+      min: 78
+    - name: parser
+      match:
+        - ./internal/parser/...
+      min: 70
+    - name: pipeline
+      match:
+        - ./internal/pipeline/...
+      min: 40
+    - name: ports
+      match:
+        - ./internal/ports/...
+      min: 0
+    - name: query
+      match:
+        - ./internal/query/...
+      min: 65
+    - name: relate
+      match:
+        - ./internal/relate/...
+      min: 80
+    - name: server
+      match:
+        - ./internal/server/...
+      min: 50
+    - name: store
+      match:
+        - ./internal/store/...
+      min: 15
+    - name: synthesize
+      match:
+        - ./internal/synthesize/...
+      min: 80
+    - name: trust
+      match:
+        - ./internal/trust/...
+      min: 88
+    - name: workflow
+      match:
+        - ./internal/workflow/...
+      min: 65

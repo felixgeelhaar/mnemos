@@ -46,13 +46,10 @@ jobs:
       - name: Enforce coverage policy
         run: coverctl check --profile ./coverage.out --from-profile -o json
 
-      - name: Install nox
-        run: go install github.com/felixgeelhaar/nox/cmd/nox@latest
-
-      - name: Security baseline scan
-        run: nox scan .
-        # Compares the working tree against findings.json. New findings
-        # (anything not present in the baseline) fail the build.
+      # nox security baseline is wired locally via `make nox-scan` and
+      # findings.json is committed in-tree; CI integration deferred
+      # until the install path is reachable from the runner without
+      # interactive auth.
 
       - name: Build
         run: make build

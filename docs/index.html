@@ -155,81 +155,46 @@ $ mnemos query --at 2026-05-01 "What happened with the deployment?"
     corroboration × freshness. No magic.
   </p>
 
-  <div class="diagram">
-<svg viewBox="0 0 920 360" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" role="img" aria-labelledby="arch-svg-title arch-svg-desc">
-  <title id="arch-svg-title">Mnemos data flow</title>
-  <desc id="arch-svg-desc">Inputs land as immutable events; the extractor derives claims with evidence links; the relationship engine connects claims; queries return claims plus contradictions and trust scores.</desc>
-  <style>
-    .box { fill: #14181d; stroke: #2a323d; stroke-width: 1; }
-    .box-accent { stroke: #7ad1ff; }
-    .label { fill: #e6e8eb; }
-    .label-dim { fill: #8a93a0; font-size: 11px; }
-    .label-accent { fill: #7ad1ff; }
-    .arrow { stroke: #4a5562; stroke-width: 1.5; fill: none; }
-    .arrow-accent { stroke: #7ad1ff; stroke-width: 1.5; fill: none; }
-    @media (prefers-color-scheme: light) {
-      .box { fill: #ffffff; stroke: #d1d5db; }
-      .box-accent { stroke: #0066b3; }
-      .label { fill: #131720; }
-      .label-dim { fill: #5a6272; }
-      .label-accent { fill: #0066b3; }
-      .arrow { stroke: #9aa3af; }
-      .arrow-accent { stroke: #0066b3; }
-    }
-  </style>
-  <defs>
-    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4a5562"/>
-    </marker>
-    <marker id="aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7ad1ff"/>
-    </marker>
-  </defs>
+  <div class="diagram" role="img" aria-label="Mnemos data flow: inputs become immutable events; the extractor derives claims with evidence; the relationship engine connects them; queries return claims plus contradictions and trust scores.">
+    <div class="pipe" style="--cols: 5">
+      <div class="pipe-cell">
+        <span class="pipe-kicker">inputs</span>
+        <p class="pipe-title">text · git · slack</p>
+        <p class="pipe-sub">prs · markdown · pdfs</p>
+      </div>
+      <div class="pipe-cell accent">
+        <span class="pipe-kicker">events</span>
+        <p class="pipe-title">immutable log</p>
+        <p class="pipe-sub">append-only · run-tagged</p>
+      </div>
+      <div class="pipe-cell accent">
+        <span class="pipe-kicker">claims</span>
+        <p class="pipe-title">derived assertions</p>
+        <p class="pipe-sub">fact · hypothesis · decision</p>
+      </div>
+      <div class="pipe-cell accent">
+        <span class="pipe-kicker">relationships</span>
+        <p class="pipe-title">claim-to-claim edges</p>
+        <p class="pipe-sub">supports · contradicts · causes</p>
+      </div>
+      <div class="pipe-cell">
+        <span class="pipe-kicker">query</span>
+        <p class="pipe-title">answers + evidence</p>
+        <p class="pipe-sub">contradictions inline</p>
+      </div>
+    </div>
 
-  <!-- Top row: 5 boxes, 160w each, 20px gap. Total 5*160 + 4*20 = 880. Centered with x=20 start. -->
-  <text class="label-dim" x="100" y="50" text-anchor="middle">inputs</text>
-  <rect class="box" x="20" y="65" width="160" height="60" rx="6"/>
-  <text class="label" x="100" y="90" text-anchor="middle">text · markdown · git</text>
-  <text class="label-dim" x="100" y="108" text-anchor="middle">prs · slack · pdfs</text>
+    <div class="pipe-band">
+      <h4>Trust score · confidence × corroboration × freshness</h4>
+      <p>Per-claim half-life decays freshness over time; <code>mnemos verify</code> ticks it back up. Trust feeds query ranking and contradiction surfacing.</p>
+    </div>
 
-  <text class="label-accent" x="280" y="50" text-anchor="middle">events</text>
-  <rect class="box box-accent" x="200" y="65" width="160" height="60" rx="6"/>
-  <text class="label" x="280" y="90" text-anchor="middle">immutable log</text>
-  <text class="label-dim" x="280" y="108" text-anchor="middle">append-only · run-tagged</text>
-
-  <text class="label-accent" x="460" y="50" text-anchor="middle">claims</text>
-  <rect class="box box-accent" x="380" y="65" width="160" height="60" rx="6"/>
-  <text class="label" x="460" y="90" text-anchor="middle">derived assertions</text>
-  <text class="label-dim" x="460" y="108" text-anchor="middle">fact · hypothesis · decision</text>
-
-  <text class="label-accent" x="640" y="50" text-anchor="middle">relationships</text>
-  <rect class="box box-accent" x="560" y="65" width="160" height="60" rx="6"/>
-  <text class="label" x="640" y="90" text-anchor="middle">claim-to-claim edges</text>
-  <text class="label-dim" x="640" y="108" text-anchor="middle">supports · contradicts · causes</text>
-
-  <text class="label-dim" x="820" y="50" text-anchor="middle">query</text>
-  <rect class="box" x="740" y="65" width="160" height="60" rx="6"/>
-  <text class="label" x="820" y="90" text-anchor="middle">answers + evidence</text>
-  <text class="label-dim" x="820" y="108" text-anchor="middle">contradictions inline</text>
-
-  <!-- Arrows align to box midline y=95 -->
-  <path class="arrow" d="M 180 95 L 200 95" marker-end="url(#ah)"/>
-  <path class="arrow-accent" d="M 360 95 L 380 95" marker-end="url(#aha)"/>
-  <path class="arrow-accent" d="M 540 95 L 560 95" marker-end="url(#aha)"/>
-  <path class="arrow" d="M 720 95 L 740 95" marker-end="url(#ah)"/>
-
-  <!-- Trust-score band -->
-  <rect class="box" x="20" y="170" width="880" height="70" rx="8"/>
-  <text class="label" x="40" y="198">Trust score = confidence × corroboration × freshness</text>
-  <text class="label-dim" x="40" y="220">Per-claim half-life decays freshness over time; `mnemos verify` ticks it back up.</text>
-
-  <!-- Storage + surface band -->
-  <rect class="box" x="20" y="260" width="880" height="70" rx="8"/>
-  <text class="label" x="40" y="288">Storage</text>
-  <text class="label-dim" x="120" y="288">SQLite (default · pure-Go, no CGO) · Postgres · MySQL · libSQL/Turso · memory</text>
-  <text class="label" x="40" y="312">Surface</text>
-  <text class="label-dim" x="120" y="312">CLI · HTTP · gRPC · MCP — pinned wire contract; all four speak the same domain types</text>
-</svg>
+    <div class="pipe-band">
+      <div class="row">
+        <strong>Storage</strong><span>SQLite (default · pure-Go, no CGO) · Postgres · MySQL · libSQL/Turso · in-memory</span>
+        <strong>Surface</strong><span>CLI · HTTP · gRPC · MCP — pinned wire contract; all four speak the same domain types</span>
+      </div>
+    </div>
   </div>
 </section>
 

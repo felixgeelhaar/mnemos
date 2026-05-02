@@ -40,14 +40,13 @@
   <div class="cta-row">
     <a class="cta primary" href="#run">Run the demo</a>
     <a class="cta" href="https://github.com/felixgeelhaar/mnemos" aria-label="View Mnemos on GitHub">★ on GitHub</a>
-    <a class="cta ghost" href="#scenario">See the scenario ↓</a>
+    <a class="cta ghost" href="#scenario">See it work ↓</a>
   </div>
-  <ul class="badges" aria-label="At a glance">
-    <li>MIT licensed</li>
-    <li>Go · single binary</li>
-    <li>CLI · HTTP · gRPC · MCP</li>
-    <li>SQLite · Postgres · MySQL · libSQL · in-memory</li>
-  </ul>
+  <div class="use-cases">
+    <div><p><strong>Catch hallucinations early</strong>Stop your support bot from quoting two contradictory facts before the customer notices.</p></div>
+    <div><p><strong>Bisect a wrong answer</strong>Trace a hallucinated answer back to the source doc that misled the model.</p></div>
+    <div><p><strong>Query the past</strong>"What was true on April 15?" — answered against the same store, no extra DB.</p></div>
+  </div>
 </section>
 
 <section id="scenario" aria-labelledby="scenario-heading">
@@ -124,26 +123,12 @@ $ mnemos query --at 2026-05-01 "What happened with the deployment?"
       <span role="cell">Mnemos stores <em>claims</em> with evidence links and contradiction edges. Vectors are a ranking signal, not the truth model.</span>
     </div>
     <div class="vs-row" role="row">
-      <span role="cell"><strong>RAG over SQLite + LLM</strong></span>
-      <span role="cell">Retrieves passages, hopes the model picks correctly.</span>
-      <span role="cell">Mnemos returns claims with citations, surfaces contradictions inline, and answers "what was true on date X?"</span>
-    </div>
-    <div class="vs-row" role="row">
       <span role="cell"><strong>LangChain memory · Mem0</strong></span>
       <span role="cell">Per-session conversation scratchpad.</span>
-      <span role="cell">Mnemos is event-sourced + replayable, with trust scoring (confidence × corroboration × freshness) and a human-editable layer.</span>
+      <span role="cell">Replayable, scored, human-editable — survives restarts and lets you ask "what did the agent know at noon on Thursday?"</span>
     </div>
   </div>
 
-  <h3 class="subhead">Time-aware by design</h3>
-  <p>
-    Every claim carries <code>valid_from</code> and <code>valid_to</code>;
-    <code>mnemos resolve --supersedes</code> writes a successor without
-    deleting the predecessor. The result: <code>mnemos query --at
-    2026-04-15</code> reconstructs what your agent <em>should have
-    known</em> at any point in the past. Bug bisection for the
-    knowledge graph.
-  </p>
 </section>
 
 <section id="architecture" aria-labelledby="arch-heading">

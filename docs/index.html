@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mnemos — git for your AI's memory</title>
+  <meta name="description" content="Mnemos gives every AI answer a source, a confidence score, and a visible contradiction trail. Local-first, MIT-licensed, single Go binary.">
+  <meta property="og:title" content="Mnemos — git for your AI's memory">
+  <meta property="og:description" content="Stop your agent from confidently lying. Claims, evidence, contradictions, point-in-time queries — all in one binary.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header>
+  <div class="wrap">
+    <div class="logo" aria-label="Mnemos">mnemos<span aria-hidden="true">.</span></div>
+    <nav aria-label="Primary">
+      <a href="#scenario">Scenario</a>
+      <a href="#vs">Vs. alternatives</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#run">Run it</a>
+      <a href="https://github.com/felixgeelhaar/mnemos">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+
+<section class="hero">
+  <p class="kicker">For AI engineers and agent builders shipping production RAG.</p>
+  <h1>Stop your agent from <span class="accent">confidently lying.</span></h1>
+  <p class="lede">
+    Mnemos is the evidence layer for AI — every answer cites a source,
+    every claim carries a confidence score, every contradiction is
+    visible instead of buried. Local-first. MIT-licensed. One Go
+    binary.
+  </p>
+  <div class="cta-row">
+    <a class="cta primary" href="#run">Run the demo</a>
+    <a class="cta" href="https://github.com/felixgeelhaar/mnemos" aria-label="View Mnemos on GitHub">★ on GitHub</a>
+    <a class="cta ghost" href="#scenario">See the scenario ↓</a>
+  </div>
+  <ul class="badges" aria-label="At a glance">
+    <li>MIT licensed</li>
+    <li>Go · single binary</li>
+    <li>CLI · HTTP · gRPC · MCP</li>
+    <li>SQLite · Postgres · MySQL · libSQL · in-memory</li>
+  </ul>
+</section>
+
+<section id="scenario" aria-labelledby="scenario-heading">
+  <p class="kicker">Scenario</p>
+  <h2 id="scenario-heading">Two facts disagree. Mnemos catches it before your agent quotes either.</h2>
+  <p>
+    No API keys. No vector DB to provision. The default extractor is
+    rule-based — install Mnemos, feed it text, and the contradiction
+    detector trips on the first conflict. Add a provider key when you
+    want grounded answers; everything below works without one.
+  </p>
+
+  <div class="terminal" role="figure" aria-label="Terminal walkthrough">
+    <div class="bar" aria-hidden="true">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="label">$ mnemos · contradiction demo</span>
+    </div>
+<pre><code>$ go install github.com/felixgeelhaar/mnemos/cmd/mnemos@latest
+
+$ mnemos process --text "The deployment succeeded in production.
+The deployment did not succeed in production. Response times averaged 45ms."
+ingested 1 event · extracted 3 claims · 1 contradiction detected
+
+$ mnemos query "What happened with the deployment?"
+{
+  "claims": [
+    { "id": "cl_a", "text": "The deployment succeeded in production",
+      "type": "fact", "confidence": 0.91,
+      "evidence": [{ "event_id": "ev_1", "span": [0, 47] }] },
+    { "id": "cl_b", "text": "The deployment did not succeed in production",
+      "type": "fact", "confidence": 0.91,
+      "evidence": [{ "event_id": "ev_1", "span": [49, 95] }] }
+  ],
+  "contradictions": [
+    { "between": ["cl_a", "cl_b"], "kind": "polarity_conflict" }
+  ]
+}
+
+$ mnemos resolve cl_a --over cl_b --reason "rolled back at 14:02"
+resolved · cl_a now valid_to=2026-05-02T14:02:00Z
+
+$ mnemos query --at 2026-05-01 "What happened with the deployment?"
+# returns the pre-rollback world — same store, point-in-time view</code></pre>
+  </div>
+
+  <div class="callout">
+    <strong>What this proves.</strong>
+    Rule-based extraction, contradiction detection, evidence linking,
+    and point-in-time replay — all without a single LLM call. The
+    audit chain is the differentiator: every claim points at the event
+    it came from, every resolution carries a reason, every query at a
+    past timestamp returns what was true <em>then</em>.
+  </div>
+</section>
+
+<section id="vs" aria-labelledby="vs-heading">
+  <p class="kicker">How it differs</p>
+  <h2 id="vs-heading">Where Mnemos fits.</h2>
+  <p>
+    Vector databases store chunks and trust the model to reason. Agent
+    memory libraries are session scratchpads with no audit trail.
+    Mnemos models the truth itself: claims with evidence, edges
+    between claims, and a temporal validity window on every fact.
+  </p>
+  <div class="vs-table" role="table" aria-label="Comparison with related tools">
+    <div class="vs-row vs-head" role="row">
+      <span role="columnheader">Tool</span>
+      <span role="columnheader">Solves</span>
+      <span role="columnheader">Mnemos's seam</span>
+    </div>
+    <div class="vs-row" role="row">
+      <span role="cell"><strong>Pinecone / Weaviate</strong></span>
+      <span role="cell">Store chunks, retrieve by similarity.</span>
+      <span role="cell">Mnemos stores <em>claims</em> with evidence links and contradiction edges. Vectors are a ranking signal, not the truth model.</span>
+    </div>
+    <div class="vs-row" role="row">
+      <span role="cell"><strong>RAG over SQLite + LLM</strong></span>
+      <span role="cell">Retrieves passages, hopes the model picks correctly.</span>
+      <span role="cell">Mnemos returns claims with citations, surfaces contradictions inline, and answers "what was true on date X?"</span>
+    </div>
+    <div class="vs-row" role="row">
+      <span role="cell"><strong>LangChain memory · Mem0</strong></span>
+      <span role="cell">Per-session conversation scratchpad.</span>
+      <span role="cell">Mnemos is event-sourced + replayable, with trust scoring (confidence × corroboration × freshness) and a human-editable layer.</span>
+    </div>
+  </div>
+
+  <h3 class="subhead">Time-aware by design</h3>
+  <p>
+    Every claim carries <code>valid_from</code> and <code>valid_to</code>;
+    <code>mnemos resolve --supersedes</code> writes a successor without
+    deleting the predecessor. The result: <code>mnemos query --at
+    2026-04-15</code> reconstructs what your agent <em>should have
+    known</em> at any point in the past. Bug bisection for the
+    knowledge graph.
+  </p>
+</section>
+
+<section id="architecture" aria-labelledby="arch-heading">
+  <p class="kicker">Architecture</p>
+  <h2 id="arch-heading">Ingest · Extract · Relate · Query.</h2>
+  <p>
+    Events are immutable. Claims are derived. Relationships connect
+    claims. Embeddings rerank. Trust falls out of confidence ×
+    corroboration × freshness. No magic.
+  </p>
+
+  <div class="diagram">
+<svg viewBox="0 0 920 380" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" role="img" aria-labelledby="arch-svg-title arch-svg-desc">
+  <title id="arch-svg-title">Mnemos data flow</title>
+  <desc id="arch-svg-desc">Inputs land as immutable events; the extractor derives claims with evidence links; the relationship engine connects claims; queries return claims with contradictions and trust scores.</desc>
+  <style>
+    .box { fill: #14181d; stroke: #2a323d; stroke-width: 1; }
+    .box-accent { stroke: #7ad1ff; }
+    .label { fill: #e6e8eb; }
+    .label-dim { fill: #8a93a0; font-size: 11px; }
+    .label-accent { fill: #7ad1ff; }
+    .arrow { stroke: #4a5562; stroke-width: 1.5; fill: none; }
+    .arrow-accent { stroke: #7ad1ff; stroke-width: 1.5; fill: none; }
+    @media (prefers-color-scheme: light) {
+      .box { fill: #ffffff; stroke: #d1d5db; }
+      .box-accent { stroke: #0066b3; }
+      .label { fill: #131720; }
+      .label-dim { fill: #5a6272; }
+      .label-accent { fill: #0066b3; }
+      .arrow { stroke: #9aa3af; }
+      .arrow-accent { stroke: #0066b3; }
+    }
+  </style>
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4a5562"/>
+    </marker>
+    <marker id="aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7ad1ff"/>
+    </marker>
+  </defs>
+
+  <text class="label-dim" x="80" y="40" text-anchor="middle">inputs</text>
+  <rect class="box" x="20" y="60" width="160" height="50" rx="6"/>
+  <text class="label" x="100" y="82" text-anchor="middle">text · markdown · git</text>
+  <text class="label-dim" x="100" y="98" text-anchor="middle">prs · slack · pdfs</text>
+
+  <text class="label-accent" x="280" y="40" text-anchor="middle">events</text>
+  <rect class="box box-accent" x="220" y="60" width="160" height="50" rx="6"/>
+  <text class="label" x="300" y="82" text-anchor="middle">immutable log</text>
+  <text class="label-dim" x="300" y="98" text-anchor="middle">append-only · run-tagged</text>
+
+  <text class="label-accent" x="480" y="40" text-anchor="middle">claims</text>
+  <rect class="box box-accent" x="420" y="60" width="160" height="50" rx="6"/>
+  <text class="label" x="500" y="82" text-anchor="middle">derived assertions</text>
+  <text class="label-dim" x="500" y="98" text-anchor="middle">fact · hypothesis · decision</text>
+
+  <text class="label-accent" x="680" y="40" text-anchor="middle">relationships</text>
+  <rect class="box box-accent" x="620" y="60" width="160" height="50" rx="6"/>
+  <text class="label" x="700" y="82" text-anchor="middle">claim-to-claim edges</text>
+  <text class="label-dim" x="700" y="98" text-anchor="middle">supports · contradicts · causes</text>
+
+  <text class="label-dim" x="860" y="40" text-anchor="middle">query</text>
+  <rect class="box" x="800" y="60" width="100" height="50" rx="6"/>
+  <text class="label" x="850" y="82" text-anchor="middle">answers</text>
+  <text class="label-dim" x="850" y="98" text-anchor="middle">+ evidence</text>
+
+  <path class="arrow" d="M 180 85 L 220 85" marker-end="url(#ah)"/>
+  <path class="arrow-accent" d="M 380 85 L 420 85" marker-end="url(#aha)"/>
+  <path class="arrow-accent" d="M 580 85 L 620 85" marker-end="url(#aha)"/>
+  <path class="arrow" d="M 780 85 L 800 85" marker-end="url(#ah)"/>
+
+  <!-- Detail row -->
+  <rect class="box" x="20" y="170" width="880" height="80" rx="8"/>
+  <text class="label" x="60" y="200">Trust score = confidence × corroboration × freshness</text>
+  <text class="label-dim" x="60" y="222">— per-claim half-life decays freshness over time; verify ticks it back up.</text>
+  <text class="label-dim" x="60" y="240">— trust feeds query ranking and contradiction surfacing; the formula lives in `internal/trust`.</text>
+
+  <text class="label-dim" x="60" y="290">Storage backends: SQLite (default · pure-Go, no CGO) · Postgres · MySQL · libSQL/Turso · memory.</text>
+  <text class="label-dim" x="60" y="310">Surface: CLI · HTTP · gRPC · MCP. Wire contract pinned; all four speak the same domain types.</text>
+</svg>
+  </div>
+</section>
+
+<section id="run" aria-labelledby="run-heading">
+  <p class="kicker">Run it</p>
+  <h2 id="run-heading">Five minutes from install to first contradiction.</h2>
+  <pre><code>brew install felixgeelhaar/tap/mnemos
+# or: go install github.com/felixgeelhaar/mnemos/cmd/mnemos@latest
+
+mnemos process --text "The deployment succeeded in production.
+The deployment did not succeed in production."
+
+mnemos query "What happened with the deployment?"</code></pre>
+
+  <p>SQLite ships with the binary. No Docker, no hosted service, no API key. Add a provider when you want grounded answers:</p>
+  <pre><code>export MNEMOS_LLM_PROVIDER=anthropic
+export MNEMOS_LLM_API_KEY=sk-ant-…
+mnemos query --llm "What happened with the deployment?"</code></pre>
+
+  <div class="callout callout-honest">
+    <strong>Without an LLM key.</strong>
+    Rule-based extraction, contradiction detection, evidence linking,
+    and point-in-time queries all work offline. Semantic search falls
+    back to BM25 (fine on short text), and grounded answer generation
+    falls back to a template. Wire a provider when you need the LLM
+    paths; the audit chain stays the same either way.
+  </div>
+
+  <h3 class="subhead">Inspect the audit chain</h3>
+  <pre><code>mnemos history --kind=claim cl_a   # every state change with reason
+mnemos verify cl_a                  # re-check against source events
+mnemos export --kind=lesson         # YAML-frontmatter markdown for review</code></pre>
+</section>
+
+<section id="stack" aria-labelledby="stack-heading">
+  <p class="kicker">Cognitive stack context</p>
+  <h2 id="stack-heading">Mnemos works alone. Plugs into a four-system stack.</h2>
+  <p>
+    The cognitive-stack split lets each layer evolve independently:
+    Mnemos remembers, Chronos watches time, Nous decides, Praxis
+    executes. Olymp drives the whole loop. Use any of them on their
+    own; wire them together when the use case calls for it.
+  </p>
+  <div class="cols">
+    <div class="card"><h3><a href="https://felixgeelhaar.github.io/chronos/">Chronos · time</a></h3><p>Pattern detection over time-series data. Typed signals, not threshold alerts.</p></div>
+    <div class="card"><h3><a href="https://felixgeelhaar.github.io/nous/">Nous · decisions</a></h3><p>Commitment extraction, risk evaluation, intervention generation.</p></div>
+    <div class="card"><h3><a href="https://felixgeelhaar.github.io/praxis/">Praxis · execution</a></h3><p>Three-verb action layer with idempotency and replay-from-audit.</p></div>
+    <div class="card"><h3><a href="https://felixgeelhaar.github.io/olymp/">Olymp · runtime</a></h3><p>Drives observe → understand → decide → act → learn end-to-end.</p></div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap footer-grid">
+    <div>
+      <div class="logo">mnemos<span aria-hidden="true">.</span></div>
+      <p class="dim">MIT licensed · single Go binary · 5 storage backends · zero hosted dependencies.</p>
+    </div>
+    <div>
+      <h4>Project</h4>
+      <ul>
+        <li><a href="https://github.com/felixgeelhaar/mnemos">GitHub repo</a></li>
+        <li><a href="https://github.com/felixgeelhaar/mnemos/blob/main/Roadmap.md">Roadmap</a></li>
+        <li><a href="https://github.com/felixgeelhaar/mnemos/blob/main/Vision.md">Vision</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Stack</h4>
+      <ul>
+        <li><a href="https://felixgeelhaar.github.io/chronos/">Chronos</a></li>
+        <li><a href="https://felixgeelhaar.github.io/nous/">Nous</a></li>
+        <li><a href="https://felixgeelhaar.github.io/praxis/">Praxis</a></li>
+        <li><a href="https://felixgeelhaar.github.io/olymp/">Olymp</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Contact</h4>
+      <ul>
+        <li><a href="https://github.com/felixgeelhaar/mnemos/discussions">Discussions</a></li>
+        <li><a href="https://github.com/felixgeelhaar/mnemos/issues">Issues</a></li>
+        <li><a href="mailto:felix.geelhaar@gmail.com">Design partners →</a></li>
+      </ul>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -21,6 +21,20 @@ linters:
     gosec:
       excludes:
         - G115 # integer overflow conversion — not applicable in this codebase
+        - G703 # path traversal — operator-supplied config paths, not user input
+    gocritic:
+      disabled-checks:
+        # `unlambda` flags trivial wrapper closures that document the
+        # call shape — keeping them helps grep-ability for the MCP
+        # capability registry.
+        - unlambda
+        # `singleCaseSwitch` is fine when the switch is reserved for
+        # future expansion alongside a constant set.
+        - singleCaseSwitch
+        # `exitAfterDefer` is intentional for stdio entrypoints
+        # (cmd/mnemos/mcp.go) where log.Fatal is the documented exit
+        # path on bootstrap failure.
+        - exitAfterDefer
 
   exclusions:
     rules:

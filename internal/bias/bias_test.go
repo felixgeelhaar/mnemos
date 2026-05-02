@@ -115,7 +115,7 @@ func TestAnalyse_EmptyInputProducesEmptyReport(t *testing.T) {
 	}
 }
 
-func findingByKind(r BiasReport, kind string) *BiasFinding {
+func findingByKind(r Report, kind string) *Finding {
 	for i := range r.Findings {
 		if r.Findings[i].Kind == kind {
 			return &r.Findings[i]

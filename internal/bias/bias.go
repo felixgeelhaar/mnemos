@@ -14,7 +14,7 @@
 //   - Corroboration shape: too many claims rest on a single event
 //     (single-source-of-truth pathology).
 //
-// Each indicator returns a `BiasFinding` carrying a numeric score in
+// Each indicator returns a `Finding` carrying a numeric score in
 // `[0, 1]` plus a structured explanation. Operators decide what to
 // do with the report — Mnemos does not auto-act on bias signals.
 package bias
@@ -28,25 +28,25 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 )
 
-// BiasFinding is one signal in a BiasReport. Score is a normalised
+// Finding is one signal in a Report. Score is a normalised
 // severity in `[0, 1]`; Threshold is the operator-tunable level at
 // or above which the finding is considered actionable.
-type BiasFinding struct {
+type Finding struct {
 	Kind        string  `json:"kind"`
 	Score       float64 `json:"score"`
 	Threshold   float64 `json:"threshold"`
 	Explanation string  `json:"explanation"`
 }
 
-// BiasReport collects every finding the analyser produced for an
+// Report collects every finding the analyser produced for an
 // answer, query result, or claim cluster. An empty Findings slice
 // means "no bias signals above the threshold".
-type BiasReport struct {
-	Findings []BiasFinding `json:"findings"`
+type Report struct {
+	Findings []Finding `json:"findings"`
 }
 
 // HasFindings is a convenience for the CLI / query summary line.
-func (r BiasReport) HasFindings() bool { return len(r.Findings) > 0 }
+func (r Report) HasFindings() bool { return len(r.Findings) > 0 }
 
 // AnalysisInput bundles the evidence the analyser needs. Pass the
 // claims that participated in an answer plus the events those claims
@@ -82,10 +82,10 @@ func DefaultThresholds() Thresholds {
 }
 
 // Analyse runs every indicator against the input and returns a
-// BiasReport carrying findings whose score met the configured
+// Report carrying findings whose score met the configured
 // threshold.
-func Analyse(in AnalysisInput, thr Thresholds) BiasReport {
-	out := BiasReport{}
+func Analyse(in AnalysisInput, thr Thresholds) Report {
+	out := Report{}
 	if f := sourceConcentration(in, thr); f != nil {
 		out.Findings = append(out.Findings, *f)
 	}
@@ -104,7 +104,7 @@ func Analyse(in AnalysisInput, thr Thresholds) BiasReport {
 // sourceConcentration returns a finding when one source_input_id
 // drives ≥ threshold share of the evidence events. Score is the
 // share of the dominant source.
-func sourceConcentration(in AnalysisInput, thr Thresholds) *BiasFinding {
+func sourceConcentration(in AnalysisInput, thr Thresholds) *Finding {
 	if len(in.Events) < 3 {
 		return nil
 	}
@@ -127,7 +127,7 @@ func sourceConcentration(in AnalysisInput, thr Thresholds) *BiasFinding {
 	if share < thr.SourceConcentration {
 		return nil
 	}
-	return &BiasFinding{
+	return &Finding{
 		Kind:        "source_concentration",
 		Score:       share,
 		Threshold:   thr.SourceConcentration,
@@ -139,7 +139,7 @@ func sourceConcentration(in AnalysisInput, thr Thresholds) *BiasFinding {
 // massively outnumber negative ones (or vice-versa). Heuristic only —
 // negation isn't free in NLP. The point is to flag the lopsidedness;
 // operators decide whether the corpus genuinely warrants it.
-func polaritySkew(in AnalysisInput, thr Thresholds) *BiasFinding {
+func polaritySkew(in AnalysisInput, thr Thresholds) *Finding {
 	if len(in.Claims) < 4 {
 		return nil
 	}
@@ -164,7 +164,7 @@ func polaritySkew(in AnalysisInput, thr Thresholds) *BiasFinding {
 	if neg > pos {
 		dom = "negative"
 	}
-	return &BiasFinding{
+	return &Finding{
 		Kind:        "polarity_skew",
 		Score:       ratio,
 		Threshold:   thr.PolaritySkew,
@@ -176,7 +176,7 @@ func polaritySkew(in AnalysisInput, thr Thresholds) *BiasFinding {
 // time window relative to the corpus span. Score is `1 - (window /
 // span)` — perfectly co-located events score 1, evenly distributed
 // score ~0.
-func temporalCluster(in AnalysisInput, thr Thresholds) *BiasFinding {
+func temporalCluster(in AnalysisInput, thr Thresholds) *Finding {
 	if len(in.Events) < 4 {
 		return nil
 	}
@@ -193,7 +193,7 @@ func temporalCluster(in AnalysisInput, thr Thresholds) *BiasFinding {
 	span := times[len(times)-1].Sub(times[0])
 	if span <= 0 {
 		// All events at the same instant — extreme cluster.
-		return &BiasFinding{
+		return &Finding{
 			Kind: "temporal_cluster", Score: 1, Threshold: thr.TemporalCluster,
 			Explanation: "evidence events share the same timestamp",
 		}
@@ -211,7 +211,7 @@ func temporalCluster(in AnalysisInput, thr Thresholds) *BiasFinding {
 	if math.IsNaN(score) || score < thr.TemporalCluster {
 		return nil
 	}
-	return &BiasFinding{
+	return &Finding{
 		Kind:        "temporal_cluster",
 		Score:       score,
 		Threshold:   thr.TemporalCluster,
@@ -223,7 +223,7 @@ func temporalCluster(in AnalysisInput, thr Thresholds) *BiasFinding {
 // single event. Even one piece of evidence per claim is fine; the
 // pattern we flag is many claims all leaning on the same event,
 // which masquerades as corroboration without actually adding it.
-func singleSourceOfTruth(in AnalysisInput, thr Thresholds) *BiasFinding {
+func singleSourceOfTruth(in AnalysisInput, thr Thresholds) *Finding {
 	if len(in.Claims) < 3 || len(in.EvidenceMap) == 0 {
 		return nil
 	}
@@ -244,7 +244,7 @@ func singleSourceOfTruth(in AnalysisInput, thr Thresholds) *BiasFinding {
 	if share < thr.SingleSourceOfTruth {
 		return nil
 	}
-	return &BiasFinding{
+	return &Finding{
 		Kind:        "single_source_of_truth",
 		Score:       share,
 		Threshold:   thr.SingleSourceOfTruth,

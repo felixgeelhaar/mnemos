@@ -156,9 +156,9 @@ $ mnemos query --at 2026-05-01 "What happened with the deployment?"
   </p>
 
   <div class="diagram">
-<svg viewBox="0 0 920 380" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" role="img" aria-labelledby="arch-svg-title arch-svg-desc">
+<svg viewBox="0 0 920 360" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" role="img" aria-labelledby="arch-svg-title arch-svg-desc">
   <title id="arch-svg-title">Mnemos data flow</title>
-  <desc id="arch-svg-desc">Inputs land as immutable events; the extractor derives claims with evidence links; the relationship engine connects claims; queries return claims with contradictions and trust scores.</desc>
+  <desc id="arch-svg-desc">Inputs land as immutable events; the extractor derives claims with evidence links; the relationship engine connects claims; queries return claims plus contradictions and trust scores.</desc>
   <style>
     .box { fill: #14181d; stroke: #2a323d; stroke-width: 1; }
     .box-accent { stroke: #7ad1ff; }
@@ -186,44 +186,49 @@ $ mnemos query --at 2026-05-01 "What happened with the deployment?"
     </marker>
   </defs>
 
-  <text class="label-dim" x="80" y="40" text-anchor="middle">inputs</text>
-  <rect class="box" x="20" y="60" width="160" height="50" rx="6"/>
-  <text class="label" x="100" y="82" text-anchor="middle">text · markdown · git</text>
-  <text class="label-dim" x="100" y="98" text-anchor="middle">prs · slack · pdfs</text>
+  <!-- Top row: 5 boxes, 160w each, 20px gap. Total 5*160 + 4*20 = 880. Centered with x=20 start. -->
+  <text class="label-dim" x="100" y="50" text-anchor="middle">inputs</text>
+  <rect class="box" x="20" y="65" width="160" height="60" rx="6"/>
+  <text class="label" x="100" y="90" text-anchor="middle">text · markdown · git</text>
+  <text class="label-dim" x="100" y="108" text-anchor="middle">prs · slack · pdfs</text>
 
-  <text class="label-accent" x="280" y="40" text-anchor="middle">events</text>
-  <rect class="box box-accent" x="220" y="60" width="160" height="50" rx="6"/>
-  <text class="label" x="300" y="82" text-anchor="middle">immutable log</text>
-  <text class="label-dim" x="300" y="98" text-anchor="middle">append-only · run-tagged</text>
+  <text class="label-accent" x="280" y="50" text-anchor="middle">events</text>
+  <rect class="box box-accent" x="200" y="65" width="160" height="60" rx="6"/>
+  <text class="label" x="280" y="90" text-anchor="middle">immutable log</text>
+  <text class="label-dim" x="280" y="108" text-anchor="middle">append-only · run-tagged</text>
 
-  <text class="label-accent" x="480" y="40" text-anchor="middle">claims</text>
-  <rect class="box box-accent" x="420" y="60" width="160" height="50" rx="6"/>
-  <text class="label" x="500" y="82" text-anchor="middle">derived assertions</text>
-  <text class="label-dim" x="500" y="98" text-anchor="middle">fact · hypothesis · decision</text>
+  <text class="label-accent" x="460" y="50" text-anchor="middle">claims</text>
+  <rect class="box box-accent" x="380" y="65" width="160" height="60" rx="6"/>
+  <text class="label" x="460" y="90" text-anchor="middle">derived assertions</text>
+  <text class="label-dim" x="460" y="108" text-anchor="middle">fact · hypothesis · decision</text>
 
-  <text class="label-accent" x="680" y="40" text-anchor="middle">relationships</text>
-  <rect class="box box-accent" x="620" y="60" width="160" height="50" rx="6"/>
-  <text class="label" x="700" y="82" text-anchor="middle">claim-to-claim edges</text>
-  <text class="label-dim" x="700" y="98" text-anchor="middle">supports · contradicts · causes</text>
+  <text class="label-accent" x="640" y="50" text-anchor="middle">relationships</text>
+  <rect class="box box-accent" x="560" y="65" width="160" height="60" rx="6"/>
+  <text class="label" x="640" y="90" text-anchor="middle">claim-to-claim edges</text>
+  <text class="label-dim" x="640" y="108" text-anchor="middle">supports · contradicts · causes</text>
 
-  <text class="label-dim" x="860" y="40" text-anchor="middle">query</text>
-  <rect class="box" x="800" y="60" width="100" height="50" rx="6"/>
-  <text class="label" x="850" y="82" text-anchor="middle">answers</text>
-  <text class="label-dim" x="850" y="98" text-anchor="middle">+ evidence</text>
+  <text class="label-dim" x="820" y="50" text-anchor="middle">query</text>
+  <rect class="box" x="740" y="65" width="160" height="60" rx="6"/>
+  <text class="label" x="820" y="90" text-anchor="middle">answers + evidence</text>
+  <text class="label-dim" x="820" y="108" text-anchor="middle">contradictions inline</text>
 
-  <path class="arrow" d="M 180 85 L 220 85" marker-end="url(#ah)"/>
-  <path class="arrow-accent" d="M 380 85 L 420 85" marker-end="url(#aha)"/>
-  <path class="arrow-accent" d="M 580 85 L 620 85" marker-end="url(#aha)"/>
-  <path class="arrow" d="M 780 85 L 800 85" marker-end="url(#ah)"/>
+  <!-- Arrows align to box midline y=95 -->
+  <path class="arrow" d="M 180 95 L 200 95" marker-end="url(#ah)"/>
+  <path class="arrow-accent" d="M 360 95 L 380 95" marker-end="url(#aha)"/>
+  <path class="arrow-accent" d="M 540 95 L 560 95" marker-end="url(#aha)"/>
+  <path class="arrow" d="M 720 95 L 740 95" marker-end="url(#ah)"/>
 
-  <!-- Detail row -->
-  <rect class="box" x="20" y="170" width="880" height="80" rx="8"/>
-  <text class="label" x="60" y="200">Trust score = confidence × corroboration × freshness</text>
-  <text class="label-dim" x="60" y="222">— per-claim half-life decays freshness over time; verify ticks it back up.</text>
-  <text class="label-dim" x="60" y="240">— trust feeds query ranking and contradiction surfacing; the formula lives in `internal/trust`.</text>
+  <!-- Trust-score band -->
+  <rect class="box" x="20" y="170" width="880" height="70" rx="8"/>
+  <text class="label" x="40" y="198">Trust score = confidence × corroboration × freshness</text>
+  <text class="label-dim" x="40" y="220">Per-claim half-life decays freshness over time; `mnemos verify` ticks it back up.</text>
 
-  <text class="label-dim" x="60" y="290">Storage backends: SQLite (default · pure-Go, no CGO) · Postgres · MySQL · libSQL/Turso · memory.</text>
-  <text class="label-dim" x="60" y="310">Surface: CLI · HTTP · gRPC · MCP. Wire contract pinned; all four speak the same domain types.</text>
+  <!-- Storage + surface band -->
+  <rect class="box" x="20" y="260" width="880" height="70" rx="8"/>
+  <text class="label" x="40" y="288">Storage</text>
+  <text class="label-dim" x="120" y="288">SQLite (default · pure-Go, no CGO) · Postgres · MySQL · libSQL/Turso · memory</text>
+  <text class="label" x="40" y="312">Surface</text>
+  <text class="label-dim" x="120" y="312">CLI · HTTP · gRPC · MCP — pinned wire contract; all four speak the same domain types</text>
 </svg>
   </div>
 </section>

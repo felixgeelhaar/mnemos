@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mnemos — git for your AI's memory</title>
-  <meta name="description" content="Mnemos gives every AI answer a source, a confidence score, and a visible contradiction trail. Local-first, MIT-licensed, single Go binary.">
-  <meta property="og:title" content="Mnemos — git for your AI's memory">
-  <meta property="og:description" content="Stop your agent from confidently lying. Claims, evidence, contradictions, point-in-time queries — all in one binary.">
+  <title>Mnemos — Self-hosted memory for AI apps</title>
+  <meta name="description" content="The open-source memory layer for AI apps you actually own. Self-hosted, MIT-licensed, single Go binary. Every claim has evidence, every contradiction surfaces, every decision replays.">
+  <meta property="og:title" content="Mnemos — Self-hosted memory for AI apps">
+  <meta property="og:description" content="AI memory that doesn't leave your servers. No vendor cloud, no per-call billing, no SDK to install — just a Go binary, an HTTP API, and your data.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -17,8 +17,9 @@
   <div class="wrap">
     <div class="logo" aria-label="Mnemos">mnemos<span aria-hidden="true">.</span></div>
     <nav aria-label="Primary">
+      <a href="#snippet">Snippet</a>
       <a href="#scenario">Scenario</a>
-      <a href="#vs">Vs. alternatives</a>
+      <a href="#vs">Where it fits</a>
       <a href="#architecture">Architecture</a>
       <a href="#run">Run it</a>
       <a href="https://github.com/felixgeelhaar/mnemos">GitHub</a>
@@ -29,35 +30,77 @@
 <main id="main" class="wrap">
 
 <section class="hero">
-  <p class="kicker">For AI engineers and agent builders shipping production RAG.</p>
-  <h1>Stop your agent from <span class="accent">confidently lying.</span></h1>
+  <p class="kicker">For AI engineers building apps that can't ship customer data to a vendor cloud.</p>
+  <h1>AI memory <span class="accent">you actually own.</span></h1>
   <p class="lede">
-    Mnemos is the evidence layer for AI — every answer cites a source,
-    every claim carries a confidence score, every contradiction is
-    visible instead of buried. Local-first. MIT-licensed. One Go
-    binary.
+    Self-hosted memory for AI apps. No vendor cloud, no per-call
+    billing, no SDK to install — just a Go binary, an HTTP API, and
+    your data. Every claim has evidence, every contradiction
+    surfaces, every decision replays — months later, in your infra.
   </p>
   <div class="cta-row">
-    <a class="cta primary" href="#run">Run the demo</a>
+    <a class="cta primary" href="#snippet">5-line example ↓</a>
     <a class="cta" href="https://github.com/felixgeelhaar/mnemos" aria-label="View Mnemos on GitHub">★ on GitHub</a>
-    <a class="cta ghost" href="#scenario">See it work ↓</a>
+    <a class="cta ghost" href="#run">Run it locally</a>
   </div>
   <div class="use-cases">
-    <div><p><strong>Catch hallucinations early</strong>Stop your support bot from quoting two contradictory facts before the customer notices.</p></div>
-    <div><p><strong>Bisect a wrong answer</strong>Trace a hallucinated answer back to the source doc that misled the model.</p></div>
-    <div><p><strong>Audit your AI agent</strong>Wrap a LangGraph / CrewAI / MCP agent. Every node emits one event; the full chain is replayable months later.</p></div>
-    <div><p><strong>Query the past</strong>"What was true on April 15?" — answered against the same store, no extra DB.</p></div>
+    <div><p><strong>Add memory to your AI app</strong>Five lines of HTTP. No SDK. No API key. No data leaving your servers.</p></div>
+    <div><p><strong>Catch contradictions automatically</strong>Two facts disagree, Mnemos flags it before your agent quotes either.</p></div>
+    <div><p><strong>Audit any agent</strong>Wrap a LangGraph / CrewAI / MCP agent. Every step emits one event; replay the full chain months later.</p></div>
+    <div><p><strong>Run it anywhere</strong>SQLite by default. Postgres, MySQL, libSQL, in-memory all supported. No CGO.</p></div>
+  </div>
+</section>
+
+<section id="snippet" aria-labelledby="snippet-heading">
+  <p class="kicker">Five lines of code</p>
+  <h2 id="snippet-heading">Add memory to an AI app, no SDK required.</h2>
+  <p>
+    Mnemos exposes one HTTP API. Any language with an HTTP client can
+    add memory in five lines — copy/paste, then own it.
+  </p>
+
+  <div class="terminal" role="figure" aria-label="Five-line memory snippet">
+    <div class="bar" aria-hidden="true">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="label">$ python · add memory to your agent</span>
+    </div>
+<pre><code>import httpx, uuid
+m = "http://localhost:7777"
+run = str(uuid.uuid4())
+
+# Remember something
+httpx.post(f"{m}/v1/events", json={"events": [{
+    "id": str(uuid.uuid4()),
+    "run_id": run,
+    "source_input_id": "chat-session-1",
+    "content": "user prefers vegetarian options",
+    "timestamp": "2026-05-03T16:00:00Z",
+    "metadata": {"role": "preference"},
+}]})
+
+# Recall it later (months later, same call)
+events = httpx.get(f"{m}/v1/events", params={"run_id": run}).json()</code></pre>
+  </div>
+
+  <div class="callout">
+    <strong>What you get for those five lines.</strong>
+    Every event keyed by <code>run_id</code> — full chain replay
+    months later. Add structured claims (<code>fact</code>,
+    <code>decision</code>, <code>hypothesis</code>) when you need
+    contradiction detection and evidence linking. Open source,
+    self-hosted, no SDK to lock you in.
   </div>
 </section>
 
 <section id="scenario" aria-labelledby="scenario-heading">
-  <p class="kicker">Scenario</p>
-  <h2 id="scenario-heading">Two facts disagree. Mnemos catches it before your agent quotes either.</h2>
+  <p class="kicker">A fuller example</p>
+  <h2 id="scenario-heading">Two facts disagree. Mnemos surfaces it before your agent quotes either.</h2>
   <p>
-    No API keys. No vector DB to provision. The default extractor is
-    rule-based — install Mnemos, feed it text, and the contradiction
-    detector trips on the first conflict. Add a provider key when you
-    want grounded answers; everything below works without one.
+    Beyond the five-line memory write, Mnemos extracts structured
+    claims, links evidence, and detects contradictions — the parts
+    that make replay-by-run-id more than a glorified log. No API
+    keys required for any of the below; add an LLM provider only
+    when you want grounded answers.
   </p>
 
   <div class="terminal" role="figure" aria-label="Terminal walkthrough">
@@ -104,29 +147,40 @@ $ mnemos query --at 2026-05-01 "What happened with the deployment?"
 </section>
 
 <section id="vs" aria-labelledby="vs-heading">
-  <p class="kicker">How it differs</p>
-  <h2 id="vs-heading">Where Mnemos fits.</h2>
+  <p class="kicker">Where it fits</p>
+  <h2 id="vs-heading">Pick the category that fits your stack.</h2>
   <p>
-    Vector databases store chunks and trust the model to reason. Agent
-    memory libraries are session scratchpads with no audit trail.
-    Mnemos models the truth itself: claims with evidence, edges
-    between claims, and a temporal validity window on every fact.
+    Mnemos is one of several ways to add memory to an AI app. The
+    right choice depends on whether you need a hosted SDK, raw
+    similarity search, a notes app, or a substrate you self-host.
+    Mnemos is the last one — and the only one that ships with
+    contradiction detection and replay-by-run-id built in.
   </p>
-  <div class="vs-table" role="table" aria-label="Comparison with related tools">
+  <div class="vs-table" role="table" aria-label="Comparison across approaches">
     <div class="vs-row vs-head" role="row">
-      <span role="columnheader">Tool</span>
-      <span role="columnheader">Solves</span>
-      <span role="columnheader">Mnemos's seam</span>
+      <span role="columnheader">Approach</span>
+      <span role="columnheader">Best for</span>
+      <span role="columnheader">What you give up</span>
     </div>
     <div class="vs-row" role="row">
-      <span role="cell"><strong>Pinecone / Weaviate</strong></span>
-      <span role="cell">Store chunks, retrieve by similarity.</span>
-      <span role="cell">Mnemos stores <em>claims</em> with evidence links and contradiction edges. Vectors are a ranking signal, not the truth model.</span>
+      <span role="cell"><strong>Hosted AI memory services</strong></span>
+      <span role="cell">Fast onboarding, consumer apps, no data residency constraints.</span>
+      <span role="cell">Vendor cloud lock-in, per-call billing, customer data leaves your infra.</span>
     </div>
     <div class="vs-row" role="row">
-      <span role="cell"><strong>LangChain memory · Mem0</strong></span>
-      <span role="cell">Per-session conversation scratchpad.</span>
-      <span role="cell">Replayable, scored, human-editable — survives restarts and lets you ask "what did the agent know at noon on Thursday?"</span>
+      <span role="cell"><strong>Vector databases</strong></span>
+      <span role="cell">Pure semantic search across raw chunks.</span>
+      <span role="cell">No claim/contradiction structure, no evidence trace, no replay.</span>
+    </div>
+    <div class="vs-row" role="row">
+      <span role="cell"><strong>Notes apps</strong> (Notion, Obsidian, Roam)</strong></span>
+      <span role="cell">Humans organising their own thinking.</span>
+      <span role="cell">Not built to be queried by an AI agent at scale; no programmatic API for memory writes.</span>
+    </div>
+    <div class="vs-row" role="row">
+      <span role="cell"><strong>Mnemos</strong></span>
+      <span role="cell">AI memory in stacks that can't leave your servers — regulated, on-prem, air-gapped.</span>
+      <span role="cell">You run a binary. (Hopefully a feature, not a cost.)</span>
     </div>
   </div>
 
@@ -233,13 +287,12 @@ curl -s "http://localhost:7777/v1/events?run_id=&lt;run-id&gt;" | jq</code></pre
 </section>
 
 <section id="stack" aria-labelledby="stack-heading">
-  <p class="kicker">Cognitive stack context</p>
-  <h2 id="stack-heading">Mnemos works alone. Plugs into a four-system stack.</h2>
+  <p class="kicker">Related projects</p>
+  <h2 id="stack-heading">Mnemos works alone. It plays well with three siblings.</h2>
   <p>
-    The cognitive-stack split lets each layer evolve independently:
-    Mnemos remembers, Chronos watches time, Nous decides, Praxis
-    executes. Olymp drives the whole loop. Use any of them on their
-    own; wire them together when the use case calls for it.
+    Mnemos is a memory layer first. The same author maintains three
+    related services and a runtime that drives all four together.
+    None of them are required to use Mnemos.
   </p>
   <div class="cols">
     <div class="card"><h3><a href="https://felixgeelhaar.github.io/chronos/">Chronos · time</a></h3><p>Pattern detection over time-series data. Typed signals, not threshold alerts.</p></div>

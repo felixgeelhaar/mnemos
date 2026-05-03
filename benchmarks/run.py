@@ -8,11 +8,13 @@ from pathlib import Path
 from datetime import datetime
 
 from .providers.mnemos import MnemosProvider
+from .providers.mem0 import Mem0Provider
 from .suites import contradiction_detection
 
 PROVIDERS = {
     "mnemos": MnemosProvider,
-    # mem0, zep, letta, gbrain land here as adapters ship.
+    "mem0": Mem0Provider,
+    # zep, letta, gbrain land here as adapters ship.
 }
 
 SUITES = {
@@ -25,7 +27,7 @@ def main() -> int:
     p = argparse.ArgumentParser(prog="bench", description="Mnemos cross-provider benchmark")
     p.add_argument("--provider", choices=[*PROVIDERS, "all"], required=True)
     p.add_argument("--suite", choices=[*SUITES, "all"], required=True)
-    p.add_argument("--output", default="results", help="Directory for JSON results")
+    p.add_argument("--output", default="benchmarks/results", help="Directory for JSON results")
     args = p.parse_args()
 
     providers = list(PROVIDERS) if args.provider == "all" else [args.provider]

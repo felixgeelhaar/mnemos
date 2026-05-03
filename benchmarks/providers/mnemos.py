@@ -1,122 +1,102 @@
-"""Mnemos provider adapter."""
+"""Mnemos provider adapter.
+
+The contradiction-detection wedge sits in the ingest → extract →
+relate pipeline, which Mnemos exposes via CLI. The adapter drives
+the CLI inside the running mnemos container so each test case
+exercises the full pipeline (not just the storage surface).
+
+Reset per case is done by switching the on-disk database file: each
+case writes against a fresh sqlite path, so contradictions detected
+in one case can't bleed into another.
+"""
 
 from __future__ import annotations
 
+import json
 import os
+import shlex
+import subprocess
 import uuid
-from datetime import datetime, timezone
 from typing import Any
-
-import httpx
 
 from . import QueryResult
 
 
-class MnemosProvider:
-    """Talks to a local Mnemos via HTTP."""
+def _docker_exec(container: str, *args: str, env: dict | None = None) -> tuple[int, str, str]:
+    """Run a command inside the named container; return (rc, stdout, stderr)."""
+    cmd = ["docker", "exec"]
+    for k, v in (env or {}).items():
+        cmd += ["-e", f"{k}={v}"]
+    cmd.append(container)
+    cmd += list(args)
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    return proc.returncode, proc.stdout, proc.stderr
 
+
+class MnemosProvider:
     name = "mnemos"
 
-    def __init__(self, base_url: str | None = None, token: str | None = None):
-        self.base_url = (
-            base_url or os.environ.get("MNEMOS_URL", "http://localhost:7777")
-        ).rstrip("/")
-        self.token = token or os.environ.get("MNEMOS_JWT")
-        self.run_id = str(uuid.uuid4())  # one suite-run = one Mnemos run
-
-    def _headers(self) -> dict[str, str]:
-        h = {"Content-Type": "application/json"}
-        if self.token:
-            h["Authorization"] = f"Bearer {self.token}"
-        return h
+    def __init__(self, container: str | None = None):
+        self.container = container or os.environ.get(
+            "MNEMOS_CONTAINER", "benchmarks-mnemos-1"
+        )
+        self.db_path = ""
+        self.reset()
 
     def reset(self) -> None:
-        # Switch to a fresh run id; old data stays in store but is
-        # invisible to subsequent queries scoped to the new run.
-        self.run_id = str(uuid.uuid4())
+        # Per-case sqlite db inside the container. Fresh file = fresh
+        # claims + relationships tables; no cross-case bleed.
+        self.db_path = f"/tmp/bench-{uuid.uuid4().hex[:12]}.db"
+
+    def _env(self) -> dict[str, str]:
+        return {"MNEMOS_DB_URL": f"sqlite://{self.db_path}"}
 
     def add(self, content: str, metadata: dict[str, Any] | None = None) -> str:
-        event_id = str(uuid.uuid4())
-        body = {
-            "events": [{
-                "id": event_id,
-                "run_id": self.run_id,
-                "source_input_id": f"bench::{self.run_id}",
-                "content": content,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "metadata": _stringify(metadata or {}),
-            }]
-        }
-        r = httpx.post(
-            f"{self.base_url}/v1/events",
-            headers=self._headers(),
-            json=body,
-            timeout=30,
+        # `mnemos process --text` runs the full pipeline: ingest event
+        # → extract claims → relate (rule-based contradiction
+        # detection happens here, no LLM needed for the suite).
+        rc, stdout, stderr = _docker_exec(
+            self.container, "mnemos", "process", "--text", content,
+            env=self._env(),
         )
-        r.raise_for_status()
-        return event_id
+        if rc != 0:
+            raise RuntimeError(f"mnemos process failed ({rc}): {stderr}")
+        # mnemos process emits human-readable text, not JSON. Return
+        # an opaque marker; the suite doesn't need event ids for
+        # contradiction scoring.
+        return f"event-{uuid.uuid4().hex[:8]}"
 
     def query(self, question: str) -> QueryResult:
-        # For the contradiction-detection suite we just need every
-        # event for this run + Mnemos's contradiction view. The
-        # "answer" is left blank because contradiction-detection
-        # doesn't test grounded-answer quality.
-        events_resp = httpx.get(
-            f"{self.base_url}/v1/events",
-            headers=self._headers(),
-            params={"run_id": self.run_id, "limit": 200},
-            timeout=30,
+        # Pull contested claim pairs via the relationships table.
+        rc, stdout, _ = _docker_exec(
+            self.container, "mnemos", "audit",
+            env=self._env(),
         )
-        events_resp.raise_for_status()
-        memories = events_resp.json().get("events", [])
+        if rc != 0:
+            return QueryResult(answer="", memories=[], contradictions=[])
+        try:
+            audit = json.loads(stdout)
+        except (json.JSONDecodeError, ValueError):
+            return QueryResult(answer="", memories=[], contradictions=[])
 
-        # Pull every active claim/relationship; the contradiction
-        # eval looks at the relationships table directly.
-        claims_resp = httpx.get(
-            f"{self.base_url}/v1/claims",
-            headers=self._headers(),
-            params={"limit": 200},
-            timeout=30,
-        )
-        claims = claims_resp.json().get("claims", []) if claims_resp.status_code == 200 else []
-
-        rels_resp = httpx.get(
-            f"{self.base_url}/v1/relationships",
-            headers=self._headers(),
-            params={"type": "contradicts", "limit": 200},
-            timeout=30,
-        )
-        rels = rels_resp.json().get("relationships", []) if rels_resp.status_code == 200 else []
-
-        # Project contradictions onto the memories we just listed.
-        own_event_ids = {e["id"] for e in memories}
-        contradictions = [
-            r for r in rels
-            if {r.get("from_claim_id"), r.get("to_claim_id")} <= own_event_ids
-            or _claim_in_run(r, claims, own_event_ids)
+        claims = audit.get("claims", [])
+        rels = [
+            r for r in audit.get("relationships", [])
+            if r.get("type") == "contradicts"
         ]
-
+        claim_text = {c.get("id"): c.get("text", "") for c in claims}
+        contradictions = [
+            {
+                "between": [r["from_claim_id"], r["to_claim_id"]],
+                "text_a": claim_text.get(r["from_claim_id"], ""),
+                "text_b": claim_text.get(r["to_claim_id"], ""),
+            }
+            for r in rels
+        ]
+        memories = [{"id": c.get("id"), "content": c.get("text", "")} for c in claims]
         return QueryResult(
             answer="",
             memories=memories,
             contradictions=contradictions,
-            evidence_ids=[e["id"] for e in memories],
+            evidence_ids=[c.get("id") for c in claims if c.get("id")],
         )
-
-
-def _stringify(meta: dict[str, Any]) -> dict[str, str]:
-    import json
-    return {k: v if isinstance(v, str) else json.dumps(v, default=str) for k, v in meta.items()}
-
-
-def _claim_in_run(rel: dict, claims: list[dict], own_event_ids: set[str]) -> bool:
-    """A relationship counts as in-run when both claims point at events from this run."""
-    by_id = {c.get("id"): c for c in claims}
-    for cid in (rel.get("from_claim_id"), rel.get("to_claim_id")):
-        c = by_id.get(cid)
-        if not c:
-            return False
-        ev_ids = {e.get("event_id") for e in (c.get("evidence") or [])}
-        if not (ev_ids & own_event_ids):
-            return False
-    return True

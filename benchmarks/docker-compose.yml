@@ -1,0 +1,87 @@
+# Benchmark stack — runs Mnemos + competitors side-by-side so the
+# harness can hit each one through a common interface.
+#
+# Each provider ships behind a stable hostname inside the bench
+# network; the harness connects via published localhost ports.
+#
+# Run:
+#   export OPENAI_API_KEY=sk-...        # required by mem0/zep/letta defaults
+#   export MNEMOS_JWT_SECRET=$(openssl rand -hex 32)
+#   docker compose -f benchmarks/docker-compose.yml up -d
+#   python -m benchmarks.run --provider all --suite all
+#   docker compose -f benchmarks/docker-compose.yml down -v
+#
+# Providers can be added incrementally — comment out the ones whose
+# adapters aren't ready yet.
+
+services:
+  # --- Mnemos ---------------------------------------------------------
+  mnemos-postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mnemos
+      POSTGRES_PASSWORD: mnemos
+      POSTGRES_DB: mnemos
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mnemos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mnemos:
+    image: ghcr.io/felixgeelhaar/mnemos:${MNEMOS_TAG:-0.13.0}
+    environment:
+      MNEMOS_DB_URL: "postgres://mnemos:mnemos@mnemos-postgres:5432/mnemos?sslmode=disable"
+      MNEMOS_SERVE_PORT: "7777"
+      MNEMOS_JWT_SECRET: ${MNEMOS_JWT_SECRET:?set MNEMOS_JWT_SECRET}
+    command: ["serve"]
+    depends_on:
+      mnemos-postgres:
+        condition: service_healthy
+    ports:
+      - "7777:7777"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7777/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # --- mem0 OSS server ------------------------------------------------
+  mem0-postgres:
+    image: ankane/pgvector:v0.5.1
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mem0:
+    image: mem0/mem0:latest
+    environment:
+      AUTH_DISABLED: "true"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY}
+      DATABASE_HOST: mem0-postgres
+      DATABASE_PORT: "5432"
+      DATABASE_USER: postgres
+      DATABASE_PASSWORD: postgres
+      DATABASE_NAME: postgres
+      JWT_SECRET: ${MNEMOS_JWT_SECRET:-bench}
+    depends_on:
+      mem0-postgres:
+        condition: service_healthy
+    ports:
+      - "8888:8000"
+
+  # zep — placeholder for next adapter ship.
+  # zep:
+  #   image: zepai/zep:latest
+  #   ports: ["8000:8000"]
+
+  # letta — placeholder for next adapter ship.
+  # letta:
+  #   image: letta/letta:latest
+  #   ports: ["8283:8283"]

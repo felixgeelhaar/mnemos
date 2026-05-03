@@ -66,15 +66,23 @@ class MnemosClient:
         content: str,
         metadata: dict[str, Any],
     ) -> str:
+        # Mnemos's events.metadata accepts map[string]string, so JSON-
+        # stringify any non-string value. Replay tooling unmarshals on
+        # read.
+        flat: dict[str, str] = {}
+        for k, v in metadata.items():
+            flat[k] = v if isinstance(v, str) else json.dumps(v, default=str)
+
         event_id = str(uuid.uuid4())
         body = {
             "events": [
                 {
                     "id": event_id,
                     "run_id": run_id,
+                    "source_input_id": f"refund-triage-langgraph::{run_id}",
                     "content": content,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "metadata": metadata,
+                    "metadata": flat,
                 }
             ]
         }
@@ -227,8 +235,13 @@ def _llm_decide(state: State) -> dict[str, Any]:
 
 def node_decide(state: State) -> State:
     """Decide the refund outcome — LLM or scripted fallback."""
+    decision: dict[str, Any]
     if os.environ.get("ANTHROPIC_API_KEY"):
-        decision = _llm_decide(state)
+        try:
+            decision = _llm_decide(state)
+        except Exception as exc:  # noqa: BLE001
+            print(f"LLM decision failed ({exc}); falling back to scripted.", file=sys.stderr)
+            decision = _scripted_decide(state)
     else:
         decision = _scripted_decide(state)
 

@@ -1,0 +1,73 @@
+# Public Mnemos playground — kick-the-tires deployment.
+#
+# Design:
+#   - In-memory backend (data evaporates on container restart)
+#   - JWT auth disabled-equivalent: the entrypoint mints one shared
+#     read-write token at boot and ships it via /token endpoint behind
+#     the rate limiter. Anyone can grab it, anyone can write.
+#   - nginx in front: rate-limits each IP to ~30 req/min, ~5 burst.
+#   - Container restarts every 24h to wipe state (use a systemd timer
+#     or compose's restart-on-schedule equivalent in your orchestrator).
+#
+# Not for production. This is a "try before you install" surface.
+#
+# Deploy:
+#   1. Point DNS A record for playground.mnemos.dev at this host.
+#   2. Provide TLS via your reverse proxy / Caddy / Cloudflare.
+#   3. docker compose -f deploy/playground/docker-compose.yml up -d
+#   4. Schedule a daily restart (cron/systemd/k8s cronjob).
+
+services:
+  mnemos:
+    image: ghcr.io/felixgeelhaar/mnemos:${MNEMOS_TAG:-0.13.0}
+    environment:
+      MNEMOS_DB_URL: "memory://playground"
+      MNEMOS_SERVE_PORT: "7777"
+      # Shared HMAC secret — playground tokens are short-lived (24h)
+      # and reset on restart, so this just needs to be unique per
+      # deployment. Set to anything random.
+      MNEMOS_JWT_SECRET: ${MNEMOS_JWT_SECRET:?set MNEMOS_JWT_SECRET}
+    command: ["serve"]
+    expose:
+      - "7777"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7777/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Mints one shared "playground" token at boot, writes it to a shared
+  # volume so nginx can serve it from /token. Token rotates on
+  # container restart (i.e., daily if you scheduled a restart).
+  token-mint:
+    image: ghcr.io/felixgeelhaar/mnemos:${MNEMOS_TAG:-0.13.0}
+    depends_on:
+      mnemos:
+        condition: service_healthy
+    environment:
+      MNEMOS_DB_URL: "memory://playground"  # shared with mnemos
+      MNEMOS_JWT_SECRET: ${MNEMOS_JWT_SECRET:?set MNEMOS_JWT_SECRET}
+    entrypoint: >
+      sh -c '
+        mnemos user create --name playground --email playground@local 2>/dev/null || true;
+        UID=$$(mnemos user list --json | jq -r ".[0].id");
+        TOKEN=$$(mnemos token issue --user "$$UID" --ttl 24h | grep -oE "eyJ[a-zA-Z0-9._-]+" | head -1);
+        printf "%s" "$$TOKEN" > /token/playground.jwt;
+        echo "minted playground token (truncated): $${TOKEN:0:20}...";
+      '
+    volumes:
+      - tokendata:/token
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - mnemos
+      - token-mint
+    ports:
+      - "8080:8080"  # bind on whatever your reverse proxy expects
+    volumes:
+      - ./nginx/playground.conf:/etc/nginx/conf.d/default.conf:ro
+      - tokendata:/var/www/token:ro
+
+volumes:
+  tokendata:

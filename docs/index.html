@@ -45,6 +45,7 @@
   <div class="use-cases">
     <div><p><strong>Catch hallucinations early</strong>Stop your support bot from quoting two contradictory facts before the customer notices.</p></div>
     <div><p><strong>Bisect a wrong answer</strong>Trace a hallucinated answer back to the source doc that misled the model.</p></div>
+    <div><p><strong>Audit your AI agent</strong>Wrap a LangGraph / CrewAI / MCP agent. Every node emits one event; the full chain is replayable months later.</p></div>
     <div><p><strong>Query the past</strong>"What was true on April 15?" — answered against the same store, no extra DB.</p></div>
   </div>
 </section>
@@ -212,6 +213,23 @@ mnemos query --llm "What happened with the deployment?"</code></pre>
   <pre><code>mnemos history --kind=claim cl_a   # every state change with reason
 mnemos verify cl_a                  # re-check against source events
 mnemos export --kind=lesson         # YAML-frontmatter markdown for review</code></pre>
+
+  <h3 class="subhead">Wrap a LangGraph / CrewAI / MCP agent</h3>
+  <p>
+    Mnemos doubles as the audit substrate beneath any AI agent. Each
+    node-or-step posts one event keyed to a single <code>run_id</code>;
+    the full reasoning chain is one HTTP call away weeks later.
+  </p>
+  <pre><code>cd examples/refund_triage_langgraph
+pip install -r requirements.txt
+python agent.py --customer-id CUST-42 --amount 245.00
+
+curl -s "http://localhost:7777/v1/events?run_id=&lt;run-id&gt;" | jq</code></pre>
+  <p class="dim">
+    The example wires raw HTTP, no SDK — four lines per node get you a
+    defensible audit trail. Source:
+    <a href="https://github.com/felixgeelhaar/mnemos/tree/main/examples/refund_triage_langgraph"><code>examples/refund_triage_langgraph/</code></a>.
+  </p>
 </section>
 
 <section id="stack" aria-labelledby="stack-heading">

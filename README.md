@@ -80,6 +80,26 @@ Without a provider, extraction and contradiction detection still work via rule-b
 mnemos mcp   # Exposes query_knowledge, process_text, and knowledge_metrics over stdio
 ```
 
+### Wrap a LangGraph / CrewAI / MCP agent for audit + replay
+
+Mnemos doubles as the audit substrate beneath any AI agent. Each
+node-or-step emits one event keyed to a single `run_id`; the full
+reasoning chain is one HTTP call away weeks later.
+
+```bash
+# A 4-node LangGraph refund-triage agent that wraps Mnemos for audit:
+cd examples/refund_triage_langgraph
+pip install -r requirements.txt
+python agent.py --customer-id CUST-42 --amount 245.00
+
+# Replay the exact decision chain
+curl -s "http://localhost:7777/v1/events?run_id=<run-id>" | jq
+```
+
+The example uses raw HTTP (no SDK), so you can see the four lines per
+node that get you a defensible audit trail. Source:
+[`examples/refund_triage_langgraph/`](examples/refund_triage_langgraph/).
+
 ## How It Works
 
 ```

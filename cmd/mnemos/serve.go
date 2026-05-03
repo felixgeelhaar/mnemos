@@ -377,7 +377,34 @@ func listEventsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request)
 	limit, offset := parsePaginationFromQuery(r)
 	ctx := r.Context()
 
-	all, err := conn.Events.ListAll(ctx)
+	// Optional run_id filter. Lets external auditors (e.g. a LangGraph
+	// agent's callback) replay one run's full chain without scanning
+	// the global event log. Falls back to ListAll when unset.
+	runID := r.URL.Query().Get("run_id")
+	if runID != "" {
+		// Whitelist parity with the write path: if the bearer has a
+		// run whitelist, the filter must target a run inside it.
+		if allowed := allowedRunsFromContext(ctx); len(allowed) > 0 {
+			ok := false
+			for _, a := range allowed {
+				if a == runID {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				writeError(w, http.StatusForbidden, fmt.Sprintf("run_id %q not in token whitelist", runID))
+				return
+			}
+		}
+	}
+	var all []domain.Event
+	var err error
+	if runID != "" {
+		all, err = conn.Events.ListByRunID(ctx, runID)
+	} else {
+		all, err = conn.Events.ListAll(ctx)
+	}
 	if err != nil {
 		writeInternalError(w, "list events", err)
 		return

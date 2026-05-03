@@ -106,6 +106,37 @@ func TestServe_ListEventsReturnsAndPaginates(t *testing.T) {
 	}
 }
 
+func TestServe_ListEventsFiltersByRunID(t *testing.T) {
+	_, conn := openTestStore(t)
+	base := time.Now().UTC()
+	seedEventConn(t, conn, "e1", "run-A", "alpha", "in1", `{}`, base)
+	seedEventConn(t, conn, "e2", "run-A", "beta", "in2", `{}`, base.Add(time.Minute))
+	seedEventConn(t, conn, "e3", "run-B", "gamma", "in3", `{}`, base.Add(2*time.Minute))
+
+	mux := newServerMux(conn)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/v1/events?run_id=run-A")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var body eventsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Total != 2 {
+		t.Errorf("total = %d, want 2 (only run-A events)", body.Total)
+	}
+	for _, e := range body.Events {
+		if e.RunID != "run-A" {
+			t.Errorf("got event with run_id %q, want only run-A", e.RunID)
+		}
+	}
+}
+
 func TestServe_ListEventsCapsAtMax(t *testing.T) {
 	_, conn := openTestStore(t)
 	mux := newServerMux(conn)

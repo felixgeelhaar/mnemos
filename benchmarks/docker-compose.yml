@@ -34,6 +34,11 @@ services:
       MNEMOS_DB_URL: "postgres://mnemos:mnemos@mnemos-postgres:5432/mnemos?sslmode=disable"
       MNEMOS_SERVE_PORT: "7777"
       MNEMOS_JWT_SECRET: ${MNEMOS_JWT_SECRET:?set MNEMOS_JWT_SECRET}
+      # LLM-driven claim extraction lifts contradiction-detection on
+      # entity/numeric/temporal conflicts the rule-based path misses.
+      MNEMOS_LLM_PROVIDER: ${MNEMOS_LLM_PROVIDER:-openai}
+      MNEMOS_LLM_API_KEY: ${MNEMOS_LLM_API_KEY:?set MNEMOS_LLM_API_KEY}
+      MNEMOS_LLM_MODEL: ${MNEMOS_LLM_MODEL:-gpt-4o-mini}
     command: ["serve"]
     depends_on:
       mnemos-postgres:
@@ -47,34 +52,32 @@ services:
       retries: 10
 
   # --- mem0 OSS server ------------------------------------------------
-  mem0-postgres:
-    image: ankane/pgvector:v0.5.1
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  mem0:
-    image: mem0/mem0:latest
-    environment:
-      AUTH_DISABLED: "true"
-      OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY}
-      DATABASE_HOST: mem0-postgres
-      DATABASE_PORT: "5432"
-      DATABASE_USER: postgres
-      DATABASE_PASSWORD: postgres
-      DATABASE_NAME: postgres
-      JWT_SECRET: ${MNEMOS_JWT_SECRET:-bench}
-    depends_on:
-      mem0-postgres:
-        condition: service_healthy
-    ports:
-      - "8888:8000"
+  # mem0 has no published Docker Hub image; their server is built from
+  # source via server/dev.Dockerfile in the mem0ai/mem0 repo. To run
+  # mem0 in this stack: clone mem0ai/mem0 next to this repo, then
+  # uncomment below and adjust build.context to point at it.
+  #
+  # mem0-postgres:
+  #   image: ankane/pgvector:v0.5.1
+  #   environment:
+  #     POSTGRES_USER: postgres
+  #     POSTGRES_PASSWORD: postgres
+  #     POSTGRES_DB: postgres
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U postgres"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 10
+  #
+  # mem0:
+  #   build:
+  #     context: ../../mem0
+  #     dockerfile: server/dev.Dockerfile
+  #   environment:
+  #     AUTH_DISABLED: "true"
+  #     OPENAI_API_KEY: ${OPENAI_API_KEY:?set OPENAI_API_KEY}
+  #     DATABASE_HOST: mem0-postgres
+  #     ...
 
   # zep — placeholder for next adapter ship.
   # zep:

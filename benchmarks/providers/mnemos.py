@@ -36,10 +36,18 @@ def _docker_exec(container: str, *args: str, env: dict | None = None) -> tuple[i
 class MnemosProvider:
     name = "mnemos"
 
-    def __init__(self, container: str | None = None):
+    def __init__(self, container: str | None = None, llm: bool | None = None):
         self.container = container or os.environ.get(
             "MNEMOS_CONTAINER", "benchmarks-mnemos-1"
         )
+        # Default to --llm when MNEMOS_LLM_PROVIDER is set inside the
+        # container (compose.yml sets this when OPENAI_API_KEY is
+        # present). Override with MNEMOS_BENCH_LLM=0 to force rule-only.
+        if llm is None:
+            llm_flag = os.environ.get("MNEMOS_BENCH_LLM", "1")
+            self.llm = llm_flag != "0"
+        else:
+            self.llm = llm
         self.db_path = ""
         self.reset()
 
@@ -47,26 +55,36 @@ class MnemosProvider:
         # Per-case sqlite db inside the container. Fresh file = fresh
         # claims + relationships tables; no cross-case bleed.
         self.db_path = f"/tmp/bench-{uuid.uuid4().hex[:12]}.db"
+        self._pending: list[str] = []
 
     def _env(self) -> dict[str, str]:
         return {"MNEMOS_DB_URL": f"sqlite://{self.db_path}"}
 
     def add(self, content: str, metadata: dict[str, Any] | None = None) -> str:
-        # `mnemos process --text` runs the full pipeline: ingest event
-        # → extract claims → relate (rule-based contradiction
-        # detection happens here, no LLM needed for the suite).
-        rc, stdout, stderr = _docker_exec(
-            self.container, "mnemos", "process", "--text", content,
-            env=self._env(),
-        )
-        if rc != 0:
-            raise RuntimeError(f"mnemos process failed ({rc}): {stderr}")
-        # mnemos process emits human-readable text, not JSON. Return
-        # an opaque marker; the suite doesn't need event ids for
-        # contradiction scoring.
+        # Defer ingest to query time. Mnemos's relate stage detects
+        # contradictions when a batch of claims sits in one extract
+        # pass; per-fact invocations don't always cross-relate. Batch
+        # makes the benchmark fair.
+        self._pending.append(content)
         return f"event-{uuid.uuid4().hex[:8]}"
 
+    def _flush(self) -> None:
+        if not self._pending:
+            return
+        # Newline-joined text so all facts are one event; mnemos
+        # process extracts claims from the whole block then relates
+        # them in one pass.
+        joined = "\n".join(self._pending)
+        cmd = ["mnemos", "process", "--text", joined]
+        if self.llm:
+            cmd.append("--llm")
+        rc, _, stderr = _docker_exec(self.container, *cmd, env=self._env())
+        if rc != 0:
+            raise RuntimeError(f"mnemos process failed ({rc}): {stderr}")
+        self._pending.clear()
+
     def query(self, question: str) -> QueryResult:
+        self._flush()
         # Pull contested claim pairs via the relationships table.
         rc, stdout, _ = _docker_exec(
             self.container, "mnemos", "audit",

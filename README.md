@@ -1,22 +1,44 @@
 # Mnemos
 
-**The local-first evidence layer that grounds AI in truth.**
+**Self-hosted memory for AI apps. No vendor cloud, no per-call billing, no SDK to install.**
 
-Your RAG system hallucinates because your data layer has no concept of evidence or contradiction. Mnemos fixes the data layer — every claim traces to its source, and conflicting information is surfaced instead of buried.
+The open-source memory layer for AI apps you actually own. Just a Go binary, an HTTP API, and your data. Every claim has evidence, every contradiction surfaces, every decision replays — months later, in your infra.
 
-## The Problem
+## Add memory to an AI app in 5 lines
 
+No SDK to install. Any language with an HTTP client works. Below is Python; substitute `curl`, `fetch`, `reqwest`, etc.
+
+```python
+import httpx, uuid
+m = "http://localhost:7777"
+run = str(uuid.uuid4())
+
+# Remember something
+httpx.post(f"{m}/v1/events", json={"events": [{
+    "id": str(uuid.uuid4()),
+    "run_id": run,
+    "source_input_id": "chat-session-1",
+    "content": "user prefers vegetarian options",
+    "timestamp": "2026-05-03T16:00:00Z",
+    "metadata": {"role": "preference"},
+}]})
+
+# Recall it later (months later, same call)
+events = httpx.get(f"{m}/v1/events", params={"run_id": run}).json()
 ```
-$67.4B — the annual cost of AI hallucination (2026)
-51% — of enterprise AI responses contain fabrications on RAG data
-52% — of organizations report significant negative consequences from AI inaccuracies
-```
 
-RAG alone reduces hallucination by 40-71%. But RAG on ungoverned data? 52% fabrication rate. The problem isn't the model—it's the data layer.
+That's the whole API for the simple case. For richer memory — typed claims, contradiction detection, evidence-back-to-source — keep reading.
 
-**"Confident wrong answers" are worse than uncertain ones.** Users don't verify cited outputs.
+## Where Mnemos fits
 
-## 5-Minute Quickstart
+| Approach | Best for | Trade-off |
+|---|---|---|
+| Hosted AI memory services | Fast onboarding, consumer apps | Vendor cloud, per-call billing, customer data leaves your infra |
+| Vector DBs (Pinecone, Chroma, Weaviate) | Pure semantic search | No claim/contradiction structure, no evidence trace, no replay |
+| Notes apps (Notion, Obsidian, Roam) | Humans organising their thinking | Not built for programmatic AI memory writes at scale |
+| **Mnemos** | AI memory in stacks that can't leave your servers — regulated, on-prem, air-gapped | You run a binary |
+
+## CLI Quickstart
 
 ### 1. Install
 

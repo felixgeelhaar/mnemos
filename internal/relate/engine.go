@@ -164,6 +164,15 @@ func (e Engine) Detect(claims []domain.Claim) ([]domain.Relationship, error) {
 				relType = domain.RelationshipTypeContradicts
 				ok = true
 			}
+			// Entity/role-divergence path. Short copular claims that
+			// share a role token but assign it to different proper
+			// nouns ("The CEO is Alice" vs "The CEO is Bob") are
+			// contradictions even though the overlap-based path
+			// rejects them as too short for value-divergence.
+			if !bothEnumerated && !ok && detectEntityRoleDivergence(cache[i].text, cache[j].text, cache[i].tokens, cache[j].tokens) {
+				relType = domain.RelationshipTypeContradicts
+				ok = true
+			}
 			if !ok {
 				continue
 			}
@@ -227,6 +236,10 @@ func (e Engine) DetectIncremental(newClaims []domain.Claim, existingClaims []dom
 
 			relType, ok := inferRelationship(newCache[i].tokens, newCache[i].neg, existCache[j].tokens, existCache[j].neg)
 			if detectNumericDivergence(newCache[i].text, existCache[j].text, newCache[i].tokens, existCache[j].tokens) {
+				relType = domain.RelationshipTypeContradicts
+				ok = true
+			}
+			if !ok && detectEntityRoleDivergence(newCache[i].text, existCache[j].text, newCache[i].tokens, existCache[j].tokens) {
 				relType = domain.RelationshipTypeContradicts
 				ok = true
 			}

@@ -1,13 +1,13 @@
 {
   "provider": "mnemos",
   "suite": "contradiction_detection",
-  "timestamp": "20260503T210720Z",
+  "timestamp": "20260504T051936Z",
   "summary": {
     "provider": "mnemos",
     "n": 5,
-    "precision_avg": 0.4,
-    "recall_avg": 0.4,
-    "f1_avg": 0.4
+    "precision_avg": 0.6,
+    "recall_avg": 0.6,
+    "f1_avg": 0.6
   },
   "cases": [
     {
@@ -40,10 +40,10 @@
     {
       "name": "numeric_disagreement",
       "expected": 1,
-      "detected": 0,
-      "precision": 0.0,
-      "recall": 0.0,
-      "f1": 0.0,
+      "detected": 1,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
       "notes": ""
     },
     {

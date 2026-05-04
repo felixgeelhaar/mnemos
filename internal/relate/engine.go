@@ -125,6 +125,7 @@ func (e Engine) Detect(claims []domain.Claim) ([]domain.Relationship, error) {
 
 	// Pre-compute normalized content tokens and polarity for each claim.
 	type analyzed struct {
+		text         string
 		tokens       map[string]struct{}
 		neg          bool
 		isEnumerated bool
@@ -133,6 +134,7 @@ func (e Engine) Detect(claims []domain.Claim) ([]domain.Relationship, error) {
 	for i := range claims {
 		tokens, neg := contentTokensAndPolarity(claims[i].Text)
 		cache[i] = analyzed{
+			text:         claims[i].Text,
 			tokens:       tokens,
 			neg:          neg,
 			isEnumerated: isEnumeratedItem(claims[i].Text),
@@ -153,6 +155,15 @@ func (e Engine) Detect(claims []domain.Claim) ([]domain.Relationship, error) {
 			bothEnumerated := cache[i].isEnumerated && cache[j].isEnumerated
 
 			relType, ok := inferRelationshipWithContext(cache[i].tokens, cache[i].neg, cache[j].tokens, cache[j].neg, bothEnumerated)
+			// Numeric-divergence path. Same-topic claims that share
+			// most tokens but disagree on a numeric value are a
+			// contradiction regardless of whether the overlap path
+			// would have called them supports — "12 refunds" vs
+			// "0 refunds" is a conflict, not a corroboration.
+			if !bothEnumerated && detectNumericDivergence(cache[i].text, cache[j].text, cache[i].tokens, cache[j].tokens) {
+				relType = domain.RelationshipTypeContradicts
+				ok = true
+			}
 			if !ok {
 				continue
 			}
@@ -188,6 +199,7 @@ func (e Engine) DetectIncremental(newClaims []domain.Claim, existingClaims []dom
 	now := e.now().UTC()
 
 	type analyzed struct {
+		text   string
 		tokens map[string]struct{}
 		neg    bool
 	}
@@ -195,13 +207,13 @@ func (e Engine) DetectIncremental(newClaims []domain.Claim, existingClaims []dom
 	newCache := make([]analyzed, len(newClaims))
 	for i := range newClaims {
 		tokens, neg := contentTokensAndPolarity(newClaims[i].Text)
-		newCache[i] = analyzed{tokens: tokens, neg: neg}
+		newCache[i] = analyzed{text: newClaims[i].Text, tokens: tokens, neg: neg}
 	}
 
 	existCache := make([]analyzed, len(existingClaims))
 	for i := range existingClaims {
 		tokens, neg := contentTokensAndPolarity(existingClaims[i].Text)
-		existCache[i] = analyzed{tokens: tokens, neg: neg}
+		existCache[i] = analyzed{text: existingClaims[i].Text, tokens: tokens, neg: neg}
 	}
 
 	for i := 0; i < len(newClaims); i++ {
@@ -214,6 +226,10 @@ func (e Engine) DetectIncremental(newClaims []domain.Claim, existingClaims []dom
 			}
 
 			relType, ok := inferRelationship(newCache[i].tokens, newCache[i].neg, existCache[j].tokens, existCache[j].neg)
+			if detectNumericDivergence(newCache[i].text, existCache[j].text, newCache[i].tokens, existCache[j].tokens) {
+				relType = domain.RelationshipTypeContradicts
+				ok = true
+			}
 			if !ok {
 				continue
 			}

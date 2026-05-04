@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 126,
+  "version": 127,
   "task_states": {
     "task-action-outcome-recording": {
       "status": "done",
@@ -23,6 +23,11 @@
       "started_at": "2026-04-12T11:34:43.933278+02:00",
       "completed_at": "2026-04-12T11:37:07.875432+02:00",
       "elapsed_minutes": 2
+    },
+    "task-benchmark-suite-in-ci-with-regression-gates": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
     },
     "task-causal-relationship-edges": {
       "status": "done",
@@ -134,6 +139,11 @@
       "completed_at": "2026-04-18T18:08:29.805408+02:00",
       "elapsed_minutes": 0
     },
+    "task-entity-aware-contradiction-detection": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
     "task-file-watch-mcp-tool": {
       "status": "done",
       "path": "",
@@ -210,6 +220,11 @@
       "started_at": "2026-05-01T11:50:22.171895+02:00",
       "completed_at": "2026-05-01T11:53:11.317976+02:00",
       "elapsed_minutes": 2
+    },
+    "task-implicit-temporal-contradiction-detection": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
     },
     "task-knowledge-browsing-mcp-tools": {
       "status": "done",
@@ -430,6 +445,11 @@
       "started_at": "2026-04-12T11:26:58.711501+02:00",
       "completed_at": "2026-04-12T11:28:55.835793+02:00",
       "elapsed_minutes": 1
+    },
+    "task-numeric-value-disagreement-detection": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
     },
     "task-one-step-process-command": {
       "status": "done",

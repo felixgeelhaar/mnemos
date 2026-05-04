@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/felixgeelhaar/fortify/retry"
@@ -197,6 +198,14 @@ func defaultTrustScorer() func(confidence float64, evidenceCount int, latestEvid
 // FindOrCreate (entities) and the (claim, entity, role) dedup
 // contract on LinkClaim.
 //
+// Resolution at ingest: before creating a new entity row, the helper
+// tries to fold the incoming surface form onto an existing entity of
+// the same type via case-insensitive substring containment. This
+// catches the common "Alice" vs "Alice Smith" case — the first
+// surface form wins as canonical, subsequent surface forms link to
+// the same row. Out of scope: cross-language resolution, alias
+// schema, embedding similarity (separate roadmap items).
+//
 // Runs after PersistArtifacts so the linked claim_id rows already
 // exist. Failure here is reported to the caller; current cmd/mnemos
 // callers treat it as a warning rather than aborting the whole job
@@ -209,21 +218,97 @@ func MaterializeEntities(ctx context.Context, conn *store.Conn, entities map[str
 	if conn == nil || conn.Entities == nil {
 		return 0, fmt.Errorf("materialize entities: conn missing Entities repository")
 	}
+	// Per-type cache of existing entities, populated lazily so a
+	// claim batch with no entities of a type doesn't pay the lookup.
+	existingByType := map[domain.EntityType][]domain.Entity{}
 	linked := 0
 	for claimID, ents := range entities {
 		for _, ent := range ents {
 			etype := domain.EntityType(ent.Type)
-			e, err := conn.Entities.FindOrCreate(ctx, ent.Name, etype, createdBy)
+			canonical, err := resolveOrCreateEntity(ctx, conn, existingByType, ent.Name, etype, createdBy)
 			if err != nil {
-				return linked, fmt.Errorf("find-or-create entity %q: %w", ent.Name, err)
+				return linked, err
 			}
-			if err := conn.Entities.LinkClaim(ctx, claimID, e.ID, ent.Role); err != nil {
-				return linked, fmt.Errorf("link claim %s -> entity %s: %w", claimID, e.ID, err)
+			if err := conn.Entities.LinkClaim(ctx, claimID, canonical.ID, ent.Role); err != nil {
+				return linked, fmt.Errorf("link claim %s -> entity %s: %w", claimID, canonical.ID, err)
 			}
 			linked++
 		}
 	}
 	return linked, nil
+}
+
+// resolveOrCreateEntity returns the canonical entity for the given
+// surface form, creating a new row only when no existing entity of
+// the same type contains-or-is-contained-by the incoming name.
+//
+// Mutates existingByType so subsequent calls within one batch see
+// freshly-created rows and don't double-create.
+func resolveOrCreateEntity(
+	ctx context.Context,
+	conn *store.Conn,
+	cache map[domain.EntityType][]domain.Entity,
+	name string,
+	etype domain.EntityType,
+	createdBy string,
+) (domain.Entity, error) {
+	pool, ok := cache[etype]
+	if !ok {
+		list, err := conn.Entities.ListByType(ctx, etype)
+		if err != nil {
+			return domain.Entity{}, fmt.Errorf("list entities of type %s: %w", etype, err)
+		}
+		pool = list
+		cache[etype] = pool
+	}
+	if match, ok := matchByContainment(pool, name); ok {
+		return match, nil
+	}
+	created, err := conn.Entities.FindOrCreate(ctx, name, etype, createdBy)
+	if err != nil {
+		return domain.Entity{}, fmt.Errorf("find-or-create entity %q: %w", name, err)
+	}
+	cache[etype] = append(cache[etype], created)
+	return created, nil
+}
+
+// matchByContainment scans an entity pool for one whose normalized
+// name contains the incoming form (or vice versa) and returns it if
+// found. The check is symmetric so that ingesting "Alice" first then
+// "Alice Smith" — or "Alice Smith" first then "Alice" — both fold
+// onto the first-seen row.
+//
+// Containment is the lightest viable resolution heuristic. False
+// positives are bounded by the (normalized_name, type) UNIQUE index
+// — entities of different types never collide. False negatives
+// (e.g. "Alice" vs "A. Smith") are accepted; the operator can use
+// `mnemos entities merge` to fold them by hand.
+func matchByContainment(pool []domain.Entity, name string) (domain.Entity, bool) {
+	target := normalizeEntityName(name)
+	if target == "" {
+		return domain.Entity{}, false
+	}
+	for _, e := range pool {
+		existing := e.NormalizedName
+		if existing == "" {
+			existing = normalizeEntityName(e.Name)
+		}
+		if existing == "" {
+			continue
+		}
+		if existing == target ||
+			strings.Contains(existing, target) ||
+			strings.Contains(target, existing) {
+			return e, true
+		}
+	}
+	return domain.Entity{}, false
+}
+
+// normalizeEntityName mirrors the (assumed) repository-side
+// normalization: lowercase + collapsed whitespace. Idempotent.
+func normalizeEntityName(name string) string {
+	return strings.Join(strings.Fields(strings.ToLower(name)), " ")
 }
 
 // GenerateEmbeddings creates vector embeddings for the given events

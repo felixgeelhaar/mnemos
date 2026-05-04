@@ -215,6 +215,102 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+  /v1/search:
+    get:
+      summary: Hybrid retrieval over the claim store
+      description: |
+        Combines BM25 + cosine similarity (when embeddings are
+        configured) + relationship-graph hop expansion to rank
+        claims for the query. Filter DSL covers run_id, type,
+        status, scope, point-in-time, and trust threshold.
+      parameters:
+        - { name: query, in: query, required: true, schema: { type: string } }
+        - { name: run_id, in: query, schema: { type: string } }
+        - { name: top_k, in: query, schema: { type: integer, minimum: 1, maximum: 200 } }
+        - { name: min_trust, in: query, schema: { type: number, format: double, minimum: 0, maximum: 1 } }
+        - { name: as_of, in: query, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: Search hits
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  query: { type: string }
+                  top_k: { type: integer }
+                  total: { type: integer }
+                  applied_filters:
+                    type: object
+                    additionalProperties: true
+                  claims:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        text: { type: string }
+                        type: { type: string }
+                        status: { type: string }
+                        confidence: { type: number, format: double }
+                        trust_score: { type: number, format: double }
+                  contradictions:
+                    type: array
+                    items: { $ref: "#/components/schemas/Relationship" }
+        "400":
+          description: Missing query or invalid filter
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    post:
+      summary: Hybrid retrieval (JSON body variant)
+      description: |
+        Same as GET but accepts a richer JSON body — additional
+        filters (claim type/status, scope.service/env/team) ride
+        in `filters` and `scope` instead of being URL-encoded.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query: { type: string }
+                run_id: { type: string }
+                top_k: { type: integer, minimum: 1, maximum: 200 }
+                min_trust: { type: number, format: double, minimum: 0, maximum: 1 }
+                as_of: { type: string, format: date-time }
+                scope:
+                  type: object
+                  properties:
+                    service: { type: string }
+                    env: { type: string }
+                    team: { type: string }
+                filters:
+                  type: object
+                  properties:
+                    type: { type: string, enum: [fact, hypothesis, decision] }
+                    status: { type: string, enum: [active, contested, resolved, deprecated] }
+      responses:
+        "200":
+          description: Search hits
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  query: { type: string }
+                  top_k: { type: integer }
+                  total: { type: integer }
+                  applied_filters: { type: object }
+                  claims: { type: array, items: { type: object } }
+                  contradictions: { type: array, items: { $ref: "#/components/schemas/Relationship" } }
+        "400":
+          description: Missing query or invalid filter
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /v1/embeddings:
     get:
       summary: List embeddings

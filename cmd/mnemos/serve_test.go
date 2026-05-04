@@ -170,6 +170,65 @@ func TestServe_ContextEndpointReturnsBlock(t *testing.T) {
 	}
 }
 
+func TestServe_SearchEndpointRejectsMissingQuery(t *testing.T) {
+	_, conn := openTestStore(t)
+	mux := newServerMux(conn)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/v1/search")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestServe_SearchEndpointDefaultsTopK(t *testing.T) {
+	_, conn := openTestStore(t)
+	mux := newServerMux(conn)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/v1/search?query=anything")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var body searchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.TopK != 10 {
+		t.Errorf("default top_k = %d, want 10", body.TopK)
+	}
+	if body.Query != "anything" {
+		t.Errorf("query = %q, want 'anything'", body.Query)
+	}
+}
+
+func TestServe_SearchEndpointRejectsBadMinTrust(t *testing.T) {
+	_, conn := openTestStore(t)
+	mux := newServerMux(conn)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/v1/search?query=x&min_trust=2.5")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 (min_trust > 1.0 rejected)", resp.StatusCode)
+	}
+}
+
 func TestServe_ContextEndpointRejectsMissingRunID(t *testing.T) {
 	_, conn := openTestStore(t)
 	mux := newServerMux(conn)

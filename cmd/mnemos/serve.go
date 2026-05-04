@@ -248,6 +248,7 @@ func newServerMux(conn *store.Conn) http.Handler {
 	mux.HandleFunc("/v1/embeddings", makeEmbeddingsHandler(conn))
 	mux.HandleFunc("/v1/metrics", makeMetricsHandler(conn))
 	mux.HandleFunc("/v1/context", makeContextHandler(conn))
+	mux.HandleFunc("/v1/search", makeSearchHandler(conn))
 
 	logger := bolt.New(bolt.NewJSONHandler(os.Stderr))
 	// panicRecover is the outermost layer so a panic in any later
@@ -1285,5 +1286,205 @@ func makeContextHandler(conn *store.Conn) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, contextResponse{RunID: req.RunID, Context: block})
+	}
+}
+
+// searchRequest is the body for POST /v1/search. The query is the
+// only required field; everything else is an optional filter.
+type searchRequest struct {
+	Query    string         `json:"query"`
+	RunID    string         `json:"run_id,omitempty"`
+	TopK     int            `json:"top_k,omitempty"`
+	MinTrust float64        `json:"min_trust,omitempty"`
+	AsOf     string         `json:"as_of,omitempty"`
+	Scope    *searchScope   `json:"scope,omitempty"`
+	Filters  *searchFilters `json:"filters,omitempty"`
+}
+
+type searchScope struct {
+	Service string `json:"service,omitempty"`
+	Env     string `json:"env,omitempty"`
+	Team    string `json:"team,omitempty"`
+}
+
+type searchFilters struct {
+	ClaimType string `json:"type,omitempty"`
+	Status    string `json:"status,omitempty"`
+}
+
+// searchClaimDTO is a slim subset of domain.Claim for /v1/search
+// responses — agents asking for retrieval don't need every field on
+// the underlying record.
+type searchClaimDTO struct {
+	ID         string  `json:"id"`
+	Text       string  `json:"text"`
+	Type       string  `json:"type"`
+	Status     string  `json:"status"`
+	Confidence float64 `json:"confidence"`
+	TrustScore float64 `json:"trust_score"`
+}
+
+type searchResponse struct {
+	Query          string                 `json:"query"`
+	Claims         []searchClaimDTO       `json:"claims"`
+	Contradictions []relationshipDTO      `json:"contradictions"`
+	Total          int                    `json:"total"`
+	TopK           int                    `json:"top_k"`
+	AppliedFilters map[string]interface{} `json:"applied_filters,omitempty"`
+}
+
+// makeSearchHandler returns the /v1/search handler. Hybrid retrieval:
+// internal/query.AnswerWithOptions already combines BM25 with cosine
+// similarity (when embeddings are configured) and hop-expansion over
+// the relationship graph; this endpoint exposes that surface with a
+// filter DSL on top.
+func makeSearchHandler(conn *store.Conn) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req searchRequest
+		switch r.Method {
+		case http.MethodGet:
+			req.Query = r.URL.Query().Get("query")
+			req.RunID = r.URL.Query().Get("run_id")
+			if v := r.URL.Query().Get("top_k"); v != "" {
+				n, err := strconv.Atoi(v)
+				if err != nil || n < 0 {
+					writeError(w, http.StatusBadRequest, "top_k must be a non-negative integer")
+					return
+				}
+				req.TopK = n
+			}
+			if v := r.URL.Query().Get("min_trust"); v != "" {
+				f, err := strconv.ParseFloat(v, 64)
+				if err != nil || f < 0 || f > 1 {
+					writeError(w, http.StatusBadRequest, "min_trust must be a float in [0,1]")
+					return
+				}
+				req.MinTrust = f
+			}
+			req.AsOf = r.URL.Query().Get("as_of")
+		case http.MethodPost:
+			if err := decodeJSON(r, &req); err != nil {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
+				return
+			}
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if req.Query == "" {
+			writeError(w, http.StatusBadRequest, "query is required")
+			return
+		}
+		if req.TopK <= 0 {
+			req.TopK = 10
+		}
+
+		opts := query.AnswerOptions{MinTrust: req.MinTrust}
+		if req.AsOf != "" {
+			t, err := parseTimeFlexible(req.AsOf)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("as_of: %v", err))
+				return
+			}
+			opts.AsOf = t
+		}
+		if req.Scope != nil {
+			opts.Scope = domain.Scope{
+				Service: req.Scope.Service,
+				Env:     req.Scope.Env,
+				Team:    req.Scope.Team,
+			}
+		}
+
+		engine := query.NewEngine(conn.Events, conn.Claims, conn.Relationships)
+		var answer domain.Answer
+		var err error
+		if req.RunID != "" {
+			answer, err = engine.AnswerForRunWithOptions(req.Query, req.RunID, opts)
+		} else {
+			answer, err = engine.AnswerWithOptions(req.Query, opts)
+		}
+		if err != nil {
+			writeInternalError(w, "search", err)
+			return
+		}
+
+		// Post-filter on type/status — these aren't AnswerOptions
+		// fields. Cheap to do at the HTTP layer; cleaner than
+		// reaching into the engine.
+		filtered := answer.Claims
+		if req.Filters != nil {
+			if req.Filters.ClaimType != "" || req.Filters.Status != "" {
+				kept := make([]domain.Claim, 0, len(filtered))
+				for _, c := range filtered {
+					if req.Filters.ClaimType != "" && string(c.Type) != req.Filters.ClaimType {
+						continue
+					}
+					if req.Filters.Status != "" && string(c.Status) != req.Filters.Status {
+						continue
+					}
+					kept = append(kept, c)
+				}
+				filtered = kept
+			}
+		}
+
+		// Truncate to top_k after filter so the cap reflects what the
+		// caller asked to see, not what the engine returned upstream.
+		total := len(filtered)
+		if total > req.TopK {
+			filtered = filtered[:req.TopK]
+		}
+
+		dto := make([]searchClaimDTO, 0, len(filtered))
+		for _, c := range filtered {
+			dto = append(dto, searchClaimDTO{
+				ID:         c.ID,
+				Text:       c.Text,
+				Type:       string(c.Type),
+				Status:     string(c.Status),
+				Confidence: c.Confidence,
+				TrustScore: c.TrustScore,
+			})
+		}
+
+		contradictions := make([]relationshipDTO, 0, len(answer.Contradictions))
+		for _, rel := range answer.Contradictions {
+			contradictions = append(contradictions, relationshipDTO{
+				ID:          rel.ID,
+				Type:        string(rel.Type),
+				FromClaimID: rel.FromClaimID,
+				ToClaimID:   rel.ToClaimID,
+				CreatedAt:   rel.CreatedAt.UTC().Format(time.RFC3339),
+			})
+		}
+
+		applied := map[string]interface{}{}
+		if req.RunID != "" {
+			applied["run_id"] = req.RunID
+		}
+		if req.MinTrust > 0 {
+			applied["min_trust"] = req.MinTrust
+		}
+		if !opts.AsOf.IsZero() {
+			applied["as_of"] = opts.AsOf.UTC().Format(time.RFC3339)
+		}
+		if req.Filters != nil {
+			if req.Filters.ClaimType != "" {
+				applied["type"] = req.Filters.ClaimType
+			}
+			if req.Filters.Status != "" {
+				applied["status"] = req.Filters.Status
+			}
+		}
+
+		writeJSON(w, http.StatusOK, searchResponse{
+			Query:          req.Query,
+			Claims:         dto,
+			Contradictions: contradictions,
+			Total:          total,
+			TopK:           req.TopK,
+			AppliedFilters: applied,
+		})
 	}
 }

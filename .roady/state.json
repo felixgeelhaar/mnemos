@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 139,
+  "version": 141,
   "task_states": {
     "task-action-outcome-recording": {
       "status": "done",
@@ -173,11 +173,15 @@
       "elapsed_minutes": 3
     },
     "task-entity-resolution-at-ingest": {
-      "status": "in_progress",
+      "status": "done",
       "path": "",
       "owner": "ai-agent",
+      "evidence": [
+        "commit cfc3ef4 — resolveOrCreateEntity + matchByContainment, 5 unit tests passing, full suite green"
+      ],
       "started_at": "2026-05-04T08:39:32.236421+02:00",
-      "elapsed_minutes": 0
+      "completed_at": "2026-05-04T08:50:53.708063+02:00",
+      "elapsed_minutes": 11
     },
     "task-file-watch-mcp-tool": {
       "status": "done",
@@ -257,8 +261,10 @@
       "elapsed_minutes": 2
     },
     "task-hybrid-retrieval-with-reranker": {
-      "status": "pending",
+      "status": "in_progress",
       "path": "",
+      "owner": "ai-agent",
+      "started_at": "2026-05-04T08:51:19.018587+02:00",
       "elapsed_minutes": 0
     },
     "task-implicit-temporal-contradiction-detection": {
@@ -663,5 +669,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-05-04T08:39:32.236421+02:00"
+  "updated_at": "2026-05-04T08:51:19.018587+02:00"
 }

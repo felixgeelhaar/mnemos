@@ -70,6 +70,27 @@ Suites score per-test, aggregate to per-suite, write JSON to
 `results/<provider>-<suite>-<timestamp>.json`. A summary script
 generates the markdown table that ships in launch posts.
 
+## CI regression gate
+
+`.github/workflows/benchmarks.yml` runs the rule-based suite on every
+PR that touches `internal/relate/`, `internal/extract/`,
+`internal/pipeline/`, `cmd/mnemos/`, or `benchmarks/`. It boots the
+docker-compose stack, runs the harness, and compares results against
+`benchmarks/baseline.json`. The workflow fails when any baselined
+metric drops more than the threshold (default 0.05).
+
+### Updating the baseline
+
+When a change intentionally raises (or lowers) a baselined metric:
+
+1. Run the suite locally and confirm the new number.
+2. Edit `benchmarks/baseline.json`:
+   - bump `f1_min` / `precision_min` / `recall_min` for the suite
+   - update `evidence_commit` to the commit hash that introduces it
+3. Commit the new baseline together with the underlying change.
+
+The threshold can be tuned per-suite later if needed.
+
 ## What we will NOT do
 
 - Cherry-pick suites where Mnemos wins.

@@ -1,0 +1,12 @@
+{
+  "_doc": "Per-suite F1 baseline. CI fails when F1 drops more than the threshold against any suite. Update this file in the same commit that legitimately raises (or lowers) a baseline.",
+  "_threshold": 0.05,
+  "suites": {
+    "contradiction_detection": {
+      "f1_min": 1.0,
+      "precision_min": 1.0,
+      "recall_min": 1.0,
+      "evidence_commit": "0d2dc95"
+    }
+  }
+}

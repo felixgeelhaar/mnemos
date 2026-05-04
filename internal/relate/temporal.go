@@ -1,0 +1,172 @@
+package relate
+
+import "strings"
+
+// aspect classifies a claim's lexical-aspect signal — the stance it
+// takes about the underlying event being completed, ongoing, planned,
+// or never having happened. Two claims about the same subject whose
+// aspects are mutually exclusive are a contradiction.
+type aspect int
+
+const (
+	aspectUnknown aspect = iota
+	aspectCompleted
+	aspectOngoing
+	aspectPlanned
+	aspectNever
+)
+
+// completedMarkers indicate the underlying event has happened and is
+// no longer in flight. Each entry is a stem; matching is done against
+// the post-stem token set so "completed", "completes", and "complete"
+// all match the same way the overlap path treats them.
+var completedMarkers = map[string]struct{}{
+	"complet":    {},
+	"finish":     {},
+	"done":       {},
+	"succeed":    {},
+	"shipp":      {},
+	"deliver":    {},
+	"resolv":     {},
+	"end":        {},
+	"clos":       {},
+	"sign-off":   {},
+	"signoff":    {},
+	"rolledback": {},
+	"deployed":   {},
+}
+
+// ongoingMarkers indicate the event is still in flight as of the
+// claim's effective time. "still" is the most reliable signal in
+// English; the others are common run-state verbs.
+var ongoingMarkers = map[string]struct{}{
+	"still":     {},
+	"ongoing":   {},
+	"continu":   {},
+	"underway":  {},
+	"runn":      {},
+	"running":   {},
+	"pending":   {},
+	"inflight":  {},
+	"inprogres": {},
+	"working":   {},
+	"workin":    {},
+	"active":    {},
+}
+
+// plannedMarkers indicate a future / scheduled event.
+var plannedMarkers = map[string]struct{}{
+	"plan":     {},
+	"schedul":  {},
+	"upcom":    {},
+	"forecast": {},
+	"will":     {},
+}
+
+// neverMarkers indicate the event explicitly did not (and will not)
+// happen. Distinct from polarity negation, which the existing path
+// already covers — these are dedicated lexical signals like "never".
+var neverMarkers = map[string]struct{}{
+	"never":    {},
+	"cancel":   {},
+	"abandon":  {},
+	"declined": {},
+}
+
+// classifyAspect returns the dominant aspect of a claim by inspecting
+// its raw lowercase tokens. Crucially this does NOT use
+// rawContentTokens because that helper filters negation words like
+// "never" — which carry the strongest aspect signal we want to read.
+func classifyAspect(text string) aspect {
+	tokens := map[string]struct{}{}
+	for _, w := range strings.Fields(strings.ToLower(text)) {
+		w = strings.Trim(w, ",.;:!?()[]{}\"'")
+		if w == "" {
+			continue
+		}
+		tokens[w] = struct{}{}
+	}
+	// Prefer stronger markers: never > planned > ongoing > completed.
+	// Real claims that mix markers ("we planned the migration but it
+	// completed early") are ambiguous; classifyAspect returns one
+	// label, deferring to the strongest signal so the divergence
+	// path stays conservative.
+	for tok := range tokens {
+		stem := stemWord(tok)
+		if _, ok := neverMarkers[stem]; ok {
+			return aspectNever
+		}
+		if _, ok := neverMarkers[tok]; ok {
+			return aspectNever
+		}
+	}
+	for tok := range tokens {
+		stem := stemWord(tok)
+		if _, ok := plannedMarkers[stem]; ok {
+			return aspectPlanned
+		}
+		if _, ok := plannedMarkers[tok]; ok {
+			return aspectPlanned
+		}
+	}
+	for tok := range tokens {
+		stem := stemWord(tok)
+		if _, ok := ongoingMarkers[stem]; ok {
+			return aspectOngoing
+		}
+		if _, ok := ongoingMarkers[tok]; ok {
+			return aspectOngoing
+		}
+	}
+	for tok := range tokens {
+		stem := stemWord(tok)
+		if _, ok := completedMarkers[stem]; ok {
+			return aspectCompleted
+		}
+		if _, ok := completedMarkers[tok]; ok {
+			return aspectCompleted
+		}
+	}
+	return aspectUnknown
+}
+
+// aspectsConflict reports whether two aspects describe mutually
+// exclusive states for the same event. Completed vs ongoing is the
+// canonical case; planned vs completed is also a conflict (the event
+// can't both be planned and already done). aspectUnknown never
+// conflicts — too lossy a signal.
+func aspectsConflict(a, b aspect) bool {
+	if a == aspectUnknown || b == aspectUnknown || a == b {
+		return false
+	}
+	// Treat (completed, ongoing), (completed, planned),
+	// (completed, never), (ongoing, never), (planned, never),
+	// (planned, ongoing) all as conflicts. Unknown → no signal.
+	return true
+}
+
+// detectTemporalDivergence flags two claims as contradicting when
+// they share a subject token but their aspects are mutually
+// exclusive — e.g. "The migration completed on Tuesday" vs "The
+// migration is still running".
+//
+// Acceptance threshold for the benchmark is 0.70 (lower than entity
+// or numeric) because aspect signals are easier to spoof in real
+// production text — claims often mix tenses ("we planned to ship and
+// shipped"). The lexicon-based heuristic targets the clearest cases.
+func detectTemporalDivergence(aText, bText string, aTokens, bTokens map[string]struct{}) bool {
+	aAspect := classifyAspect(aText)
+	bAspect := classifyAspect(bText)
+	if !aspectsConflict(aAspect, bAspect) {
+		return false
+	}
+
+	// Require a shared subject anchor — at least one shared content
+	// token after stop-word removal. Without this guard, "deploy
+	// completed" and "rollback still running" would flag despite
+	// being about different operations.
+	if contentOverlap(aTokens, bTokens) < 1 {
+		return false
+	}
+	return true
+}

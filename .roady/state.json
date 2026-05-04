@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 130,
+  "version": 132,
   "task_states": {
     "task-action-outcome-recording": {
       "status": "done",
@@ -140,11 +140,15 @@
       "elapsed_minutes": 0
     },
     "task-entity-aware-contradiction-detection": {
-      "status": "in_progress",
+      "status": "done",
       "path": "",
       "owner": "ai-agent",
+      "evidence": [
+        "commit a00c874 — F1 on three_way_partial_conflict 0.00 → 1.00, no regressions on existing suite cases or data/eval/relationship_detection.yaml"
+      ],
       "started_at": "2026-05-04T07:20:49.292312+02:00",
-      "elapsed_minutes": 0
+      "completed_at": "2026-05-04T07:24:46.979578+02:00",
+      "elapsed_minutes": 3
     },
     "task-file-watch-mcp-tool": {
       "status": "done",
@@ -224,8 +228,10 @@
       "elapsed_minutes": 2
     },
     "task-implicit-temporal-contradiction-detection": {
-      "status": "pending",
+      "status": "in_progress",
       "path": "",
+      "owner": "ai-agent",
+      "started_at": "2026-05-04T07:24:47.849296+02:00",
       "elapsed_minutes": 0
     },
     "task-knowledge-browsing-mcp-tools": {
@@ -614,5 +620,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-05-04T07:20:49.292312+02:00"
+  "updated_at": "2026-05-04T07:24:47.849296+02:00"
 }

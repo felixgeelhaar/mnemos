@@ -173,6 +173,15 @@ func (e Engine) Detect(claims []domain.Claim) ([]domain.Relationship, error) {
 				relType = domain.RelationshipTypeContradicts
 				ok = true
 			}
+			// Temporal-aspect divergence path. Same-subject claims
+			// whose lexical aspects exclude each other ("migration
+			// completed Tuesday" vs "migration is still running")
+			// are contradictions even when the overlap is too low
+			// to trigger the polarity path.
+			if !ok && detectTemporalDivergence(cache[i].text, cache[j].text, cache[i].tokens, cache[j].tokens) {
+				relType = domain.RelationshipTypeContradicts
+				ok = true
+			}
 			if !ok {
 				continue
 			}
@@ -240,6 +249,10 @@ func (e Engine) DetectIncremental(newClaims []domain.Claim, existingClaims []dom
 				ok = true
 			}
 			if !ok && detectEntityRoleDivergence(newCache[i].text, existCache[j].text, newCache[i].tokens, existCache[j].tokens) {
+				relType = domain.RelationshipTypeContradicts
+				ok = true
+			}
+			if !ok && detectTemporalDivergence(newCache[i].text, existCache[j].text, newCache[i].tokens, existCache[j].tokens) {
 				relType = domain.RelationshipTypeContradicts
 				ok = true
 			}

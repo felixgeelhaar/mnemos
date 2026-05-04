@@ -7,7 +7,7 @@ Latest run per (provider, suite) pair. Re-run any with
 
 | Provider | n | Precision | Recall | F1 | Run |
 |---|---|---|---|---|---|
-| **mnemos** | 5 | 0.80 | 0.80 | 0.80 | `20260504T052409Z` |
+| **mnemos** | 5 | 1.00 | 1.00 | 1.00 | `20260504T052757Z` |
 
 ### Per-case detail — mnemos
 
@@ -17,4 +17,4 @@ Latest run per (provider, suite) pair. Re-run any with
 | three_way_partial_conflict | 1 | 1 | 1.00 | 1.00 | 1.00 |
 | no_contradictions_clean_facts | 0 | 0 | 1.00 | 1.00 | 1.00 |
 | numeric_disagreement | 1 | 1 | 1.00 | 1.00 | 1.00 |
-| implicit_temporal_conflict | 1 | 0 | 0.00 | 0.00 | 0.00 |
+| implicit_temporal_conflict | 1 | 1 | 1.00 | 1.00 | 1.00 |

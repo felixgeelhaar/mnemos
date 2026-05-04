@@ -20,6 +20,7 @@ public, the methodology is documented, and anyone can re-run it.
 |---|---|---|
 | `contradiction_detection` | Feed deliberately-contradicting facts. Query. Measure whether the system surfaces the conflict or quotes one side confidently. | This is Mnemos's claimed wedge. Either it wins here or the wedge is wrong. |
 | `longmemeval` | Chat-history → question recall. Score recall@1 against expected substrings. Seed fixture ships in-tree; LongMemEval-paper data plugs in via a JSON shim. | mem0 publishes 93.4 here. Without our own number we can't compare. |
+| `locomo` | Multi-session conversation → cross-session recall. Scores substring presence in the recalled context. Seed fixture ships in-tree; the published LoCoMo JSON plugs in via `load_cases(path)`. | mem0 publishes 91.6 here. Same shape, same comparison. |
 | `replay_completeness` (planned) | Multi-step agent run. Ask each provider for the full chain at the end. Measure ordered-recall completeness. | "Replay months later" is the second wedge. |
 | `evidence_traceability` (planned) | Each retrieved memory must point at its source event. Measure trace coverage. | Hallucination bisection. |
 

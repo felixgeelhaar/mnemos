@@ -9,7 +9,7 @@ from datetime import datetime
 
 from .providers.mnemos import MnemosProvider
 from .providers.mem0 import Mem0Provider
-from .suites import contradiction_detection, longmemeval
+from .suites import contradiction_detection, locomo, longmemeval
 
 PROVIDERS = {
     "mnemos": MnemosProvider,
@@ -20,7 +20,8 @@ PROVIDERS = {
 SUITES = {
     "contradiction_detection": contradiction_detection.run,
     "longmemeval": longmemeval.run,
-    # locomo, replay_completeness, evidence_traceability follow.
+    "locomo": locomo.run,
+    # replay_completeness, evidence_traceability follow.
 }
 
 

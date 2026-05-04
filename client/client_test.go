@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -93,6 +94,39 @@ func (f *fakeRegistry) handler() http.Handler {
 			writeJSON(w, http.StatusCreated, client.AppendResponse{Accepted: len(body.Relationships)})
 		}
 	}))
+	mux.HandleFunc("/v1/search", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("query")
+		if query == "" {
+			http.Error(w, `{"error":"query required"}`, http.StatusBadRequest)
+			return
+		}
+		topK := 10
+		if v := r.URL.Query().Get("top_k"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				topK = n
+			}
+		}
+		writeJSON(w, http.StatusOK, client.SearchResponse{
+			Query:  query,
+			TopK:   topK,
+			Total:  0,
+			Claims: []client.SearchClaim{{ID: "cl_test", Text: "stub", Type: "fact", Status: "active"}},
+		})
+	})
+	mux.HandleFunc("/v1/context", func(w http.ResponseWriter, r *http.Request) {
+		runID := r.URL.Query().Get("run_id")
+		if runID == "" {
+			http.Error(w, `{"error":"run_id required"}`, http.StatusBadRequest)
+			return
+		}
+		writeJSON(w, http.StatusOK, struct {
+			RunID   string `json:"run_id"`
+			Context string `json:"context"`
+		}{
+			RunID:   runID,
+			Context: "# Memory context (run " + runID + ")\n## Active claims (0)\n",
+		})
+	})
 	mux.HandleFunc("/v1/embeddings", f.requireAuth(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -409,5 +443,54 @@ func Example_basic() {
 	}
 	for _, claim := range list.Claims {
 		fmt.Printf("[%s] %s\n", claim.Type, claim.Text)
+	}
+}
+
+func TestClient_Search(t *testing.T) {
+	srv := httptest.NewServer((&fakeRegistry{}).handler())
+	defer srv.Close()
+
+	got, err := client.New(srv.URL).Search(context.Background(), "deployment", client.SearchOptions{TopK: 5})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if got.Query != "deployment" {
+		t.Errorf("query = %q, want deployment", got.Query)
+	}
+	if got.TopK != 5 {
+		t.Errorf("top_k = %d, want 5", got.TopK)
+	}
+}
+
+func TestClient_SearchRequiresQuery(t *testing.T) {
+	srv := httptest.NewServer((&fakeRegistry{}).handler())
+	defer srv.Close()
+
+	_, err := client.New(srv.URL).Search(context.Background(), "", client.SearchOptions{})
+	if err == nil {
+		t.Errorf("expected error when query is empty")
+	}
+}
+
+func TestClient_Context(t *testing.T) {
+	srv := httptest.NewServer((&fakeRegistry{}).handler())
+	defer srv.Close()
+
+	got, err := client.New(srv.URL).Context(context.Background(), "run-1", client.ContextOptions{})
+	if err != nil {
+		t.Fatalf("Context: %v", err)
+	}
+	if !strings.Contains(got, "# Memory context (run run-1)") {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestClient_ContextRequiresRunID(t *testing.T) {
+	srv := httptest.NewServer((&fakeRegistry{}).handler())
+	defer srv.Close()
+
+	_, err := client.New(srv.URL).Context(context.Background(), "", client.ContextOptions{})
+	if err == nil {
+		t.Errorf("expected error when runID is empty")
 	}
 }

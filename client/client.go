@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -129,6 +131,105 @@ func (c *Client) Relationships() *RelationshipsBuilder { return &RelationshipsBu
 
 // Embeddings returns a fluent builder for the /v1/embeddings endpoint.
 func (c *Client) Embeddings() *EmbeddingsBuilder { return &EmbeddingsBuilder{c: c} }
+
+// SearchOptions tunes a Search call.
+type SearchOptions struct {
+	RunID        string
+	TopK         int
+	MinTrust     float64
+	AsOf         string // RFC3339, validity time
+	RecordedAsOf string // RFC3339, ingestion time
+}
+
+// SearchResponse is the shape of /v1/search.
+type SearchResponse struct {
+	Query          string                 `json:"query"`
+	TopK           int                    `json:"top_k"`
+	Total          int                    `json:"total"`
+	Claims         []SearchClaim          `json:"claims"`
+	Contradictions []SearchContradiction  `json:"contradictions"`
+	AppliedFilters map[string]interface{} `json:"applied_filters,omitempty"`
+}
+
+// SearchClaim is a slim DTO returned by /v1/search.
+type SearchClaim struct {
+	ID         string  `json:"id"`
+	Text       string  `json:"text"`
+	Type       string  `json:"type"`
+	Status     string  `json:"status"`
+	Confidence float64 `json:"confidence"`
+	TrustScore float64 `json:"trust_score"`
+}
+
+// SearchContradiction mirrors the relationships row format used by
+// /v1/search responses.
+type SearchContradiction struct {
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	FromClaimID string `json:"from_claim_id"`
+	ToClaimID   string `json:"to_claim_id"`
+	CreatedAt   string `json:"created_at"`
+}
+
+// Search hits GET /v1/search. Hybrid retrieval over the claim store.
+func (c *Client) Search(ctx context.Context, query string, opts SearchOptions) (*SearchResponse, error) {
+	v := url.Values{}
+	v.Set("query", query)
+	if opts.TopK > 0 {
+		v.Set("top_k", strconv.Itoa(opts.TopK))
+	}
+	if opts.RunID != "" {
+		v.Set("run_id", opts.RunID)
+	}
+	if opts.MinTrust > 0 {
+		v.Set("min_trust", strconv.FormatFloat(opts.MinTrust, 'f', -1, 64))
+	}
+	if opts.AsOf != "" {
+		v.Set("as_of", opts.AsOf)
+	}
+	if opts.RecordedAsOf != "" {
+		v.Set("recorded_as_of", opts.RecordedAsOf)
+	}
+	var out SearchResponse
+	if err := c.do(ctx, http.MethodGet, "/v1/search?"+v.Encode(), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ContextOptions tunes a Context call.
+type ContextOptions struct {
+	Query     string
+	MaxTokens int
+}
+
+// contextResponse mirrors the /v1/context body. Returned as a string
+// from Context() — callers wanting the run_id back can cast.
+type contextResponse struct {
+	RunID   string `json:"run_id"`
+	Context string `json:"context"`
+}
+
+// Context hits GET /v1/context. Returns the rendered Context Block
+// string for a run — drop directly into a system prompt.
+func (c *Client) Context(ctx context.Context, runID string, opts ContextOptions) (string, error) {
+	if runID == "" {
+		return "", fmt.Errorf("Context: runID is required")
+	}
+	v := url.Values{}
+	v.Set("run_id", runID)
+	if opts.Query != "" {
+		v.Set("query", opts.Query)
+	}
+	if opts.MaxTokens > 0 {
+		v.Set("max_tokens", strconv.Itoa(opts.MaxTokens))
+	}
+	var out contextResponse
+	if err := c.do(ctx, http.MethodGet, "/v1/context?"+v.Encode(), nil, &out); err != nil {
+		return "", err
+	}
+	return out.Context, nil
+}
 
 // do is the single point that sends a request, decodes a response, and
 // applies cross-cutting concerns (logging + retry). All builder

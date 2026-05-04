@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 134,
+  "version": 137,
   "task_states": {
     "task-action-outcome-recording": {
       "status": "done",
@@ -25,10 +25,19 @@
       "elapsed_minutes": 2
     },
     "task-benchmark-suite-in-ci-with-regression-gates": {
-      "status": "in_progress",
+      "status": "done",
       "path": "",
       "owner": "ai-agent",
+      "evidence": [
+        "commit 39bdf97 — workflow + baseline.json + check_baseline.py shipped, local check_baseline pass against current 1.00 F1 baseline"
+      ],
       "started_at": "2026-05-04T07:29:21.297555+02:00",
+      "completed_at": "2026-05-04T07:31:23.595922+02:00",
+      "elapsed_minutes": 2
+    },
+    "task-bi-temporal-claim-model": {
+      "status": "pending",
+      "path": "",
       "elapsed_minutes": 0
     },
     "task-causal-relationship-edges": {
@@ -85,6 +94,13 @@
       "started_at": "2026-04-12T13:04:03.273488+02:00",
       "completed_at": "2026-04-12T13:06:33.280868+02:00",
       "elapsed_minutes": 2
+    },
+    "task-context-block-api-for-chat-agents": {
+      "status": "in_progress",
+      "path": "",
+      "owner": "ai-agent",
+      "started_at": "2026-05-04T08:14:37.611861+02:00",
+      "elapsed_minutes": 0
     },
     "task-core-foundation": {
       "status": "done",
@@ -151,6 +167,11 @@
       "started_at": "2026-05-04T07:20:49.292312+02:00",
       "completed_at": "2026-05-04T07:24:46.979578+02:00",
       "elapsed_minutes": 3
+    },
+    "task-entity-resolution-at-ingest": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
     },
     "task-file-watch-mcp-tool": {
       "status": "done",
@@ -228,6 +249,11 @@
       "started_at": "2026-05-01T11:50:22.171895+02:00",
       "completed_at": "2026-05-01T11:53:11.317976+02:00",
       "elapsed_minutes": 2
+    },
+    "task-hybrid-retrieval-with-reranker": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
     },
     "task-implicit-temporal-contradiction-detection": {
       "status": "done",
@@ -515,6 +541,11 @@
       "completed_at": "2026-04-17T22:29:27.167939+02:00",
       "elapsed_minutes": 0
     },
+    "task-published-cross-product-benchmarks-(locomo-+-longmemeval)": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
     "task-push/pull-synchronization-with-remote-registry": {
       "status": "done",
       "path": "",
@@ -626,5 +657,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-05-04T07:29:21.297555+02:00"
+  "updated_at": "2026-05-04T08:14:37.611861+02:00"
 }

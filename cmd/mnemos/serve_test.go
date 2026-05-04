@@ -137,6 +137,55 @@ func TestServe_ListEventsFiltersByRunID(t *testing.T) {
 	}
 }
 
+func TestServe_ContextEndpointReturnsBlock(t *testing.T) {
+	_, conn := openTestStore(t)
+	base := time.Now().UTC()
+	seedEventConn(t, conn, "e1", "ctx-run", "deployment succeeded in production", "in1", `{}`, base)
+
+	mux := newServerMux(conn)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/v1/context?run_id=ctx-run")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var body contextResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.RunID != "ctx-run" {
+		t.Errorf("run_id = %q, want ctx-run", body.RunID)
+	}
+	if !strings.Contains(body.Context, "# Memory context (run ctx-run)") {
+		t.Errorf("context missing header:\n%s", body.Context)
+	}
+	if !strings.Contains(body.Context, "## Active claims") {
+		t.Errorf("context missing claims section:\n%s", body.Context)
+	}
+}
+
+func TestServe_ContextEndpointRejectsMissingRunID(t *testing.T) {
+	_, conn := openTestStore(t)
+	mux := newServerMux(conn)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/v1/context")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
 func TestServe_ListEventsCapsAtMax(t *testing.T) {
 	_, conn := openTestStore(t)
 	mux := newServerMux(conn)

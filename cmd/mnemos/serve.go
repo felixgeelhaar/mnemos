@@ -19,6 +19,7 @@ import (
 	"github.com/felixgeelhaar/bolt"
 	"github.com/felixgeelhaar/mnemos/internal/auth"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/query"
 	mnemosgrpc "github.com/felixgeelhaar/mnemos/internal/server/grpc"
 	"github.com/felixgeelhaar/mnemos/internal/store"
 	"google.golang.org/grpc"
@@ -246,6 +247,7 @@ func newServerMux(conn *store.Conn) http.Handler {
 	mux.HandleFunc("/v1/relationships", makeRelationshipsHandler(conn))
 	mux.HandleFunc("/v1/embeddings", makeEmbeddingsHandler(conn))
 	mux.HandleFunc("/v1/metrics", makeMetricsHandler(conn))
+	mux.HandleFunc("/v1/context", makeContextHandler(conn))
 
 	logger := bolt.New(bolt.NewJSONHandler(os.Stderr))
 	// panicRecover is the outermost layer so a panic in any later
@@ -1218,4 +1220,70 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 func writeInternalError(w http.ResponseWriter, label string, cause error) {
 	fmt.Fprintf(os.Stderr, "serve 500 [%s]: %v\n", label, cause)
 	writeJSON(w, http.StatusInternalServerError, errorResponse{Error: "internal error: " + label})
+}
+
+// contextRequest is the body for POST /v1/context. run_id is required;
+// query and max_tokens are optional.
+type contextRequest struct {
+	RunID     string `json:"run_id"`
+	Query     string `json:"query,omitempty"`
+	MaxTokens int    `json:"max_tokens,omitempty"`
+}
+
+// contextResponse wraps the rendered Context Block string in JSON so
+// callers can inline it (the canonical "drop into your system prompt"
+// path) without splitting on a content-type guess.
+type contextResponse struct {
+	RunID   string `json:"run_id"`
+	Context string `json:"context"`
+}
+
+// makeContextHandler returns the /v1/context handler. POST returns a
+// rendered Context Block for the given run; GET ?run_id=… is a thin
+// alias so curl users don't have to send a body.
+func makeContextHandler(conn *store.Conn) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req contextRequest
+		switch r.Method {
+		case http.MethodGet:
+			req.RunID = r.URL.Query().Get("run_id")
+			req.Query = r.URL.Query().Get("query")
+			if v := r.URL.Query().Get("max_tokens"); v != "" {
+				n, err := strconv.Atoi(v)
+				if err != nil || n < 0 {
+					writeError(w, http.StatusBadRequest, "max_tokens must be a non-negative integer")
+					return
+				}
+				req.MaxTokens = n
+			}
+		case http.MethodPost:
+			// /v1/context is read-only; the JWT middleware skips reads
+			// (see jwtAuthMiddleware). Treat POST the same way — its
+			// only purpose here is to accept a JSON body for clients
+			// that prefer it to query strings.
+			if err := decodeJSON(r, &req); err != nil {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
+				return
+			}
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if req.RunID == "" {
+			writeError(w, http.StatusBadRequest, "run_id is required")
+			return
+		}
+
+		engine := query.NewEngine(conn.Events, conn.Claims, conn.Relationships)
+		block, err := engine.BuildContextBlock(r.Context(), query.ContextBlockOptions{
+			RunID:     req.RunID,
+			Query:     req.Query,
+			MaxTokens: req.MaxTokens,
+		})
+		if err != nil {
+			writeInternalError(w, "build context block", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, contextResponse{RunID: req.RunID, Context: block})
+	}
 }

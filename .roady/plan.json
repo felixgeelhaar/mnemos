@@ -514,9 +514,54 @@
       "estimate": "",
       "depends_on": [],
       "feature_id": "benchmark-suite-in-ci-with-regression-gates"
+    },
+    {
+      "id": "task-published-cross-product-benchmarks-(locomo-+-longmemeval)",
+      "title": "Implement Published cross-product benchmarks (LoCoMo + LongMemEval)",
+      "description": "Implement the feature: Published cross-product benchmarks (LoCoMo + LongMemEval). All three primary competitors (mem0, zep/Graphiti, letta) cite published benchmark numbers as their adoption story. mem0 specifically reports LoCoMo 91.6, LongMemEval 93.4, BEAM 64.1. Mnemos's benchmarks today are a 5-case hand-authored contradiction-detection seed suite with F1=1.0 — meaningful for the wedge but not comparable to the leaderboards buyers cite.\n\nAcceptance criteria:\n- benchmarks/suites/longmemeval.py loads the published LongMemEval dataset and runs it against any registered Provider (mnemos, mem0, zep, letta — adapters land in their respective tasks).\n- benchmarks/suites/locomo.py same for LoCoMo.\n- benchmarks/results/ holds Mnemos's own numbers, comparable line-for-line with mem0's published claims.\n- benchmarks/RESULTS.md surfaces a head-to-head table.\n- README clearly states which numbers are reproduced from the original paper vs which we ran ourselves.\n\nOut of scope:\n- BEAM (low priority; LoCoMo + LongMemEval cover the same buyer concern).\n- Beating mem0 on every dataset (we run honestly; if Mnemos loses, the gap goes onto a roadmap).",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "published-cross-product-benchmarks-(locomo-+-longmemeval)"
+    },
+    {
+      "id": "task-hybrid-retrieval-with-reranker",
+      "title": "Implement Hybrid retrieval with reranker",
+      "description": "Implement the feature: Hybrid retrieval with reranker. mem0's REST search supports semantic + BM25 + entity-linking with managed reranker; threshold/top_k/filter DSL (AND/OR/NOT/gte/lte/in/icontains). Graphiti's hybrid search adds graph-distance reranking. Mnemos has BM25 (when no embeddings) and embeddings + token overlap, but the paths are not unified and there is no documented filter DSL on /v1/claims or /v1/relationships.\n\nAcceptance criteria:\n- /v1/search endpoint that accepts {query, top_k, threshold, filters} and returns claims + their evidence + contradictions inline.\n- Filter DSL covers run_id, claim type, status, scope (service/env/team), valid_at, trust_score range, evidence count.\n- Score combines: cosine similarity (when embeddings configured) + BM25 + relationship-graph proximity (count of supports/contradicts edges away from query-matched seed claims).\n- Documented on the page + README.\n- Benchmarked: at least the recall@k metric on LongMemEval matches or beats Mnemos's current default.\n\nOut of scope:\n- ML reranker training (use a deterministic linear combo for now).\n- Cross-encoder reranking (separate task if the linear combo proves too weak).",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "hybrid-retrieval-with-reranker"
+    },
+    {
+      "id": "task-context-block-api-for-chat-agents",
+      "title": "Implement Context Block API for chat agents",
+      "description": "Implement the feature: Context Block API for chat agents. Zep's headline feature: a single string \"Context Block\" that an agent can drop into its system prompt to get the relevant slice of user/thread history. Surveyed as the killer demo for chat-tuned use cases. Mnemos has all the underlying pieces (claims, lessons, playbooks, trust scores) but no single \"give me the context for thread X\" endpoint.\n\nAcceptance criteria:\n- /v1/context endpoint that accepts {run_id (or user_id), query?, max_tokens?} and returns a single string suitable for a system prompt: top-N claims by trust × relevance, surfaced contradictions, relevant lessons, optional thread summary.\n- Documented format with stable ordering so agents can rely on the layout.\n- mnemos-py wrapper method `Mnemos.context(run_id=…, query=…)` returns the same string.\n- Bench suite case: feed a chat history, call /v1/context, ensure the recalled facts answer a follow-up question correctly.\n\nOut of scope:\n- LLM-generated summary of the thread itself (use existing extracted claims for now; LLM summary is a follow-up).\n- Streaming context updates (one-shot is enough).",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "context-block-api-for-chat-agents"
+    },
+    {
+      "id": "task-bi-temporal-claim-model",
+      "title": "Implement Bi-temporal claim model",
+      "description": "Implement the feature: Bi-temporal claim model. Graphiti tracks four timestamps per fact-edge: valid_at, invalid_at (event/validity time) + created_at, expired_at (transaction/ingestion time). This bi-temporal split is their headline differentiator. Mnemos has valid_from/valid_to but no separate ingestion-time axis — point-in-time queries today read the validity axis only.\n\nAcceptance criteria:\n- domain.Claim and domain.Relationship gain ingestion_time + ingestion_expired_at fields (event time stays as valid_from/valid_to).\n- /v1/claims supports `as_of=\u003ctimestamp\u003e` (validity time) AND `recorded_as_of=\u003ctimestamp\u003e` (ingestion time) filters independently.\n- mnemos query --at and --recorded-at flags expose both axes.\n- Migration script for existing claim rows (default ingestion_time = created_at).\n- Tests: a claim that was valid yesterday but recorded today returns under recorded_as_of=today AND as_of=yesterday simultaneously.\n\nOut of scope:\n- UI/dashboard for time-axis browsing.\n- Per-evidence ingestion timestamps (events already have ingested_at; this task is the claim/relationship layer only).",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "bi-temporal-claim-model"
+    },
+    {
+      "id": "task-entity-resolution-at-ingest",
+      "title": "Implement Entity resolution at ingest",
+      "description": "Implement the feature: Entity resolution at ingest. Both mem0 (entity linking, replaced their removed graph store) and Graphiti (auto entity dedup at ingest) collapse references to the same real-world entity (e.g. \"Alice\", \"Alice Smith\", \"the CEO Alice\") into a canonical node. Mnemos has the entities CLI (entities list / show / merge) but no automatic resolution at ingest — claims with different surface forms of the same entity remain separate.\n\nAcceptance criteria:\n- internal/extract gains an entity-resolution pass: extracted claims are matched against the existing entities table by (name OR alias) + embedding similarity above a threshold, and merged into the canonical entity automatically.\n- A new claim that mentions \"Alice Smith\" links to the same entity row as an earlier claim mentioning \"Alice\" once the surface form has been seen.\n- Resolution decisions are auditable: each link records {claim_id, entity_id, score, method=exact|alias|embedding}.\n- The existing `mnemos entities merge` CLI continues to work for manual overrides.\n- Bench suite case: ingest \"The CEO is Alice\" then \"Alice owns the building\" and confirm both link to the same entity node.\n\nOut of scope:\n- Cross-language entity resolution.\n- LLM-driven entity resolution (rule-based + embedding similarity is enough for the first pass).",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "entity-resolution-at-ingest"
     }
   ],
   "approval_status": "approved",
   "created_at": "2026-04-12T11:03:09.397775+02:00",
-  "updated_at": "2026-05-03T23:18:03.630385+02:00"
+  "updated_at": "2026-05-04T08:05:19.080166+02:00"
 }

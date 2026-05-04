@@ -155,6 +155,66 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AppendSummary" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /v1/context:
+    get:
+      summary: Get a Context Block for a run
+      description: |
+        Returns a stable, agent-ready string summarising the memory
+        state for one run — top claims by trust, surfaced
+        contradictions, and a footer with counts. Designed to be
+        dropped directly into a system prompt.
+      parameters:
+        - { name: run_id, in: query, required: true, schema: { type: string } }
+        - { name: query, in: query, schema: { type: string }, description: "Optional refinement (currently unused; reserved for hybrid retrieval)." }
+        - { name: max_tokens, in: query, schema: { type: integer, minimum: 0 }, description: "Truncate output to keep within an approximate token budget (chars/4)." }
+      responses:
+        "200":
+          description: Context block
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run_id, context]
+                properties:
+                  run_id: { type: string }
+                  context: { type: string }
+        "400":
+          description: Missing run_id
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    post:
+      summary: Get a Context Block (JSON body variant)
+      description: |
+        Same as GET but accepts a JSON body. Useful when callers want
+        to set max_tokens without URL encoding.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [run_id]
+              properties:
+                run_id: { type: string }
+                query: { type: string }
+                max_tokens: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: Context block
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run_id, context]
+                properties:
+                  run_id: { type: string }
+                  context: { type: string }
+        "400":
+          description: Missing or invalid input
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
   /v1/embeddings:
     get:
       summary: List embeddings

@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 141,
+  "version": 143,
   "task_states": {
     "task-action-outcome-recording": {
       "status": "done",
@@ -261,11 +261,15 @@
       "elapsed_minutes": 2
     },
     "task-hybrid-retrieval-with-reranker": {
-      "status": "in_progress",
+      "status": "done",
       "path": "",
       "owner": "ai-agent",
+      "evidence": [
+        "commit 3c291ff (mnemos) + c3fcd79 (mnemos-py) — /v1/search GET+POST, filter DSL, tests, OpenAPI"
+      ],
       "started_at": "2026-05-04T08:51:19.018587+02:00",
-      "elapsed_minutes": 0
+      "completed_at": "2026-05-04T08:56:51.495941+02:00",
+      "elapsed_minutes": 5
     },
     "task-implicit-temporal-contradiction-detection": {
       "status": "done",
@@ -554,8 +558,10 @@
       "elapsed_minutes": 0
     },
     "task-published-cross-product-benchmarks-(locomo-+-longmemeval)": {
-      "status": "pending",
+      "status": "in_progress",
       "path": "",
+      "owner": "ai-agent",
+      "started_at": "2026-05-04T08:57:09.015877+02:00",
       "elapsed_minutes": 0
     },
     "task-push/pull-synchronization-with-remote-registry": {
@@ -669,5 +675,5 @@
       "elapsed_minutes": 4
     }
   },
-  "updated_at": "2026-05-04T08:51:19.018587+02:00"
+  "updated_at": "2026-05-04T08:57:09.015877+02:00"
 }

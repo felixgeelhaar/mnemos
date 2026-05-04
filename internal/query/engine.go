@@ -85,6 +85,11 @@ type AnswerOptions struct {
 	Hops           int
 	MinTrust       float64
 	AsOf           time.Time
+	// RecordedAsOf is the ingestion-time axis. When non-zero, the
+	// engine drops claims with CreatedAt > RecordedAsOf so the
+	// response reproduces what the store knew as of that timestamp.
+	// Zero value disables the filter (the common case).
+	RecordedAsOf   time.Time
 	IncludeHistory bool
 	// AllowedClaimIDs, when non-nil, restricts the answer set to
 	// claims whose id is in the map. Used by `query --entity` to
@@ -221,6 +226,22 @@ func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents
 		filtered := make([]domain.Claim, 0, len(claims))
 		for _, c := range claims {
 			if c.IsValidAt(asOf) {
+				filtered = append(filtered, c)
+			}
+		}
+		claims = filtered
+	}
+
+	// Ingestion-time filter (the second axis of the bi-temporal
+	// model). Drop rows recorded after RecordedAsOf so the response
+	// reproduces what the store knew at that timestamp. Independent
+	// of the validity filter — a claim that was valid yesterday but
+	// recorded today returns under (AsOf=yesterday, RecordedAsOf=now)
+	// and disappears under (AsOf=yesterday, RecordedAsOf=yesterday).
+	if !opts.RecordedAsOf.IsZero() {
+		filtered := make([]domain.Claim, 0, len(claims))
+		for _, c := range claims {
+			if !c.CreatedAt.After(opts.RecordedAsOf) {
 				filtered = append(filtered, c)
 			}
 		}

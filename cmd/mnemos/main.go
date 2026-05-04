@@ -440,6 +440,7 @@ func handleQuery(args []string, f Flags) {
 			Scope:          qa.scope,
 			MinTrust:       minTrust,
 			AsOf:           asOf,
+			RecordedAsOf:   qa.recordedAsOf,
 			IncludeHistory: includeHistory,
 		}
 		if entity != "" {
@@ -1091,6 +1092,7 @@ func printUsage() {
 	fmt.Println("  query --llm <question>               Query with LLM-grounded answer")
 	fmt.Println("  query --min-trust X <question>       Only return claims with trust_score >= X (X in [0, 1])")
 	fmt.Println("  query --at YYYY-MM-DD <question>     Point-in-time query against the temporal-validity layer")
+	fmt.Println("  query --recorded-at YYYY-MM-DD <q>   Point-in-time query against the ingestion-time layer")
 	fmt.Println("  query --include-history <question>   Include superseded claims (off by default)")
 	fmt.Println("  query --entity <name|id> <question>  Restrict the answer to claims linked to this entity")
 	fmt.Println("  entities list [--type T]             List canonicalised entities (people/orgs/projects/...)")
@@ -1171,6 +1173,7 @@ type queryArgs struct {
 	hops           int
 	minTrust       float64
 	asOf           time.Time
+	recordedAsOf   time.Time
 	includeHistory bool
 	entity         string // filter answer to claims linked to this entity (id or name)
 	hopKinds       []domain.RelationshipType
@@ -1224,6 +1227,16 @@ func parseQueryArgs(args []string) (queryArgs, error) {
 				return queryArgs{}, NewUserError("--at: %v", err)
 			}
 			out.asOf = t
+			questionArgs = questionArgs[2:]
+		case "--recorded-at":
+			if len(questionArgs) < 2 {
+				return queryArgs{}, NewUserError("--recorded-at flag requires a date (YYYY-MM-DD) or RFC3339 timestamp")
+			}
+			t, err := parseAsOf(questionArgs[1])
+			if err != nil {
+				return queryArgs{}, NewUserError("--recorded-at: %v", err)
+			}
+			out.recordedAsOf = t
 			questionArgs = questionArgs[2:]
 		case "--include-history":
 			out.includeHistory = true

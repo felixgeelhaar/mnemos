@@ -485,6 +485,9 @@ func listClaimsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request)
 	limit, offset := parsePaginationFromQuery(r)
 	typeFilter := r.URL.Query().Get("type")
 	statusFilter := r.URL.Query().Get("status")
+	asOfRaw := r.URL.Query().Get("as_of")              // validity time
+	recordedAsOfRaw := r.URL.Query().Get("recorded_as_of") // ingestion time
+
 	if typeFilter != "" && !validClaimType(typeFilter) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid type %q", typeFilter))
 		return
@@ -493,6 +496,26 @@ func listClaimsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid status %q", statusFilter))
 		return
 	}
+
+	var asOf time.Time
+	if asOfRaw != "" {
+		t, err := parseTimeFlexible(asOfRaw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("as_of: %v", err))
+			return
+		}
+		asOf = t
+	}
+	var recordedAsOf time.Time
+	if recordedAsOfRaw != "" {
+		t, err := parseTimeFlexible(recordedAsOfRaw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("recorded_as_of: %v", err))
+			return
+		}
+		recordedAsOf = t
+	}
+
 	ctx := r.Context()
 
 	all, err := conn.Claims.ListAll(ctx)
@@ -506,6 +529,17 @@ func listClaimsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request)
 			continue
 		}
 		if statusFilter != "" && string(c.Status) != statusFilter {
+			continue
+		}
+		// Validity-time filter: claim must have been valid at as_of.
+		// IsValidAt treats zero ValidFrom as "valid since forever".
+		if !asOf.IsZero() && !c.IsValidAt(asOf) {
+			continue
+		}
+		// Ingestion-time filter: drop rows recorded after the query
+		// timestamp so the response is reproducible from the snapshot
+		// of the store as it stood then.
+		if !recordedAsOf.IsZero() && c.CreatedAt.After(recordedAsOf) {
 			continue
 		}
 		filtered = append(filtered, c)
@@ -1292,13 +1326,14 @@ func makeContextHandler(conn *store.Conn) http.HandlerFunc {
 // searchRequest is the body for POST /v1/search. The query is the
 // only required field; everything else is an optional filter.
 type searchRequest struct {
-	Query    string         `json:"query"`
-	RunID    string         `json:"run_id,omitempty"`
-	TopK     int            `json:"top_k,omitempty"`
-	MinTrust float64        `json:"min_trust,omitempty"`
-	AsOf     string         `json:"as_of,omitempty"`
-	Scope    *searchScope   `json:"scope,omitempty"`
-	Filters  *searchFilters `json:"filters,omitempty"`
+	Query        string         `json:"query"`
+	RunID        string         `json:"run_id,omitempty"`
+	TopK         int            `json:"top_k,omitempty"`
+	MinTrust     float64        `json:"min_trust,omitempty"`
+	AsOf         string         `json:"as_of,omitempty"`           // validity time
+	RecordedAsOf string         `json:"recorded_as_of,omitempty"`  // ingestion time
+	Scope        *searchScope   `json:"scope,omitempty"`
+	Filters      *searchFilters `json:"filters,omitempty"`
 }
 
 type searchScope struct {
@@ -1362,6 +1397,7 @@ func makeSearchHandler(conn *store.Conn) http.HandlerFunc {
 				req.MinTrust = f
 			}
 			req.AsOf = r.URL.Query().Get("as_of")
+			req.RecordedAsOf = r.URL.Query().Get("recorded_as_of")
 		case http.MethodPost:
 			if err := decodeJSON(r, &req); err != nil {
 				writeError(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
@@ -1387,6 +1423,14 @@ func makeSearchHandler(conn *store.Conn) http.HandlerFunc {
 				return
 			}
 			opts.AsOf = t
+		}
+		if req.RecordedAsOf != "" {
+			t, err := parseTimeFlexible(req.RecordedAsOf)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("recorded_as_of: %v", err))
+				return
+			}
+			opts.RecordedAsOf = t
 		}
 		if req.Scope != nil {
 			opts.Scope = domain.Scope{
@@ -1468,6 +1512,9 @@ func makeSearchHandler(conn *store.Conn) http.HandlerFunc {
 		}
 		if !opts.AsOf.IsZero() {
 			applied["as_of"] = opts.AsOf.UTC().Format(time.RFC3339)
+		}
+		if !opts.RecordedAsOf.IsZero() {
+			applied["recorded_as_of"] = opts.RecordedAsOf.UTC().Format(time.RFC3339)
 		}
 		if req.Filters != nil {
 			if req.Filters.ClaimType != "" {

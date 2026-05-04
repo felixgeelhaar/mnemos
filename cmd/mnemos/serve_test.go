@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/felixgeelhaar/mnemos/internal/domain"
 )
 
 func TestServe_WebRootReturnsHTML(t *testing.T) {
@@ -183,6 +186,70 @@ func TestServe_SearchEndpointRejectsMissingQuery(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestServe_ListClaimsBitemporalAxes(t *testing.T) {
+	_, conn := openTestStore(t)
+	ctx := context.Background()
+
+	// Three claims:
+	//   cl_old_valid: created last week, valid since last month
+	//   cl_recent_valid: created today, valid since last month
+	//   cl_recent_future: created today, valid only from tomorrow
+	now := time.Now().UTC()
+	lastWeek := now.AddDate(0, 0, -7)
+	lastMonth := now.AddDate(0, -1, 0)
+	tomorrow := now.AddDate(0, 0, 1)
+	if err := conn.Claims.Upsert(ctx, []domain.Claim{
+		{ID: "cl_old", Text: "old", Type: domain.ClaimTypeFact, Status: domain.ClaimStatusActive, CreatedAt: lastWeek, ValidFrom: lastMonth},
+		{ID: "cl_recent", Text: "recent", Type: domain.ClaimTypeFact, Status: domain.ClaimStatusActive, CreatedAt: now, ValidFrom: lastMonth},
+		{ID: "cl_future", Text: "future", Type: domain.ClaimTypeFact, Status: domain.ClaimStatusActive, CreatedAt: now, ValidFrom: tomorrow},
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	mux := newServerMux(conn)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	get := func(query string) claimsResponse {
+		t.Helper()
+		resp, err := http.Get(srv.URL + "/v1/claims?" + query)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var body claimsResponse
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return body
+	}
+
+	yesterday := now.AddDate(0, 0, -1).Format(time.RFC3339)
+
+	// recorded_as_of=yesterday drops cl_recent + cl_future (both
+	// CreatedAt=now); cl_old (CreatedAt=lastWeek) stays.
+	got := get("recorded_as_of=" + yesterday)
+	if got.Total != 1 || got.Claims[0].ID != "cl_old" {
+		t.Errorf("recorded_as_of=yesterday returned %d claims, want 1 (cl_old): %+v", got.Total, got.Claims)
+	}
+
+	// as_of=now drops cl_future (ValidFrom=tomorrow) but keeps both
+	// recorded-recently rows.
+	got = get("as_of=" + now.Format(time.RFC3339))
+	for _, c := range got.Claims {
+		if c.ID == "cl_future" {
+			t.Errorf("as_of=now should drop cl_future, got it: %+v", got.Claims)
+		}
+	}
+
+	// Both axes together: recorded last week + valid then. cl_old
+	// matches; cl_recent + cl_future drop on recorded; cl_old stays.
+	got = get("recorded_as_of=" + yesterday + "&as_of=" + now.Format(time.RFC3339))
+	if got.Total != 1 || got.Claims[0].ID != "cl_old" {
+		t.Errorf("both filters returned %d claims, want 1 (cl_old): %+v", got.Total, got.Claims)
 	}
 }
 

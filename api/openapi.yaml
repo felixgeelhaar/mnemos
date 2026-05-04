@@ -81,9 +81,17 @@ paths:
   /v1/claims:
     get:
       summary: List claims
+      description: |
+        Bi-temporal: claims have a validity-time axis (`as_of`) and an
+        ingestion-time axis (`recorded_as_of`). Both filters are
+        independent; a claim that was valid yesterday but recorded
+        today returns under `as_of=yesterday` AND `recorded_as_of=now`,
+        and disappears under `as_of=yesterday` AND `recorded_as_of=yesterday`.
       parameters:
         - { name: type, in: query, schema: { type: string, enum: [fact, hypothesis, decision] } }
         - { name: status, in: query, schema: { type: string, enum: [active, contested, resolved, deprecated] } }
+        - { name: as_of, in: query, schema: { type: string, format: date-time }, description: "Validity time. Returns claims that were in force at this instant." }
+        - { name: recorded_as_of, in: query, schema: { type: string, format: date-time }, description: "Ingestion time. Drops claims with created_at after this instant — the response reproduces what the store knew then." }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200 } }
         - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
       responses:

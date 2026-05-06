@@ -1,0 +1,68 @@
+site_name: Mnemos
+site_description: Self-hosted memory for AI apps. No vendor cloud, no per-call billing, no SDK to install.
+site_url: https://docs.mnemos.dev/
+repo_url: https://github.com/felixgeelhaar/mnemos
+repo_name: felixgeelhaar/mnemos
+edit_uri: edit/main/docs-site/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: blue
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: cyan
+  features:
+    - navigation.instant
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.snippets
+  - tables
+  - attr_list
+
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Concepts:
+    - Claims & evidence: concepts/claims.md
+    - Contradictions: concepts/contradictions.md
+    - Bi-temporal queries: concepts/bitemporal.md
+  - SDKs:
+    - Python: sdks/python.md
+    - TypeScript: sdks/typescript.md
+    - Go: sdks/go.md
+  - API reference: api.md
+  - Comparison: comparison.md
+  - Benchmarks: benchmarks.md
+  - Examples: examples.md
+  - Self-host: self-host.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/felixgeelhaar/mnemos

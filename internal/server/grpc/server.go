@@ -386,6 +386,9 @@ func (s *Server) AppendClaims(ctx context.Context, req *mnemosv1.AppendClaimsReq
 		if c.Status != "" && !validClaimStatus(c.Status) {
 			return nil, status.Errorf(codes.InvalidArgument, "claims[%d].status %q invalid", i, c.Status)
 		}
+		if c.Visibility != "" && !validClaimVisibility(c.Visibility) {
+			return nil, status.Errorf(codes.InvalidArgument, "claims[%d].visibility %q invalid; must be personal, team, or org", i, c.Visibility)
+		}
 		created := now
 		if c.CreatedAt != nil {
 			created = c.CreatedAt.AsTime()
@@ -398,6 +401,7 @@ func (s *Server) AppendClaims(ctx context.Context, req *mnemosv1.AppendClaimsReq
 			Status:     domain.ClaimStatus(c.Status),
 			CreatedAt:  created,
 			CreatedBy:  actor,
+			Visibility: domain.Visibility(c.Visibility),
 		})
 	}
 
@@ -660,11 +664,15 @@ func paginate[T any](xs []T, limit, offset int) []T {
 }
 
 func validClaimType(t string) bool {
-	return t == string(domain.ClaimTypeFact) || t == string(domain.ClaimTypeHypothesis) || t == string(domain.ClaimTypeDecision)
+	return t == string(domain.ClaimTypeFact) || t == string(domain.ClaimTypeHypothesis) || t == string(domain.ClaimTypeDecision) || t == string(domain.ClaimTypeTestResult)
 }
 
 func validClaimStatus(s string) bool {
 	return s == string(domain.ClaimStatusActive) || s == string(domain.ClaimStatusContested) || s == string(domain.ClaimStatusResolved) || s == string(domain.ClaimStatusDeprecated)
+}
+
+func validClaimVisibility(s string) bool {
+	return s == string(domain.VisibilityPersonal) || s == string(domain.VisibilityTeam) || s == string(domain.VisibilityOrg)
 }
 
 func eventToProto(e domain.Event) *mnemosv1.Event {
@@ -688,6 +696,7 @@ func claimToProto(c domain.Claim) *mnemosv1.Claim {
 		Confidence: c.Confidence,
 		Status:     string(c.Status),
 		CreatedAt:  timestamppb.New(c.CreatedAt.UTC()),
+		Visibility: string(c.Visibility),
 	}
 }
 

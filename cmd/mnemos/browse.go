@@ -197,7 +197,7 @@ func normalizePagination(limit, offset int) (int, int) {
 
 func validClaimType(s string) bool {
 	switch domain.ClaimType(s) {
-	case domain.ClaimTypeFact, domain.ClaimTypeHypothesis, domain.ClaimTypeDecision:
+	case domain.ClaimTypeFact, domain.ClaimTypeHypothesis, domain.ClaimTypeDecision, domain.ClaimTypeTestResult:
 		return true
 	}
 	return false
@@ -206,6 +206,14 @@ func validClaimType(s string) bool {
 func validClaimStatus(s string) bool {
 	switch domain.ClaimStatus(s) {
 	case domain.ClaimStatusActive, domain.ClaimStatusContested, domain.ClaimStatusResolved, domain.ClaimStatusDeprecated:
+		return true
+	}
+	return false
+}
+
+func validClaimVisibility(s string) bool {
+	switch domain.Visibility(s) {
+	case domain.VisibilityPersonal, domain.VisibilityTeam, domain.VisibilityOrg:
 		return true
 	}
 	return false

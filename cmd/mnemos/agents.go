@@ -11,6 +11,7 @@ import (
 
 	"github.com/felixgeelhaar/mnemos/internal/auth"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	"github.com/felixgeelhaar/mnemos/internal/query"
 )
 
 // handleAgent dispatches `mnemos agent <subcommand>`. The token
@@ -25,6 +26,7 @@ func handleAgent(args []string, _ Flags) {
 		fmt.Fprintln(os.Stderr, "  mnemos agent list")
 		fmt.Fprintln(os.Stderr, "  mnemos agent revoke <agent-id>")
 		fmt.Fprintln(os.Stderr, "  mnemos agent token issue --agent <id> [--ttl <duration>]")
+		fmt.Fprintln(os.Stderr, "  mnemos agent heal --claim <id> --statement \"<new truth>\" [--reason \"...\"] [--json]")
 		os.Exit(int(ExitUsage))
 	}
 	switch args[0] {
@@ -36,6 +38,8 @@ func handleAgent(args []string, _ Flags) {
 		handleAgentRevoke(args[1:])
 	case "token":
 		handleAgentToken(args[1:])
+	case "heal":
+		handleAgentHeal(args[1:])
 	default:
 		exitWithMnemosError(false, NewUserError("unknown agent subcommand %q", args[0]))
 	}
@@ -274,4 +278,152 @@ func newAgentID() (string, error) {
 		return "", err
 	}
 	return "agt_" + hex.EncodeToString(b), nil
+}
+
+// handleAgentHeal implements the Agent Self-Healing Loop:
+//
+//	mnemos agent heal --claim <id> --statement "<new truth>" [--reason "..."] [--json]
+//
+// When an agent receives a verdict with action=update, it calls this
+// command to update the stale claim in Mnemos and confirm the new
+// trust score. The workflow is:
+//
+//	Query → Verdict(action=update) → Agent calls heal → Mnemos updated
+//
+// The command:
+//  1. Fetches the existing claim by ID.
+//  2. Replaces its Text with the new statement.
+//  3. Upserts it with the provided reason so the audit trail captures why.
+//  4. Calls WhyTrustClaim to compute and return the updated trust report.
+//
+// Output is either human-readable or JSON (--json).
+func handleAgentHeal(args []string) {
+	claimID, statement, reason := "", "", ""
+	jsonOut := false
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--claim":
+			if i+1 >= len(args) {
+				exitWithMnemosError(false, NewUserError("--claim requires a claim ID"))
+				return
+			}
+			claimID = args[i+1]
+			i++
+		case "--statement":
+			if i+1 >= len(args) {
+				exitWithMnemosError(false, NewUserError("--statement requires a value"))
+				return
+			}
+			statement = args[i+1]
+			i++
+		case "--reason":
+			if i+1 >= len(args) {
+				exitWithMnemosError(false, NewUserError("--reason requires a value"))
+				return
+			}
+			reason = args[i+1]
+			i++
+		case "--json":
+			jsonOut = true
+		default:
+			exitWithMnemosError(false, NewUserError("unknown heal flag %q", args[i]))
+			return
+		}
+	}
+	if strings.TrimSpace(claimID) == "" {
+		exitWithMnemosError(false, NewUserError("--claim is required"))
+		return
+	}
+	if strings.TrimSpace(statement) == "" {
+		exitWithMnemosError(false, NewUserError("--statement is required"))
+		return
+	}
+	if reason == "" {
+		reason = "agent self-healing: belief updated after verdict action=update"
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	conn, err := openConn(ctx)
+	if err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "open database"))
+		return
+	}
+	defer closeConn(conn)
+
+	// 1. Fetch the existing claim.
+	claims, err := conn.Claims.ListByIDs(ctx, []string{claimID})
+	if err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "look up claim"))
+		return
+	}
+	if len(claims) == 0 {
+		exitWithMnemosError(false, NewUserError("claim %q not found", claimID))
+		return
+	}
+	claim := claims[0]
+	oldText := claim.Text
+
+	// 2. Replace the claim text with the agent's corrected statement.
+	claim.Text = strings.TrimSpace(statement)
+
+	// 3. Persist the update with an audit reason.
+	if err := conn.Claims.UpsertWithReason(ctx, []domain.Claim{claim}, reason); err != nil {
+		exitWithMnemosError(false, NewSystemError(err, "update claim"))
+		return
+	}
+
+	// 4. Compute the updated trust report so the agent can confirm
+	//    the heal was accepted and see the new trust score.
+	eng := query.NewEngine(conn.Events, conn.Claims, conn.Relationships)
+	report, err := eng.WhyTrustClaim(ctx, claimID)
+	if err != nil {
+		// Non-fatal: heal succeeded but trust report failed.
+		// Emit a minimal result rather than masking the update.
+		if jsonOut {
+			emitJSON(map[string]any{
+				"action":      "healed",
+				"claim_id":    claimID,
+				"old_text":    oldText,
+				"new_text":    claim.Text,
+				"trust_score": nil,
+				"trust_error": err.Error(),
+			})
+		} else {
+			fmt.Printf("healed claim_id=%s\n", claimID)
+			fmt.Printf("  old: %s\n", oldText)
+			fmt.Printf("  new: %s\n", claim.Text)
+			fmt.Printf("  reason: %s\n", reason)
+			fmt.Printf("  trust_score: (unavailable: %v)\n", err)
+		}
+		return
+	}
+
+	if jsonOut {
+		emitJSON(map[string]any{
+			"action":      "healed",
+			"claim_id":    claimID,
+			"old_text":    oldText,
+			"new_text":    claim.Text,
+			"trust_score": report.Score,
+			"signals":     report.Signals,
+		})
+		return
+	}
+
+	fmt.Printf("healed claim_id=%s trust_score=%.3f\n", claimID, report.Score)
+	fmt.Printf("  old: %s\n", oldText)
+	fmt.Printf("  new: %s\n", claim.Text)
+	fmt.Printf("  reason: %s\n", reason)
+	if len(report.Signals) > 0 {
+		fmt.Println("  trust signals:")
+		for _, s := range report.Signals {
+			fmt.Printf("    • %s: %.3f (weight=%.2f, contribution=%.3f)", s.Name, s.Value, s.Weight, s.Contribution)
+			if s.Detail != "" {
+				fmt.Printf(" — %s", s.Detail)
+			}
+			fmt.Println()
+		}
+	}
 }

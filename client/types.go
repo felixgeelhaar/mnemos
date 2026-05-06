@@ -26,10 +26,13 @@ type Event struct {
 type Claim struct {
 	ID         string  `json:"id"`
 	Text       string  `json:"text"`
-	Type       string  `json:"type"`       // fact | hypothesis | decision
+	Type       string  `json:"type"`       // fact | hypothesis | decision | test_result
 	Confidence float64 `json:"confidence"` // 0.0 to 1.0
 	Status     string  `json:"status"`     // active | contested | resolved | deprecated
 	CreatedAt  string  `json:"created_at"`
+	// Visibility gates audience access: personal | team | org.
+	// Omitted values are treated as "team" by the server.
+	Visibility string `json:"visibility,omitempty"`
 }
 
 // EvidenceLink ties a claim to one of the events it was extracted from.

@@ -13,12 +13,14 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/felixgeelhaar/bolt"
 	"github.com/felixgeelhaar/mnemos/internal/auth"
 	"github.com/felixgeelhaar/mnemos/internal/domain"
+	markdownpkg "github.com/felixgeelhaar/mnemos/internal/markdown"
 	"github.com/felixgeelhaar/mnemos/internal/query"
 	mnemosgrpc "github.com/felixgeelhaar/mnemos/internal/server/grpc"
 	"github.com/felixgeelhaar/mnemos/internal/store"
@@ -249,6 +251,9 @@ func newServerMux(conn *store.Conn) http.Handler {
 	mux.HandleFunc("/v1/metrics", makeMetricsHandler(conn))
 	mux.HandleFunc("/v1/context", makeContextHandler(conn))
 	mux.HandleFunc("/v1/search", makeSearchHandler(conn))
+	mux.HandleFunc("/v1/claims/", makeClaimSubresourceHandler(conn))
+	mux.HandleFunc("/v1/incidents", makeIncidentsHandler(conn))
+	mux.HandleFunc("/v1/incidents/", makeIncidentSubresourceHandler(conn))
 
 	logger := bolt.New(bolt.NewJSONHandler(os.Stderr))
 	// panicRecover is the outermost layer so a panic in any later
@@ -460,12 +465,27 @@ type claimsResponse struct {
 }
 
 type claimDTO struct {
-	ID         string  `json:"id"`
-	Text       string  `json:"text"`
-	Type       string  `json:"type"`
-	Confidence float64 `json:"confidence"`
-	Status     string  `json:"status"`
-	CreatedAt  string  `json:"created_at"`
+	ID              string  `json:"id"`
+	Text            string  `json:"text"`
+	Type            string  `json:"type"`
+	Confidence      float64 `json:"confidence"`
+	Status          string  `json:"status"`
+	CreatedAt       string  `json:"created_at"`
+	SourceDocument  string  `json:"source_document,omitempty"`
+	SourceType      string  `json:"source_type,omitempty"`
+	SourceAuthority float64 `json:"source_authority,omitempty"`
+	Liveness        string  `json:"liveness,omitempty"`
+	// Test provenance — populated when type == "test_result".
+	TestID             string `json:"test_id,omitempty"`
+	TestRequirementRef string `json:"test_requirement_ref,omitempty"`
+	TestAuthor         string `json:"test_author,omitempty"`
+	TestLastModified   string `json:"test_last_modified,omitempty"`
+	TestLastRunAt      string `json:"test_last_run_at,omitempty"`
+	TestPassCount      int    `json:"test_pass_count,omitempty"`
+	TestFailCount      int    `json:"test_fail_count,omitempty"`
+	// Visibility gates audience access: personal | team | org.
+	// Defaults to "team" when omitted.
+	Visibility string `json:"visibility,omitempty"`
 }
 
 func makeClaimsHandler(conn *store.Conn) http.HandlerFunc {
@@ -485,7 +505,7 @@ func listClaimsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request)
 	limit, offset := parsePaginationFromQuery(r)
 	typeFilter := r.URL.Query().Get("type")
 	statusFilter := r.URL.Query().Get("status")
-	asOfRaw := r.URL.Query().Get("as_of")              // validity time
+	asOfRaw := r.URL.Query().Get("as_of")                  // validity time
 	recordedAsOfRaw := r.URL.Query().Get("recorded_as_of") // ingestion time
 
 	if typeFilter != "" && !validClaimType(typeFilter) {
@@ -562,6 +582,7 @@ func listClaimsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request)
 			Confidence: c.Confidence,
 			Status:     string(c.Status),
 			CreatedAt:  c.CreatedAt.UTC().Format(time.RFC3339),
+			Visibility: string(c.Visibility),
 		})
 		ids = append(ids, c.ID)
 	}
@@ -595,6 +616,19 @@ type relationshipDTO struct {
 	FromClaimID string `json:"from_claim_id"`
 	ToClaimID   string `json:"to_claim_id"`
 	CreatedAt   string `json:"created_at"`
+}
+
+// verdictDTO is the JSON representation of a domain.Verdict returned in
+// search responses when consumer=agent. Agents should inspect Action to
+// decide whether to trust the winner, update their internal beliefs, or
+// escalate to a human.
+type verdictDTO struct {
+	WinnerClaimID    string  `json:"winner_claim_id,omitempty"`
+	LoserClaimID     string  `json:"loser_claim_id,omitempty"`
+	Confidence       float64 `json:"confidence,omitempty"`
+	Rationale        string  `json:"rationale,omitempty"`
+	Action           string  `json:"action"`
+	EscalationReason string  `json:"escalation_reason,omitempty"`
 }
 
 func makeRelationshipsHandler(conn *store.Conn) http.HandlerFunc {
@@ -843,6 +877,10 @@ func appendClaimsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Reques
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("claims[%d].status %q invalid", i, c.Status))
 			return
 		}
+		if c.Visibility != "" && !validClaimVisibility(c.Visibility) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("claims[%d].visibility %q invalid; must be personal, team, or org", i, c.Visibility))
+			return
+		}
 		created, err := parseTimeFlexible(c.CreatedAt)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("claims[%d].created_at: %v", i, err))
@@ -851,14 +889,36 @@ func appendClaimsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Reques
 		if created.IsZero() {
 			created = now
 		}
+		testLastModified, err := parseTimeFlexible(c.TestLastModified)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("claims[%d].test_last_modified: %v", i, err))
+			return
+		}
+		testLastRunAt, err := parseTimeFlexible(c.TestLastRunAt)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("claims[%d].test_last_run_at: %v", i, err))
+			return
+		}
 		claim := domain.Claim{
-			ID:         c.ID,
-			Text:       c.Text,
-			Type:       domain.ClaimType(c.Type),
-			Confidence: c.Confidence,
-			Status:     domain.ClaimStatus(c.Status),
-			CreatedAt:  created,
-			CreatedBy:  actor,
+			ID:                 c.ID,
+			Text:               c.Text,
+			Type:               domain.ClaimType(c.Type),
+			Confidence:         c.Confidence,
+			Status:             domain.ClaimStatus(c.Status),
+			CreatedAt:          created,
+			CreatedBy:          actor,
+			SourceDocument:     c.SourceDocument,
+			SourceType:         domain.SourceType(c.SourceType),
+			SourceAuthority:    c.SourceAuthority,
+			Liveness:           domain.LivenessStatus(c.Liveness),
+			TestID:             c.TestID,
+			TestRequirementRef: c.TestRequirementRef,
+			TestAuthor:         c.TestAuthor,
+			TestLastModified:   testLastModified,
+			TestLastRunAt:      testLastRunAt,
+			TestPassCount:      c.TestPassCount,
+			TestFailCount:      c.TestFailCount,
+			Visibility:         domain.Visibility(c.Visibility),
 		}
 		claims = append(claims, claim)
 	}
@@ -1330,10 +1390,17 @@ type searchRequest struct {
 	RunID        string         `json:"run_id,omitempty"`
 	TopK         int            `json:"top_k,omitempty"`
 	MinTrust     float64        `json:"min_trust,omitempty"`
-	AsOf         string         `json:"as_of,omitempty"`           // validity time
-	RecordedAsOf string         `json:"recorded_as_of,omitempty"`  // ingestion time
+	AsOf         string         `json:"as_of,omitempty"`          // validity time
+	RecordedAsOf string         `json:"recorded_as_of,omitempty"` // ingestion time
 	Scope        *searchScope   `json:"scope,omitempty"`
 	Filters      *searchFilters `json:"filters,omitempty"`
+	// Consumer controls contradiction handling: "agent" triggers automatic
+	// trust-based resolution; "user" (default) surfaces contradictions with
+	// a human-readable explanation.
+	Consumer string `json:"consumer,omitempty"`
+	// Visibility controls workspace isolation: "personal", "team" (default), or "org".
+	// personal – only personal claims; team – personal+team; org – all claims.
+	Visibility string `json:"visibility,omitempty"`
 }
 
 type searchScope struct {
@@ -1366,6 +1433,15 @@ type searchResponse struct {
 	Total          int                    `json:"total"`
 	TopK           int                    `json:"top_k"`
 	AppliedFilters map[string]interface{} `json:"applied_filters,omitempty"`
+	// AutoResolved is true when the engine automatically resolved one or more
+	// contradictions on behalf of an agent consumer.
+	AutoResolved bool `json:"auto_resolved,omitempty"`
+	// ContradictionExplanation is a human-readable explanation of
+	// unresolved contradictions, populated when consumer=user.
+	ContradictionExplanation string `json:"contradiction_explanation,omitempty"`
+	// Verdicts contains one structured resolution entry per contradicting
+	// claim pair. Only populated when consumer=agent.
+	Verdicts []verdictDTO `json:"verdicts,omitempty"`
 }
 
 // makeSearchHandler returns the /v1/search handler. Hybrid retrieval:
@@ -1398,6 +1474,7 @@ func makeSearchHandler(conn *store.Conn) http.HandlerFunc {
 			}
 			req.AsOf = r.URL.Query().Get("as_of")
 			req.RecordedAsOf = r.URL.Query().Get("recorded_as_of")
+			req.Consumer = r.URL.Query().Get("consumer")
 		case http.MethodPost:
 			if err := decodeJSON(r, &req); err != nil {
 				writeError(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
@@ -1438,6 +1515,17 @@ func makeSearchHandler(conn *store.Conn) http.HandlerFunc {
 				Env:     req.Scope.Env,
 				Team:    req.Scope.Team,
 			}
+		}
+		if req.Consumer == "agent" {
+			opts.Consumer = domain.ConsumerAgent
+		} else {
+			opts.Consumer = domain.ConsumerUser
+		}
+		switch domain.Visibility(req.Visibility) {
+		case domain.VisibilityPersonal, domain.VisibilityTeam, domain.VisibilityOrg:
+			opts.Visibility = domain.Visibility(req.Visibility)
+		default:
+			// zero / unknown → engine default (team)
 		}
 
 		engine := query.NewEngine(conn.Events, conn.Claims, conn.Relationships)
@@ -1525,13 +1613,266 @@ func makeSearchHandler(conn *store.Conn) http.HandlerFunc {
 			}
 		}
 
+		verdictDTOs := make([]verdictDTO, 0, len(answer.Verdicts))
+		for _, v := range answer.Verdicts {
+			verdictDTOs = append(verdictDTOs, verdictDTO{
+				WinnerClaimID:    v.WinnerClaimID,
+				LoserClaimID:     v.LoserClaimID,
+				Confidence:       v.Confidence,
+				Rationale:        v.Rationale,
+				Action:           string(v.Action),
+				EscalationReason: v.EscalationReason,
+			})
+		}
+
 		writeJSON(w, http.StatusOK, searchResponse{
-			Query:          req.Query,
-			Claims:         dto,
-			Contradictions: contradictions,
-			Total:          total,
-			TopK:           req.TopK,
-			AppliedFilters: applied,
+			Query:                    req.Query,
+			Claims:                   dto,
+			Contradictions:           contradictions,
+			Total:                    total,
+			TopK:                     req.TopK,
+			AppliedFilters:           applied,
+			AutoResolved:             answer.AutoResolved,
+			ContradictionExplanation: answer.ContradictionExplanation,
+			Verdicts:                 verdictDTOs,
 		})
+	}
+}
+
+// makeClaimSubresourceHandler routes requests under /v1/claims/<id>/<subresource>.
+// Currently supports:
+//
+//	GET /v1/claims/<id>/provenance  → trust provenance report for the claim
+//	GET /v1/claims/<id>/export.md   → human-readable markdown export with provenance annotations
+func makeClaimSubresourceHandler(conn *store.Conn) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// path: /v1/claims/<id>/<subresource>
+		// Strip the prefix so we can parse id + subresource.
+		tail := strings.TrimPrefix(r.URL.Path, "/v1/claims/")
+		parts := strings.SplitN(tail, "/", 2)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		claimID, subresource := parts[0], parts[1]
+
+		switch subresource {
+		case "provenance":
+			makeProvenanceHandler(conn, claimID)(w, r)
+		case "export.md":
+			makeClaimMarkdownExportHandler(conn, claimID)(w, r)
+		default:
+			writeError(w, http.StatusNotFound, fmt.Sprintf("unknown subresource %q", subresource))
+		}
+	}
+}
+
+// makeProvenanceHandler handles GET /v1/claims/<id>/provenance.
+// It builds a query.Engine and delegates to WhyTrustClaim to produce a
+// structured domain.ProvenanceReport explaining how the claim's trust
+// score was computed from its provenance signals.
+func makeProvenanceHandler(conn *store.Conn, claimID string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		ctx := r.Context()
+		eng := query.NewEngine(conn.Events, conn.Claims, conn.Relationships)
+		report, err := eng.WhyTrustClaim(ctx, claimID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, fmt.Sprintf("provenance query failed: %v", err))
+			return
+		}
+		writeJSON(w, http.StatusOK, report)
+	}
+}
+
+// makeClaimMarkdownExportHandler handles GET /v1/claims/<id>/export.md.
+// It fetches the claim, runs a provenance report (unless ?provenance=false
+// is passed), and returns a Git-friendly markdown document with YAML
+// frontmatter carrying trust score, confidence rationale, and source links.
+func makeClaimMarkdownExportHandler(conn *store.Conn, claimID string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		ctx := r.Context()
+		claims, err := conn.Claims.ListByIDs(ctx, []string{claimID})
+		if err != nil || len(claims) == 0 {
+			writeError(w, http.StatusNotFound, fmt.Sprintf("claim %q not found", claimID))
+			return
+		}
+		c := claims[0]
+		// Provenance enrichment is opt-out: pass ?provenance=false to skip.
+		var report *domain.ProvenanceReport
+		if r.URL.Query().Get("provenance") != "false" {
+			eng := query.NewEngine(conn.Events, conn.Claims, conn.Relationships)
+			rpt, pErr := eng.WhyTrustClaim(ctx, claimID)
+			if pErr == nil {
+				report = &rpt
+			}
+			// Non-fatal: if provenance fails we still return the claim markdown.
+		}
+		rendered, err := markdownpkg.ExportClaim(c, report)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("render markdown: %v", err))
+			return
+		}
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.md"`, claimID))
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(rendered)) //nolint:gosec // G705: rendered is produced by our own markdown.ExportClaim, not from user input
+	}
+}
+
+// incidentRequest is the body for POST /v1/incidents.
+type incidentRequest struct {
+	ID               string `json:"id"`
+	Title            string `json:"title"`
+	Summary          string `json:"summary"`
+	Severity         string `json:"severity"`
+	RootCauseClaimID string `json:"root_cause_claim_id"`
+	CreatedBy        string `json:"created_by"`
+}
+
+// makeIncidentsHandler handles:
+//
+//	POST /v1/incidents  → open a new incident
+//	GET  /v1/incidents  → list all incidents (supports ?severity=<s> and ?status=<s>)
+func makeIncidentsHandler(conn *store.Conn) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			openIncidentHandler(conn, w, r)
+		case http.MethodGet:
+			listIncidentsHandler(conn, w, r)
+		default:
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		}
+	}
+}
+
+func openIncidentHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request) {
+	var req incidentRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid body: %v", err))
+		return
+	}
+	if strings.TrimSpace(req.Title) == "" {
+		writeError(w, http.StatusBadRequest, "title is required")
+		return
+	}
+	id := req.ID
+	if id == "" {
+		gen, err := newID("inc_")
+		if err != nil {
+			writeInternalError(w, "generate incident id", err)
+			return
+		}
+		id = gen
+	}
+	severity := domain.IncidentSeverity(req.Severity)
+	if severity == "" {
+		severity = domain.IncidentSeverityMedium
+	}
+	inc := domain.Incident{
+		ID:               id,
+		Title:            req.Title,
+		Summary:          req.Summary,
+		Severity:         severity,
+		Status:           domain.IncidentStatusOpen,
+		RootCauseClaimID: req.RootCauseClaimID,
+		OpenedAt:         time.Now().UTC(),
+		CreatedBy:        req.CreatedBy,
+	}
+	ctx := r.Context()
+	if err := conn.Incidents.Upsert(ctx, inc); err != nil {
+		writeInternalError(w, "upsert incident", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, inc)
+}
+
+func listIncidentsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	severityFilter := r.URL.Query().Get("severity")
+	statusFilter := r.URL.Query().Get("status")
+	var (
+		incidents []domain.Incident
+		err       error
+	)
+	switch {
+	case severityFilter != "":
+		incidents, err = conn.Incidents.ListBySeverity(ctx, domain.IncidentSeverity(severityFilter))
+	case statusFilter != "":
+		incidents, err = conn.Incidents.ListByStatus(ctx, domain.IncidentStatus(statusFilter))
+	default:
+		incidents, err = conn.Incidents.ListAll(ctx)
+	}
+	if err != nil {
+		writeInternalError(w, "list incidents", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, incidents)
+}
+
+// makeIncidentSubresourceHandler handles:
+//
+//	GET /v1/incidents/<id>              → fetch incident by ID
+//	POST /v1/incidents/<id>/resolve     → mark incident resolved
+//	GET  /v1/incidents/<id>/why-wrong   → WhyWereWeWrong analysis
+func makeIncidentSubresourceHandler(conn *store.Conn) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Strip "/v1/incidents/" prefix and split remainder.
+		prefix := "/v1/incidents/"
+		tail := strings.TrimPrefix(r.URL.Path, prefix)
+		parts := strings.SplitN(tail, "/", 2)
+		id := parts[0]
+		if id == "" {
+			writeError(w, http.StatusBadRequest, "incident id required")
+			return
+		}
+		sub := ""
+		if len(parts) == 2 {
+			sub = parts[1]
+		}
+
+		ctx := r.Context()
+		switch {
+		case sub == "" && r.Method == http.MethodGet:
+			inc, found, err := conn.Incidents.GetByID(ctx, id)
+			if err != nil {
+				writeInternalError(w, "get incident", err)
+				return
+			}
+			if !found {
+				writeError(w, http.StatusNotFound, fmt.Sprintf("incident %q not found", id))
+				return
+			}
+			writeJSON(w, http.StatusOK, inc)
+
+		case sub == "resolve" && r.Method == http.MethodPost:
+			if err := conn.Incidents.Resolve(ctx, id, time.Now().UTC()); err != nil {
+				writeInternalError(w, "resolve incident", err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"id": id, "status": string(domain.IncidentStatusResolved)})
+
+		case sub == "why-wrong" && r.Method == http.MethodGet:
+			eng := query.NewEngine(conn.Events, conn.Claims, conn.Relationships).
+				WithDecisions(conn.Decisions).
+				WithIncidents(conn.Incidents)
+			report, err := eng.WhyWereWeWrong(ctx, id)
+			if err != nil {
+				writeError(w, http.StatusNotFound, fmt.Sprintf("why-wrong analysis failed: %v", err))
+				return
+			}
+			writeJSON(w, http.StatusOK, report)
+
+		default:
+			writeError(w, http.StatusNotFound, fmt.Sprintf("unknown incident sub-resource %q", sub))
+		}
 	}
 }

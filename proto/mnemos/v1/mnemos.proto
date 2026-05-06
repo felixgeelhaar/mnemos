@@ -146,6 +146,9 @@ message Claim {
   double    confidence = 4;
   string    status     = 5;
   google.protobuf.Timestamp created_at = 6;
+  // visibility gates audience access: personal | team | org.
+  // Empty string is treated as "team" by the server.
+  string    visibility = 7;
 }
 
 message ClaimEvidence {

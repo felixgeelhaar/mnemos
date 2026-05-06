@@ -110,6 +110,22 @@ func postJSON(t *testing.T, url string, body any, headers map[string]string) *ht
 	return resp
 }
 
+func getJSON(t *testing.T, url string, headers map[string]string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	return resp
+}
+
 func TestServe_AppendEvents_PersistsAndCanBeListed(t *testing.T) {
 	st := newServeJWTTest(t)
 
@@ -797,5 +813,101 @@ func TestServe_Auth_UserTokenGetsAllScopes(t *testing.T) {
 			continue
 		}
 		_ = r.Body.Close()
+	}
+}
+
+// TestServe_AppendClaims_VisibilityRoundTrip verifies that an explicit
+// visibility value is persisted and returned by GET /v1/claims.
+func TestServe_AppendClaims_VisibilityRoundTrip(t *testing.T) {
+	for _, vis := range []string{"personal", "team", "org"} {
+		t.Run(vis, func(t *testing.T) {
+			st := newServeJWTTest(t)
+			now := time.Now().UTC()
+
+			body := map[string]any{
+				"claims": []map[string]any{
+					{
+						"id":         "cl_vis_" + vis,
+						"text":       "visibility test " + vis,
+						"type":       "fact",
+						"confidence": 0.8,
+						"status":     "active",
+						"created_at": now.Format(time.RFC3339),
+						"visibility": vis,
+					},
+				},
+			}
+			resp := postJSON(t, st.Srv.URL+"/v1/claims", body, st.Auth)
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != http.StatusCreated {
+				var msg errorResponse
+				_ = json.NewDecoder(resp.Body).Decode(&msg)
+				t.Fatalf("POST status = %d, want 201 (%v)", resp.StatusCode, msg.Error)
+			}
+
+			// Read back and confirm visibility is present.
+			getResp := getJSON(t, st.Srv.URL+"/v1/claims", st.Auth)
+			defer func() { _ = getResp.Body.Close() }()
+			if getResp.StatusCode != http.StatusOK {
+				t.Fatalf("GET status = %d, want 200", getResp.StatusCode)
+			}
+			var result struct {
+				Claims []struct {
+					ID         string `json:"id"`
+					Visibility string `json:"visibility"`
+				} `json:"claims"`
+			}
+			if err := json.NewDecoder(getResp.Body).Decode(&result); err != nil {
+				t.Fatalf("decode GET response: %v", err)
+			}
+			if len(result.Claims) != 1 {
+				t.Fatalf("claims count = %d, want 1", len(result.Claims))
+			}
+			if result.Claims[0].Visibility != vis {
+				t.Errorf("visibility = %q, want %q", result.Claims[0].Visibility, vis)
+			}
+		})
+	}
+}
+
+// TestServe_AppendClaims_RejectsInvalidVisibility verifies that an
+// unrecognised visibility value is rejected with 400.
+func TestServe_AppendClaims_RejectsInvalidVisibility(t *testing.T) {
+	st := newServeJWTTest(t)
+	body := map[string]any{
+		"claims": []map[string]any{
+			{"id": "cl_vis_bad", "text": "x", "type": "fact", "confidence": 0.5, "status": "active", "visibility": "public"},
+		},
+	}
+	resp := postJSON(t, st.Srv.URL+"/v1/claims", body, st.Auth)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+// TestServe_AppendClaims_VisibilityDefaultsToTeam verifies that omitting
+// visibility results in the claim being stored with visibility == "team".
+func TestServe_AppendClaims_VisibilityDefaultsToTeam(t *testing.T) {
+	st := newServeJWTTest(t)
+	now := time.Now().UTC()
+
+	body := map[string]any{
+		"claims": []map[string]any{
+			{"id": "cl_vis_nofield", "text": "no vis field", "type": "fact", "confidence": 0.7, "status": "active", "created_at": now.Format(time.RFC3339)},
+		},
+	}
+	resp := postJSON(t, st.Srv.URL+"/v1/claims", body, st.Auth)
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("POST status = %d, want 201", resp.StatusCode)
+	}
+
+	var vis string
+	if err := st.DB.QueryRowContext(context.Background(), `SELECT visibility FROM claims WHERE id = ?`, "cl_vis_nofield").Scan(&vis); err != nil {
+		t.Fatalf("read visibility: %v", err)
+	}
+	if vis != "team" {
+		t.Errorf("visibility = %q, want \"team\"", vis)
 	}
 }

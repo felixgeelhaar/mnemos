@@ -375,3 +375,41 @@ type EntityRepository interface {
 	Count(ctx context.Context) (int64, error)
 	ClaimIDsMissingEntityLinks(ctx context.Context) ([]string, error)
 }
+
+// IncidentRepository persists and retrieves incidents — structured
+// records of failure events used for "Why Were We Wrong?" analysis.
+// Incidents are upsert-by-id so re-opening with updated evidence
+// rewrites the row without churning the opened_at timestamp.
+type IncidentRepository interface {
+	// Upsert creates or replaces an incident row by ID. The full
+	// Incident struct (including all JSON array fields) is written
+	// atomically.
+	Upsert(ctx context.Context, incident domain.Incident) error
+	// GetByID returns the incident with the given ID, or
+	// (Incident{}, false, nil) when no matching row exists.
+	GetByID(ctx context.Context, id string) (domain.Incident, bool, error)
+	// ListAll returns every incident ordered by opened_at descending.
+	ListAll(ctx context.Context) ([]domain.Incident, error)
+	// ListBySeverity returns incidents matching the given severity,
+	// ordered by opened_at descending.
+	ListBySeverity(ctx context.Context, severity domain.IncidentSeverity) ([]domain.Incident, error)
+	// ListByStatus returns incidents matching the given lifecycle
+	// status, ordered by opened_at descending.
+	ListByStatus(ctx context.Context, status domain.IncidentStatus) ([]domain.Incident, error)
+	// Resolve sets the incident's status to "resolved" and stamps
+	// resolved_at. Idempotent on already-resolved incidents.
+	Resolve(ctx context.Context, id string, resolvedAt time.Time) error
+	// AttachDecision appends decisionID to the incident's
+	// decision_ids list if not already present.
+	AttachDecision(ctx context.Context, incidentID, decisionID string) error
+	// AttachOutcome appends outcomeID to the incident's outcome_ids
+	// list if not already present.
+	AttachOutcome(ctx context.Context, incidentID, outcomeID string) error
+	// SetPlaybook records the synthesised playbook that came out of
+	// this incident's lessons.
+	SetPlaybook(ctx context.Context, incidentID, playbookID string) error
+	// CountAll returns the total number of incident rows.
+	CountAll(ctx context.Context) (int64, error)
+	// DeleteAll wipes every incident row. Used by mnemos reset.
+	DeleteAll(ctx context.Context) error
+}

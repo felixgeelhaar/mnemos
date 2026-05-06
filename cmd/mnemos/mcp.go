@@ -466,6 +466,47 @@ func handleMCP() {
 			return out, nil
 		})
 
+	// --- Self-editing memory tools (letta-style) ---
+	srv.Tool("memory_deprecate").
+		Description("Mark a claim as deprecated when the agent finds it stale or wrong. Records the rationale on the status transition; existing evidence + history stay queryable.").
+		OutputSchema(mcpMemoryDeprecateOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpMemoryDeprecateInput) (mcpMemoryDeprecateOutput, error) {
+			return mcpRunMemoryDeprecate(ctx, mcpActor, input)
+		})
+
+	srv.Tool("memory_resolve_contradiction").
+		Description("Pick the winner of two contradicting claims. Winner moves to status=resolved; loser to status=deprecated. Both transitions carry the rationale.").
+		OutputSchema(mcpMemoryResolveOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpMemoryResolveInput) (mcpMemoryResolveOutput, error) {
+			return mcpRunMemoryResolve(ctx, mcpActor, input)
+		})
+
+	srv.Tool("memory_escalate").
+		Description("Signal that the agent cannot resolve a claim autonomously and requests human review. Records an escalation Verdict on the claim with the agent-provided reason so the audit trail captures who escalated and why.").
+		OutputSchema(mcpMemoryEscalateOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpMemoryEscalateInput) (mcpMemoryEscalateOutput, error) {
+			return mcpRunMemoryEscalate(ctx, mcpActor, input)
+		})
+
+	srv.Tool("memory_promote").
+		Description("Re-verify a claim against fresh evidence. Bumps last_verified, increments verify_count — the trust score follows.").
+		OutputSchema(mcpMemoryPromoteOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpMemoryPromoteInput) (mcpMemoryPromoteOutput, error) {
+			return mcpRunMemoryPromote(ctx, mcpActor, input)
+		})
+
+	srv.Tool("memory_context").
+		Description("Render the system-prompt-ready Context Block for a run: top claims by trust, surfaced contradictions, footer with counts. Drop directly into the agent's prompt at the start of each turn.").
+		OutputSchema(mcpMemoryContextOutput{}).
+		ValidateInput().
+		Handler(func(ctx context.Context, input mcpMemoryContextInput) (mcpMemoryContextOutput, error) {
+			return mcpRunMemoryContext(ctx, input)
+		})
+
 	// Wire signal handling so a SIGINT/SIGTERM cancels the parent
 	// context: ServeStdio observes the cancellation and returns,
 	// then we tear the watcher down. Without this, Ctrl+C would
@@ -1090,4 +1131,197 @@ func mcpRunRecordOutcome(ctx context.Context, actor string, input mcpRecordOutco
 		return mcpRecordOutcomeOutput{}, err
 	}
 	return mcpRecordOutcomeOutput{ID: outcome.ID, ActionID: outcome.ActionID, Result: string(outcome.Result)}, nil
+}
+
+// --- Self-editing memory tools (letta-style) ---------------------------------
+//
+// The four tools below let an LLM agent curate Mnemos's memory while it
+// runs: deprecate a claim it discovers is stale, resolve a contradiction
+// by picking a winner, and pull a system-prompt-ready Context Block at
+// the start of each turn. The shape mirrors letta's core/recall/archival
+// edit tools, mapped onto Mnemos's claim-status lifecycle.
+//
+// All four are stateless: each call resolves the claim by id, applies
+// the change through the existing repository contracts, returns a small
+// JSON receipt. No agent-internal state is kept.
+
+type mcpMemoryDeprecateInput struct {
+	ClaimID string `json:"claim_id" jsonschema:"required,description=Claim id to deprecate"`
+	Reason  string `json:"reason,omitempty" jsonschema:"description=Free-form rationale stored on the status transition"`
+}
+
+type mcpMemoryDeprecateOutput struct {
+	ClaimID   string `json:"claim_id"`
+	OldStatus string `json:"old_status"`
+	NewStatus string `json:"new_status"`
+}
+
+type mcpMemoryResolveInput struct {
+	WinnerID string `json:"winner_id" jsonschema:"required,description=Claim id that should remain active"`
+	LoserID  string `json:"loser_id" jsonschema:"required,description=Claim id that should be marked deprecated"`
+	Reason   string `json:"reason,omitempty" jsonschema:"description=Free-form rationale stored on both status transitions"`
+}
+
+type mcpMemoryResolveOutput struct {
+	WinnerID string `json:"winner_id"`
+	LoserID  string `json:"loser_id"`
+}
+
+type mcpMemoryPromoteInput struct {
+	ClaimID string `json:"claim_id" jsonschema:"required,description=Claim id to promote (re-verify against fresh evidence)"`
+}
+
+type mcpMemoryPromoteOutput struct {
+	ClaimID    string `json:"claim_id"`
+	VerifiedAt string `json:"verified_at"`
+}
+
+type mcpMemoryEscalateInput struct {
+	ClaimID string `json:"claim_id" jsonschema:"required,description=ID of the claim the agent cannot resolve autonomously"`
+	Reason  string `json:"reason,omitempty" jsonschema:"description=Why the agent is escalating this claim (shown verbatim in the audit trail)"`
+}
+
+type mcpMemoryEscalateOutput struct {
+	ClaimID          string `json:"claim_id"`
+	Action           string `json:"action"`
+	EscalationReason string `json:"escalation_reason"`
+	Rationale        string `json:"rationale"`
+}
+
+type mcpMemoryContextInput struct {
+	RunID     string `json:"run_id" jsonschema:"required,description=Run id whose context block to render"`
+	MaxTokens int    `json:"max_tokens,omitempty" jsonschema:"description=Approximate token budget (chars/4); 0 disables truncation"`
+}
+
+type mcpMemoryContextOutput struct {
+	RunID   string `json:"run_id"`
+	Context string `json:"context"`
+}
+
+func mcpRunMemoryEscalate(ctx context.Context, _ string, input mcpMemoryEscalateInput) (mcpMemoryEscalateOutput, error) {
+	if input.ClaimID == "" {
+		return mcpMemoryEscalateOutput{}, fmt.Errorf("claim_id is required")
+	}
+	conn, err := openConn(ctx)
+	if err != nil {
+		return mcpMemoryEscalateOutput{}, err
+	}
+	defer closeConn(conn)
+	eng := query.NewEngine(conn.Events, conn.Claims, conn.Relationships)
+	verdict, err := eng.EscalateClaimForAgent(ctx, input.ClaimID, input.Reason)
+	if err != nil {
+		return mcpMemoryEscalateOutput{}, err
+	}
+	return mcpMemoryEscalateOutput{
+		ClaimID:          input.ClaimID,
+		Action:           string(verdict.Action),
+		EscalationReason: verdict.EscalationReason,
+		Rationale:        verdict.Rationale,
+	}, nil
+}
+
+func mcpRunMemoryDeprecate(ctx context.Context, actor string, input mcpMemoryDeprecateInput) (mcpMemoryDeprecateOutput, error) {
+	if input.ClaimID == "" {
+		return mcpMemoryDeprecateOutput{}, fmt.Errorf("claim_id is required")
+	}
+	conn, err := openConn(ctx)
+	if err != nil {
+		return mcpMemoryDeprecateOutput{}, err
+	}
+	defer closeConn(conn)
+	existing, err := conn.Claims.ListByIDs(ctx, []string{input.ClaimID})
+	if err != nil || len(existing) == 0 {
+		return mcpMemoryDeprecateOutput{}, fmt.Errorf("claim %s not found", input.ClaimID)
+	}
+	old := existing[0].Status
+	updated := existing[0]
+	updated.Status = domain.ClaimStatusDeprecated
+	reason := input.Reason
+	if reason == "" {
+		reason = "agent-deprecated"
+	}
+	if err := conn.Claims.UpsertWithReasonAs(ctx, []domain.Claim{updated}, reason, actor); err != nil {
+		return mcpMemoryDeprecateOutput{}, err
+	}
+	return mcpMemoryDeprecateOutput{
+		ClaimID:   input.ClaimID,
+		OldStatus: string(old),
+		NewStatus: string(domain.ClaimStatusDeprecated),
+	}, nil
+}
+
+func mcpRunMemoryResolve(ctx context.Context, actor string, input mcpMemoryResolveInput) (mcpMemoryResolveOutput, error) {
+	if input.WinnerID == "" || input.LoserID == "" {
+		return mcpMemoryResolveOutput{}, fmt.Errorf("winner_id and loser_id are required")
+	}
+	if input.WinnerID == input.LoserID {
+		return mcpMemoryResolveOutput{}, fmt.Errorf("winner_id and loser_id must differ")
+	}
+	conn, err := openConn(ctx)
+	if err != nil {
+		return mcpMemoryResolveOutput{}, err
+	}
+	defer closeConn(conn)
+	existing, err := conn.Claims.ListByIDs(ctx, []string{input.WinnerID, input.LoserID})
+	if err != nil || len(existing) < 2 {
+		return mcpMemoryResolveOutput{}, fmt.Errorf("both claims must exist")
+	}
+	reason := input.Reason
+	if reason == "" {
+		reason = "agent-resolved-contradiction"
+	}
+	updates := make([]domain.Claim, 0, 2)
+	for _, c := range existing {
+		switch c.ID {
+		case input.WinnerID:
+			c.Status = domain.ClaimStatusResolved
+		case input.LoserID:
+			c.Status = domain.ClaimStatusDeprecated
+		}
+		updates = append(updates, c)
+	}
+	if err := conn.Claims.UpsertWithReasonAs(ctx, updates, reason, actor); err != nil {
+		return mcpMemoryResolveOutput{}, err
+	}
+	return mcpMemoryResolveOutput{WinnerID: input.WinnerID, LoserID: input.LoserID}, nil
+}
+
+func mcpRunMemoryPromote(ctx context.Context, actor string, input mcpMemoryPromoteInput) (mcpMemoryPromoteOutput, error) {
+	_ = actor // attribution lives in the verify path's own log
+	if input.ClaimID == "" {
+		return mcpMemoryPromoteOutput{}, fmt.Errorf("claim_id is required")
+	}
+	conn, err := openConn(ctx)
+	if err != nil {
+		return mcpMemoryPromoteOutput{}, err
+	}
+	defer closeConn(conn)
+	now := time.Now().UTC()
+	if err := conn.Claims.MarkVerified(ctx, input.ClaimID, now, 0); err != nil {
+		return mcpMemoryPromoteOutput{}, err
+	}
+	return mcpMemoryPromoteOutput{
+		ClaimID:    input.ClaimID,
+		VerifiedAt: now.Format(time.RFC3339),
+	}, nil
+}
+
+func mcpRunMemoryContext(ctx context.Context, input mcpMemoryContextInput) (mcpMemoryContextOutput, error) {
+	if input.RunID == "" {
+		return mcpMemoryContextOutput{}, fmt.Errorf("run_id is required")
+	}
+	conn, err := openConn(ctx)
+	if err != nil {
+		return mcpMemoryContextOutput{}, err
+	}
+	defer closeConn(conn)
+	engine := query.NewEngine(conn.Events, conn.Claims, conn.Relationships)
+	block, err := engine.BuildContextBlock(ctx, query.ContextBlockOptions{
+		RunID:     input.RunID,
+		MaxTokens: input.MaxTokens,
+	})
+	if err != nil {
+		return mcpMemoryContextOutput{}, err
+	}
+	return mcpMemoryContextOutput{RunID: input.RunID, Context: block}, nil
 }

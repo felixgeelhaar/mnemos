@@ -206,6 +206,8 @@ func printClaimPreview(claims []domain.Claim, maxDisplay int) {
 			typeIcon = icon("✓", "+")
 		case domain.ClaimTypeHypothesis:
 			typeIcon = icon("?", "?")
+		case domain.ClaimTypeTestResult:
+			typeIcon = icon("⚗", "T")
 		}
 		status := ""
 		if c.Status == domain.ClaimStatusContested {

@@ -9,12 +9,17 @@ import (
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 	"github.com/felixgeelhaar/mnemos/internal/markdown"
+	"github.com/felixgeelhaar/mnemos/internal/query"
+	"github.com/felixgeelhaar/mnemos/internal/store"
 )
 
-// handleExport routes `mnemos export --kind=lesson|playbook [--id=ID]`.
+// handleExport routes `mnemos export --kind=lesson|playbook|claim [--id=ID]`.
+// For claims, pass --provenance to enrich the export with a full trust-score
+// breakdown (requires a live engine query).
 // Default writes to stdout; --out <path> writes to a file.
 func handleExport(args []string, _ Flags) {
 	var kind, id, out string
+	var withProvenance bool
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--kind":
@@ -26,6 +31,8 @@ func handleExport(args []string, _ Flags) {
 		case "--out":
 			out = args[i+1]
 			i++
+		case "--provenance":
+			withProvenance = true
 		default:
 			exitWithMnemosError(false, NewUserError("unknown flag %q", args[i]))
 			return
@@ -66,8 +73,14 @@ func handleExport(args []string, _ Flags) {
 			exitWithMnemosError(false, NewSystemError(err, "render markdown"))
 			return
 		}
+	case "claim":
+		rendered, err = handleExportClaim(ctx, conn, id, withProvenance)
+		if err != nil {
+			exitWithMnemosError(false, err)
+			return
+		}
 	default:
-		exitWithMnemosError(false, NewUserError("unknown kind %q (want lesson | playbook)", kind))
+		exitWithMnemosError(false, NewUserError("unknown kind %q (want lesson | playbook | claim)", kind))
 		return
 	}
 	if out == "" {
@@ -79,6 +92,33 @@ func handleExport(args []string, _ Flags) {
 		return
 	}
 	emitJSON(map[string]string{"path": out, "kind": kind, "id": id})
+}
+
+// handleExportClaim fetches a claim, optionally enriches it with a
+// live provenance report, and renders it as markdown.
+func handleExportClaim(ctx context.Context, conn *store.Conn, id string, withProvenance bool) (string, error) {
+	claims, err := conn.Claims.ListByIDs(ctx, []string{id})
+	if err != nil {
+		return "", NewSystemError(err, "get claim %q", id)
+	}
+	if len(claims) == 0 {
+		return "", NewUserError("claim %q not found", id)
+	}
+	c := claims[0]
+	var report *domain.ProvenanceReport
+	if withProvenance {
+		eng := query.NewEngine(conn.Events, conn.Claims, conn.Relationships)
+		r, pErr := eng.WhyTrustClaim(ctx, id)
+		if pErr != nil {
+			return "", NewSystemError(pErr, "provenance query for claim %q", id)
+		}
+		report = &r
+	}
+	rendered, err := markdown.ExportClaim(c, report)
+	if err != nil {
+		return "", NewSystemError(err, "render claim markdown")
+	}
+	return rendered, nil
 }
 
 // handleImport reads a markdown file and upserts it as the matching

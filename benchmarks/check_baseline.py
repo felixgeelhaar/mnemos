@@ -1,8 +1,9 @@
 """Compare the latest benchmark results against the committed baseline.
 
 Exits non-zero when any suite's F1 / precision / recall drops more than
-the threshold below the baseline, or when a baselined suite has no
-results at all (regression by omission).
+the threshold below the baseline, when suite-level policy metrics fall
+below explicit minimums (for example recall_pass_rate_min), or when a
+baselined suite has no results at all (regression by omission).
 
 Usage:
     python -m benchmarks.check_baseline                    # default paths
@@ -68,6 +69,23 @@ def main() -> int:
                     f"threshold {threshold})"
                 )
 
+        # Optional suite-level minimums that should not use threshold drift
+        # semantics (these are hard floors).
+        for min_key, summary_key in (
+            ("recall_pass_rate_min", "recall_pass_rate"),
+            ("critical_pass_rate_min", "critical_pass_rate"),
+            ("confidence_avg_min", "confidence_avg"),
+        ):
+            if min_key not in expected:
+                continue
+            actual = summary.get(summary_key, 0.0)
+            min_value = expected[min_key]
+            if actual < min_value:
+                failures.append(
+                    f"[{suite_name}] {summary_key} = {actual:.3f}, "
+                    f"required >= {min_value:.3f}"
+                )
+
     if failures:
         print("Benchmark regression detected:", file=sys.stderr)
         for f in failures:
@@ -76,7 +94,7 @@ def main() -> int:
               "in the same commit.", file=sys.stderr)
         return 1
 
-    print(f"OK — all baselined suites within {threshold} of recorded F1/P/R.")
+    print(f"OK — all baselined suites satisfy F1/P/R drift and policy floors.")
     return 0
 
 

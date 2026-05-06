@@ -13,6 +13,8 @@
       "precision_min": 1.0,
       "recall_min": 1.0,
       "recall_pass_rate_min": 1.0,
+      "critical_pass_rate_min": 1.0,
+      "confidence_avg_min": 0.45,
       "evidence_commit": "2d34dbb"
     }
   }

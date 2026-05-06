@@ -133,6 +133,16 @@ mnemos pull = query team knowledge alongside local
 - [x] GraphRAG-style multi-hop queries (supports/contradicts edge expansion)
 - [x] Compliance and audit trails (Phase A + F deliver the substrate)
 - [x] Bias detection — `internal/bias` ships four indicators (source concentration, polarity skew, temporal cluster, single-source-of-truth) with operator-tunable thresholds.
+- [ ] **Epistemic Provenance & Claim Trust Framework**
+  - [ ] Claim provenance data model (source doc, authority, liveness)
+  - [ ] Citation graph & link density tracking (know what converges)
+  - [ ] Liveness detection (e.g. 12-year-old process doc still being executed = live/zombie)
+  - [ ] Source credibility scoring engine (link density + liveness + recency + authority)
+  - [ ] Test provenance model (first-class "test result" as claim with metadata)
+  - [ ] Test conflict detection (Test1 passes, Test2 fails for same thing)
+  - [ ] Confidence-weighted conflict resolution (which test/source to trust?)
+  - [ ] Provenance Query API: "Why trust this claim?" with rationale
+  - [ ] Human-readable provenance markdown export
 - [ ] Enterprise integrations (Slack, Teams, Jira)
 - [x] Web interface — embedded SPA shipped with `mnemos serve`
 

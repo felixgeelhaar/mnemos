@@ -4,6 +4,8 @@
 
 Mnemos transforms arbitrary inputs into structured, evolving, evidence-backed knowledge. It enables users to understand what is true and why—eliminating AI hallucination through traceable claims.
 
+**Core Differentiator:** Epistemic provenance — Mnemos doesn't just store claims, it explains *why* a claim should be trusted over alternatives through source credibility signals, citation graphs, and liveness detection.
+
 ## 2. Problem Statement
 
 ### 2.1 The Hallucination Problem
@@ -33,6 +35,8 @@ AI systems are becoming decision-makers, but they forget context, invent facts, 
 - auditable
 - collaborative
 - evolving
+
+**The Epistemic Layer:** Beyond storage, Mnemos answers *"Why should I trust this claim over that one?"* — resolving conflicts through provenance signals (citation density, liveness, authority, recency) rather than treating all claims as equal.
 
 ## 4. Phased Roadmap
 
@@ -127,6 +131,16 @@ mnemos pull = query team knowledge alongside local knowledge
 **Deliverables:**
 - [ ] GraphRAG integration for multi-hop queries
 - [x] Embeddings for semantic search (shipped in Phase 1)
+- [ ] **Epistemic Provenance & Claim Trust Framework**
+  - [ ] Claim provenance data model (source doc, authority, liveness)
+  - [ ] Citation graph & link density tracking (know what converges)
+  - [ ] Liveness detection (e.g. 12-year-old process doc still being executed = live)
+  - [ ] Source credibility scoring engine (link density + liveness + recency + authority)
+  - [ ] Test provenance model (first-class "test result" as claim with metadata)
+  - [ ] Test conflict detection (Test1 passes, Test2 fails for same thing)
+  - [ ] Confidence-weighted conflict resolution (which test/source to trust?)
+  - [ ] Provenance Query API: "Why trust this claim?" with rationale
+  - [ ] Human-readable provenance markdown export
 - [ ] Governance and bias detection
 - [ ] Enterprise integrations (Slack, Teams, Jira)
 - [ ] Compliance and audit trails
@@ -163,8 +177,29 @@ mnemos pull = query team knowledge alongside local knowledge
 **Scenario:** "Ground AI decisions in verified organizational knowledge"
 
 **Inputs:** All organizational data sources via registry
+
 **Output:** Trusted, auditable AI responses
+
 **Tool:** REST API, SDK, web interface
+
+### Use Case 5: Epistemic Provenance (Phase 3)
+
+**Scenario:** "I have conflicting docs/claims — which one should I trust?"
+
+**User:** Power user with Karpathy-style workflow (Obsidian + transcriptions + docs). Finds two claims that contradict. Needs to know: which is more可信?
+
+**Inputs:** Multiple documents, transcriptions, git commits, test results
+
+**Provenance Signals:**
+- Citation density (3 sources agree on Claim A)
+- Liveness (12-year-old process doc still being executed)
+- Recency (this spec was just updated yesterday)
+- Authority (this came from the CTO's decision)
+- Test conflict (Test1 passes, Test2 fails — which test is newer/more authoritative?)
+
+**Output:** Trusted claim + rationale ("Trust Claim A: 3 sources agree, source is live (last executed 2 days ago), contradicts Test2 which is 6 months stale")
+
+**Tool:** `mnemos query --explain-trust <claim-id>`, HTTP/gRPC API, MCP provenance tools
 
 ## 6. Product Principles
 
@@ -172,6 +207,7 @@ mnemos pull = query team knowledge alongside local knowledge
 2. **Time matters** — History preserved, knowledge evolves
 3. **Contradictions are signals** — Conflict is insight, not error
 4. **Systems must explain themselves** — Every answer includes evidence
+5. **Provenance creates trust** — Not all claims are equal; explain *why* one source wins over others through citation density, liveness, authority, and recency
 
 ## 7. Non-Goals
 
@@ -193,7 +229,11 @@ mnemos pull = query team knowledge alongside local knowledge
 ## 9. Definition of Success
 
 Mnemos is successful when:
+
 - Users can answer "What is true and why?"
 - Answers are trusted due to evidence backing
 - The system feels fundamentally superior to search or RAG
 - AI outputs are grounded in verified knowledge
+- **Users can resolve conflicting claims** — "Why should I trust Claim A over Claim B?"
+- **Provenance signals guide decisions** — citation density, liveness, authority, and recency are first-class outputs
+- **Test conflicts are resolved** — when Test1 passes but Test2 fails, the system explains which to trust and why

@@ -39,15 +39,63 @@
     No managed vendor dependency required.
   </p>
   <div class="cta-row">
-    <a class="cta primary" href="#run">Try it locally in 5 minutes</a>
+    <a class="cta primary" href="#run">Run demo now</a>
     <a class="cta" href="https://github.com/felixgeelhaar/mnemos" aria-label="View Mnemos on GitHub">View on GitHub</a>
-    <a class="cta ghost" href="mailto:felix.geelhaar@gmail.com?subject=Mnemos%20Design%20Partner">Talk to the maintainer</a>
+    <a class="cta ghost" href="#architecture">See architecture</a>
   </div>
+
+  <div class="metric-strip" aria-label="Product proof metrics">
+    <div><strong>1.0</strong><span>holdout recall pass rate</span></div>
+    <div><strong>1.0</strong><span>critical pass rate</span></div>
+    <div><strong>5 min</strong><span>to first contradiction check</span></div>
+    <div><strong>5 backends</strong><span>SQLite, Postgres, MySQL, libSQL, memory</span></div>
+  </div>
+
+  <p class="hero-proof">
+    Best for teams where wrong memory is expensive: regulated B2B AI, internal copilots, and on-prem agent platforms.
+  </p>
   <div class="use-cases">
     <div><p><strong>Own your memory infrastructure</strong>Single Go binary, MIT license, and storage in your stack.</p></div>
     <div><p><strong>Reduce hallucination risk from memory drift</strong>Contradictions are first-class and surfaced before response generation.</p></div>
     <div><p><strong>Pass audits faster</strong>Every claim links to evidence and every correction carries a reason.</p></div>
     <div><p><strong>Integrate with your current agent runtime</strong>Use HTTP, CLI, gRPC, or MCP with LangGraph, CrewAI, and custom systems.</p></div>
+  </div>
+</section>
+
+<section id="demo" aria-labelledby="demo-heading">
+  <p class="kicker">Live proof</p>
+  <h2 id="demo-heading">Same prompt, safer outcome when memory is auditable.</h2>
+  <p>
+    Mnemos helps your system avoid confidently repeating stale or contradictory memory by forcing evidence and contradiction handling into the loop.
+  </p>
+
+  <div class="demo-grid">
+    <div class="demo-card bad">
+      <h3>Without Mnemos</h3>
+      <p class="dim">Agent answer</p>
+      <pre><code>"Deployment succeeded in production."
+
+No contradiction surfaced.
+No evidence shown.
+Wrong state repeated.</code></pre>
+    </div>
+    <div class="demo-card good">
+      <h3>With Mnemos</h3>
+      <p class="dim">Agent answer + memory audit context</p>
+      <pre><code>"There are contradictory claims about deployment status.
+Latest resolution: rolled back at 14:02."
+
+evidence: ev_1
+contradiction: [cl_a, cl_b]
+confidence: 0.84</code></pre>
+    </div>
+  </div>
+
+  <div class="callout">
+    <strong>Design partner program.</strong>
+    If you're shipping AI in a regulated or high-risk workflow, email
+    <a href="mailto:felix.geelhaar@gmail.com?subject=Mnemos%20Design%20Partner">felix.geelhaar@gmail.com</a>
+    for a 30-minute architecture review and rollout plan.
   </div>
 </section>
 

@@ -469,6 +469,63 @@ pre code { background: transparent; padding: 0; }
   letter-spacing: 0.06em;
 }
 
+.metric-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  margin: 10px 0 18px;
+}
+.metric-strip > div {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 2px;
+}
+.metric-strip strong {
+  font-family: var(--mono);
+  color: var(--accent);
+  font-size: 16px;
+}
+.metric-strip span {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.hero-proof {
+  color: var(--text-dim);
+  font-size: 14px;
+  margin: 0;
+}
+
+.demo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.demo-card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.demo-card h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.demo-card.bad {
+  border-left: 4px solid var(--accent-bad);
+}
+
+.demo-card.good {
+  border-left: 4px solid var(--accent-good);
+}
+
 .vs-table {
   margin: 24px 0;
   background: var(--bg-elev);

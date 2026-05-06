@@ -87,7 +87,27 @@ CREATE TABLE IF NOT EXISTS claims (
 	created_by TEXT NOT NULL DEFAULT '<system>',
 	trust_score REAL NOT NULL DEFAULT 0,
 	valid_from TEXT NOT NULL DEFAULT '',
-	valid_to TEXT
+	valid_to TEXT,
+	last_verified TEXT NOT NULL DEFAULT '',
+	verify_count INTEGER NOT NULL DEFAULT 0,
+	half_life_days REAL NOT NULL DEFAULT 0,
+	scope_service TEXT NOT NULL DEFAULT '',
+	scope_env TEXT NOT NULL DEFAULT '',
+	scope_team TEXT NOT NULL DEFAULT '',
+	source_document TEXT NOT NULL DEFAULT '',
+	source_type TEXT NOT NULL DEFAULT '',
+	source_authority REAL NOT NULL DEFAULT 0,
+	liveness TEXT NOT NULL DEFAULT '',
+	last_executed TEXT NOT NULL DEFAULT '',
+	citation_count INTEGER NOT NULL DEFAULT 0,
+	provenance_rationale TEXT NOT NULL DEFAULT '',
+	test_id TEXT NOT NULL DEFAULT '',
+	test_requirement_ref TEXT NOT NULL DEFAULT '',
+	test_author TEXT NOT NULL DEFAULT '',
+	test_last_modified TEXT NOT NULL DEFAULT '',
+	test_last_run_at TEXT NOT NULL DEFAULT '',
+	test_pass_count INTEGER NOT NULL DEFAULT 0,
+	test_fail_count INTEGER NOT NULL DEFAULT 0
 );
 -- idx_claims_trust_score and idx_claims_valid_to are created by
 -- migrate() after the v1→v2 / v2→v3 ALTER TABLEs add the columns on
@@ -284,7 +304,8 @@ CREATE TABLE IF NOT EXISTS lessons (
 	derived_at TEXT NOT NULL,
 	last_verified TEXT NOT NULL DEFAULT '',
 	source TEXT NOT NULL DEFAULT 'synthesize',
-	created_by TEXT NOT NULL DEFAULT '<system>'
+	created_by TEXT NOT NULL DEFAULT '<system>',
+	polarity TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_lessons_scope_service ON lessons(scope_service);
 CREATE INDEX IF NOT EXISTS idx_lessons_scope_env ON lessons(scope_env);
@@ -391,6 +412,27 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_relationships_unique_edge
 	ON entity_relationships(kind, from_type, from_id, to_type, to_id);
 CREATE INDEX IF NOT EXISTS idx_entity_relationships_from ON entity_relationships(from_type, from_id);
 CREATE INDEX IF NOT EXISTS idx_entity_relationships_to ON entity_relationships(to_type, to_id);
+
+-- Phase 9: incidents
+CREATE TABLE IF NOT EXISTS incidents (
+	id TEXT PRIMARY KEY,
+	title TEXT NOT NULL,
+	summary TEXT NOT NULL DEFAULT '',
+	severity TEXT NOT NULL,
+	status TEXT NOT NULL DEFAULT 'open',
+	timeline_event_ids_json TEXT NOT NULL DEFAULT '[]',
+	root_cause_claim_id TEXT NOT NULL DEFAULT '',
+	decision_ids_json TEXT NOT NULL DEFAULT '[]',
+	outcome_ids_json TEXT NOT NULL DEFAULT '[]',
+	playbook_id TEXT NOT NULL DEFAULT '',
+	opened_at TEXT NOT NULL,
+	resolved_at TEXT NOT NULL DEFAULT '',
+	created_by TEXT NOT NULL DEFAULT '<system>'
+);
+CREATE INDEX IF NOT EXISTS idx_incidents_severity ON incidents(severity);
+CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);
+CREATE INDEX IF NOT EXISTS idx_incidents_opened_at ON incidents(opened_at);
+CREATE INDEX IF NOT EXISTS idx_incidents_root_cause_claim_id ON incidents(root_cause_claim_id);
 `
 
 	if _, err := db.Exec(schema); err != nil {
@@ -407,7 +449,7 @@ CREATE INDEX IF NOT EXISTS idx_entity_relationships_to ON entity_relationships(t
 // currentSchemaVersion is the schema generation this binary expects.
 // Bump whenever a column or table is added; pair the bump with a step
 // in addMissingColumns so existing DBs upgrade in place.
-const currentSchemaVersion = 7
+const currentSchemaVersion = 13
 
 // addMissingColumn declares one defensive column-add. Each entry is
 // idempotent: if the column already exists in the table we skip it,
@@ -458,9 +500,32 @@ var expectedColumns = []addMissingColumn{
 	{"claims", "scope_service", "TEXT NOT NULL DEFAULT ''"},
 	{"claims", "scope_env", "TEXT NOT NULL DEFAULT ''"},
 	{"claims", "scope_team", "TEXT NOT NULL DEFAULT ''"},
+	// v8 — epistemic provenance fields.
+	{"claims", "source_document", "TEXT NOT NULL DEFAULT ''"},
+	{"claims", "source_type", "TEXT NOT NULL DEFAULT ''"},
+	{"claims", "source_authority", "REAL NOT NULL DEFAULT 0"},
+	{"claims", "liveness", "TEXT NOT NULL DEFAULT ''"},
+	{"claims", "last_executed", "TEXT NOT NULL DEFAULT ''"},
+	{"claims", "citation_count", "INTEGER NOT NULL DEFAULT 0"},
+	{"claims", "provenance_rationale", "TEXT NOT NULL DEFAULT ''"},
+	// v9 — test provenance fields.
+	{"claims", "test_id", "TEXT NOT NULL DEFAULT ''"},
+	{"claims", "test_requirement_ref", "TEXT NOT NULL DEFAULT ''"},
+	{"claims", "test_author", "TEXT NOT NULL DEFAULT ''"},
+	{"claims", "test_last_modified", "TEXT NOT NULL DEFAULT ''"},
+	{"claims", "test_last_run_at", "TEXT NOT NULL DEFAULT ''"},
+	{"claims", "test_pass_count", "INTEGER NOT NULL DEFAULT 0"},
+	{"claims", "test_fail_count", "INTEGER NOT NULL DEFAULT 0"},
 	{"decisions", "scope_service", "TEXT NOT NULL DEFAULT ''"},
 	{"decisions", "scope_env", "TEXT NOT NULL DEFAULT ''"},
 	{"decisions", "scope_team", "TEXT NOT NULL DEFAULT ''"},
+	// v10 — visibility field (personal / team / org).
+	{"claims", "visibility", "TEXT NOT NULL DEFAULT 'team'"},
+	// v11 — lesson polarity (positive / negative anti-lesson).
+	{"lessons", "polarity", "TEXT NOT NULL DEFAULT ''"},
+	// v12 — decision audit trail: refuted beliefs + failed outcome link.
+	{"decisions", "refuted_beliefs_json", "TEXT NOT NULL DEFAULT '[]'"},
+	{"decisions", "failed_outcome_id", "TEXT NOT NULL DEFAULT ''"},
 }
 
 // v1Columns is the legacy alias kept for any external callers (and for

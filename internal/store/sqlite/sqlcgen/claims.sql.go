@@ -89,7 +89,12 @@ func (q *Queries) DeleteClaimStatusHistoryByClaimID(ctx context.Context, claimID
 const listAllClaims = `-- name: ListAllClaims :many
 SELECT id, text, type, confidence, status, created_at, created_by, trust_score,
        valid_from, valid_to, last_verified, verify_count, half_life_days,
-       scope_service, scope_env, scope_team
+       scope_service, scope_env, scope_team,
+       source_document, source_type, source_authority, liveness,
+       last_executed, citation_count, provenance_rationale,
+       test_id, test_requirement_ref, test_author,
+       test_last_modified, test_last_run_at, test_pass_count, test_fail_count,
+       visibility
 FROM claims
 ORDER BY created_at ASC
 `
@@ -120,6 +125,21 @@ func (q *Queries) ListAllClaims(ctx context.Context) ([]Claim, error) {
 			&i.ScopeService,
 			&i.ScopeEnv,
 			&i.ScopeTeam,
+			&i.SourceDocument,
+			&i.SourceType,
+			&i.SourceAuthority,
+			&i.Liveness,
+			&i.LastExecuted,
+			&i.CitationCount,
+			&i.ProvenanceRationale,
+			&i.TestID,
+			&i.TestRequirementRef,
+			&i.TestAuthor,
+			&i.TestLastModified,
+			&i.TestLastRunAt,
+			&i.TestPassCount,
+			&i.TestFailCount,
+			&i.Visibility,
 		); err != nil {
 			return nil, err
 		}
@@ -246,8 +266,8 @@ func (q *Queries) UpdateClaimTrust(ctx context.Context, arg UpdateClaimTrustPara
 }
 
 const upsertClaim = `-- name: UpsertClaim :exec
-INSERT INTO claims (id, text, type, confidence, status, created_at, created_by, valid_from, scope_service, scope_env, scope_team)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO claims (id, text, type, confidence, status, created_at, created_by, valid_from, scope_service, scope_env, scope_team, source_document, source_type, source_authority, liveness, last_executed, citation_count, provenance_rationale, test_id, test_requirement_ref, test_author, test_last_modified, test_last_run_at, test_pass_count, test_fail_count, visibility)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   text = excluded.text,
   type = excluded.type,
@@ -258,21 +278,51 @@ ON CONFLICT(id) DO UPDATE SET
   valid_from = excluded.valid_from,
   scope_service = excluded.scope_service,
   scope_env = excluded.scope_env,
-  scope_team = excluded.scope_team
+  scope_team = excluded.scope_team,
+  source_document = excluded.source_document,
+  source_type = excluded.source_type,
+  source_authority = excluded.source_authority,
+  liveness = excluded.liveness,
+  last_executed = excluded.last_executed,
+  citation_count = excluded.citation_count,
+  provenance_rationale = excluded.provenance_rationale,
+  test_id = excluded.test_id,
+  test_requirement_ref = excluded.test_requirement_ref,
+  test_author = excluded.test_author,
+  test_last_modified = excluded.test_last_modified,
+  test_last_run_at = excluded.test_last_run_at,
+  test_pass_count = excluded.test_pass_count,
+  test_fail_count = excluded.test_fail_count,
+  visibility = excluded.visibility
 `
 
 type UpsertClaimParams struct {
-	ID           string  `json:"id"`
-	Text         string  `json:"text"`
-	Type         string  `json:"type"`
-	Confidence   float64 `json:"confidence"`
-	Status       string  `json:"status"`
-	CreatedAt    string  `json:"created_at"`
-	CreatedBy    string  `json:"created_by"`
-	ValidFrom    string  `json:"valid_from"`
-	ScopeService string  `json:"scope_service"`
-	ScopeEnv     string  `json:"scope_env"`
-	ScopeTeam    string  `json:"scope_team"`
+	ID                  string  `json:"id"`
+	Text                string  `json:"text"`
+	Type                string  `json:"type"`
+	Confidence          float64 `json:"confidence"`
+	Status              string  `json:"status"`
+	CreatedAt           string  `json:"created_at"`
+	CreatedBy           string  `json:"created_by"`
+	ValidFrom           string  `json:"valid_from"`
+	ScopeService        string  `json:"scope_service"`
+	ScopeEnv            string  `json:"scope_env"`
+	ScopeTeam           string  `json:"scope_team"`
+	SourceDocument      string  `json:"source_document"`
+	SourceType          string  `json:"source_type"`
+	SourceAuthority     float64 `json:"source_authority"`
+	Liveness            string  `json:"liveness"`
+	LastExecuted        string  `json:"last_executed"`
+	CitationCount       int64   `json:"citation_count"`
+	ProvenanceRationale string  `json:"provenance_rationale"`
+	TestID              string  `json:"test_id"`
+	TestRequirementRef  string  `json:"test_requirement_ref"`
+	TestAuthor          string  `json:"test_author"`
+	TestLastModified    string  `json:"test_last_modified"`
+	TestLastRunAt       string  `json:"test_last_run_at"`
+	TestPassCount       int64   `json:"test_pass_count"`
+	TestFailCount       int64   `json:"test_fail_count"`
+	Visibility          string  `json:"visibility"`
 }
 
 // ON CONFLICT preserves trust_score and valid_to (computed/managed
@@ -292,6 +342,21 @@ func (q *Queries) UpsertClaim(ctx context.Context, arg UpsertClaimParams) error 
 		arg.ScopeService,
 		arg.ScopeEnv,
 		arg.ScopeTeam,
+		arg.SourceDocument,
+		arg.SourceType,
+		arg.SourceAuthority,
+		arg.Liveness,
+		arg.LastExecuted,
+		arg.CitationCount,
+		arg.ProvenanceRationale,
+		arg.TestID,
+		arg.TestRequirementRef,
+		arg.TestAuthor,
+		arg.TestLastModified,
+		arg.TestLastRunAt,
+		arg.TestPassCount,
+		arg.TestFailCount,
+		arg.Visibility,
 	)
 	return err
 }

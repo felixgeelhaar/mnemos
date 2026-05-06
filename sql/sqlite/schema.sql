@@ -31,7 +31,22 @@ CREATE TABLE IF NOT EXISTS claims (
   half_life_days REAL NOT NULL DEFAULT 0,
   scope_service TEXT NOT NULL DEFAULT '',
   scope_env TEXT NOT NULL DEFAULT '',
-  scope_team TEXT NOT NULL DEFAULT ''
+  scope_team TEXT NOT NULL DEFAULT '',
+  source_document TEXT NOT NULL DEFAULT '',
+  source_type TEXT NOT NULL DEFAULT '',
+  source_authority REAL NOT NULL DEFAULT 0.0,
+  liveness TEXT NOT NULL DEFAULT '',
+  last_executed TEXT NOT NULL DEFAULT '',
+  citation_count INTEGER NOT NULL DEFAULT 0,
+  provenance_rationale TEXT NOT NULL DEFAULT '',
+  test_id TEXT NOT NULL DEFAULT '',
+  test_requirement_ref TEXT NOT NULL DEFAULT '',
+  test_author TEXT NOT NULL DEFAULT '',
+  test_last_modified TEXT NOT NULL DEFAULT '',
+  test_last_run_at TEXT NOT NULL DEFAULT '',
+  test_pass_count INTEGER NOT NULL DEFAULT 0,
+  test_fail_count INTEGER NOT NULL DEFAULT 0,
+  visibility TEXT NOT NULL DEFAULT 'team'
 );
 
 CREATE INDEX IF NOT EXISTS idx_claims_scope_service ON claims(scope_service);
@@ -207,7 +222,8 @@ CREATE TABLE IF NOT EXISTS lessons (
   derived_at TEXT NOT NULL,
   last_verified TEXT NOT NULL DEFAULT '',
   source TEXT NOT NULL DEFAULT 'synthesize',
-  created_by TEXT NOT NULL DEFAULT '<system>'
+  created_by TEXT NOT NULL DEFAULT '<system>',
+  polarity TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_lessons_scope_service ON lessons(scope_service);
@@ -240,7 +256,9 @@ CREATE TABLE IF NOT EXISTS decisions (
   created_at TEXT NOT NULL,
   scope_service TEXT NOT NULL DEFAULT '',
   scope_env TEXT NOT NULL DEFAULT '',
-  scope_team TEXT NOT NULL DEFAULT ''
+  scope_team TEXT NOT NULL DEFAULT '',
+  refuted_beliefs_json TEXT NOT NULL DEFAULT '[]',
+  failed_outcome_id TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_decisions_chosen_at ON decisions(chosen_at);

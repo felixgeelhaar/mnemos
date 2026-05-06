@@ -80,18 +80,45 @@ func (r ClaimRepository) upsertWithReason(ctx context.Context, claims []domain.C
 		if validFrom.IsZero() {
 			validFrom = claim.CreatedAt
 		}
+		lastExecuted := ""
+		if !claim.LastExecuted.IsZero() {
+			lastExecuted = claim.LastExecuted.UTC().Format(time.RFC3339Nano)
+		}
+		testLastModified := ""
+		if !claim.TestLastModified.IsZero() {
+			testLastModified = claim.TestLastModified.UTC().Format(time.RFC3339Nano)
+		}
+		testLastRunAt := ""
+		if !claim.TestLastRunAt.IsZero() {
+			testLastRunAt = claim.TestLastRunAt.UTC().Format(time.RFC3339Nano)
+		}
 		err = qtx.UpsertClaim(ctx, sqlcgen.UpsertClaimParams{
-			ID:           claim.ID,
-			Text:         claim.Text,
-			Type:         string(claim.Type),
-			Confidence:   claim.Confidence,
-			Status:       string(claim.Status),
-			CreatedAt:    claim.CreatedAt.UTC().Format(time.RFC3339Nano),
-			CreatedBy:    actorOr(claim.CreatedBy),
-			ValidFrom:    validFrom.UTC().Format(time.RFC3339Nano),
-			ScopeService: claim.Scope.Service,
-			ScopeEnv:     claim.Scope.Env,
-			ScopeTeam:    claim.Scope.Team,
+			ID:                  claim.ID,
+			Text:                claim.Text,
+			Type:                string(claim.Type),
+			Confidence:          claim.Confidence,
+			Status:              string(claim.Status),
+			CreatedAt:           claim.CreatedAt.UTC().Format(time.RFC3339Nano),
+			CreatedBy:           actorOr(claim.CreatedBy),
+			ValidFrom:           validFrom.UTC().Format(time.RFC3339Nano),
+			ScopeService:        claim.Scope.Service,
+			ScopeEnv:            claim.Scope.Env,
+			ScopeTeam:           claim.Scope.Team,
+			SourceDocument:      claim.SourceDocument,
+			SourceType:          string(claim.SourceType),
+			SourceAuthority:     claim.SourceAuthority,
+			Liveness:            string(claim.Liveness),
+			LastExecuted:        lastExecuted,
+			CitationCount:       int64(claim.CitationCount),
+			ProvenanceRationale: claim.ProvenanceRationale,
+			TestID:              claim.TestID,
+			TestRequirementRef:  claim.TestRequirementRef,
+			TestAuthor:          claim.TestAuthor,
+			TestLastModified:    testLastModified,
+			TestLastRunAt:       testLastRunAt,
+			TestPassCount:       int64(claim.TestPassCount),
+			TestFailCount:       int64(claim.TestFailCount),
+			Visibility:          visibilityOrDefault(claim.Visibility),
 		})
 		if err != nil {
 			return fmt.Errorf("upsert claim %s: %w", claim.ID, err)
@@ -176,7 +203,7 @@ func (r ClaimRepository) ListByEventIDs(ctx context.Context, eventIDs []string) 
 	}
 
 	query := fmt.Sprintf(`
-SELECT DISTINCT c.id, c.text, c.type, c.confidence, c.status, c.created_at, c.created_by, c.trust_score, c.valid_from, c.valid_to, c.last_verified, c.verify_count, c.half_life_days, c.scope_service, c.scope_env, c.scope_team
+SELECT DISTINCT c.id, c.text, c.type, c.confidence, c.status, c.created_at, c.created_by, c.trust_score, c.valid_from, c.valid_to, c.last_verified, c.verify_count, c.half_life_days, c.scope_service, c.scope_env, c.scope_team, c.source_document, c.source_type, c.source_authority, c.liveness, c.last_executed, c.citation_count, c.provenance_rationale, c.test_id, c.test_requirement_ref, c.test_author, c.test_last_modified, c.test_last_run_at, c.test_pass_count, c.test_fail_count, c.visibility
 FROM claims c
 JOIN claim_evidence ce ON ce.claim_id = c.id
 WHERE ce.event_id IN (%s)
@@ -307,7 +334,7 @@ func (r ClaimRepository) ListByIDs(ctx context.Context, claimIDs []string) ([]do
 	}
 
 	query := fmt.Sprintf(`
-SELECT id, text, type, confidence, status, created_at, created_by, trust_score, valid_from, valid_to, last_verified, verify_count, half_life_days, scope_service, scope_env, scope_team
+SELECT id, text, type, confidence, status, created_at, created_by, trust_score, valid_from, valid_to, last_verified, verify_count, half_life_days, scope_service, scope_env, scope_team, source_document, source_type, source_authority, liveness, last_executed, citation_count, provenance_rationale, test_id, test_requirement_ref, test_author, test_last_modified, test_last_run_at, test_pass_count, test_fail_count, visibility
 FROM claims
 WHERE id IN (%s)`, strings.Join(placeholders, ",")) //nolint:gosec // G201: placeholders are literal "?" strings, not user input
 
@@ -609,21 +636,48 @@ func (r ClaimRepository) ListAll(ctx context.Context) ([]domain.Claim, error) {
 
 func mapSQLClaim(row sqlcgen.Claim) (domain.Claim, error) {
 	claim := domain.Claim{
-		ID:           row.ID,
-		Text:         row.Text,
-		Type:         domain.ClaimType(row.Type),
-		Confidence:   row.Confidence,
-		Status:       domain.ClaimStatus(row.Status),
-		CreatedBy:    row.CreatedBy,
-		TrustScore:   row.TrustScore,
-		VerifyCount:  int(row.VerifyCount),
-		HalfLifeDays: row.HalfLifeDays,
-		Scope:        domain.Scope{Service: row.ScopeService, Env: row.ScopeEnv, Team: row.ScopeTeam},
+		ID:                  row.ID,
+		Text:                row.Text,
+		Type:                domain.ClaimType(row.Type),
+		Confidence:          row.Confidence,
+		Status:              domain.ClaimStatus(row.Status),
+		CreatedBy:           row.CreatedBy,
+		TrustScore:          row.TrustScore,
+		VerifyCount:         int(row.VerifyCount),
+		HalfLifeDays:        row.HalfLifeDays,
+		Scope:               domain.Scope{Service: row.ScopeService, Env: row.ScopeEnv, Team: row.ScopeTeam},
+		SourceDocument:      row.SourceDocument,
+		SourceType:          domain.SourceType(row.SourceType),
+		SourceAuthority:     row.SourceAuthority,
+		Liveness:            domain.LivenessStatus(row.Liveness),
+		CitationCount:       int(row.CitationCount),
+		ProvenanceRationale: row.ProvenanceRationale,
+		TestID:              row.TestID,
+		TestRequirementRef:  row.TestRequirementRef,
+		TestAuthor:          row.TestAuthor,
+		TestPassCount:       int(row.TestPassCount),
+		TestFailCount:       int(row.TestFailCount),
+		Visibility:          domain.Visibility(visibilityOrDefault(domain.Visibility(row.Visibility))),
 	}
 	if lv, perr := parseOptionalTime(row.LastVerified); perr != nil {
 		return domain.Claim{}, fmt.Errorf("parse claim last_verified: %w", perr)
 	} else {
 		claim.LastVerified = lv
+	}
+	if le, perr := parseOptionalTime(row.LastExecuted); perr != nil {
+		return domain.Claim{}, fmt.Errorf("parse claim last_executed: %w", perr)
+	} else {
+		claim.LastExecuted = le
+	}
+	if tlm, perr := parseOptionalTime(row.TestLastModified); perr != nil {
+		return domain.Claim{}, fmt.Errorf("parse claim test_last_modified: %w", perr)
+	} else {
+		claim.TestLastModified = tlm
+	}
+	if tlr, perr := parseOptionalTime(row.TestLastRunAt); perr != nil {
+		return domain.Claim{}, fmt.Errorf("parse claim test_last_run_at: %w", perr)
+	} else {
+		claim.TestLastRunAt = tlr
 	}
 
 	t, err := time.Parse(time.RFC3339Nano, row.CreatedAt)
@@ -670,18 +724,33 @@ type claimRowScanner interface {
 
 func scanClaim(scanner claimRowScanner) (domain.Claim, error) {
 	var (
-		claim        domain.Claim
-		claimType    string
-		status       string
-		createdAt    string
-		validFrom    string
-		validTo      sql.NullString
-		lastVerified string
-		verifyCount  int64
-		halfLifeDays float64
-		scopeService string
-		scopeEnv     string
-		scopeTeam    string
+		claim               domain.Claim
+		claimType           string
+		status              string
+		createdAt           string
+		validFrom           string
+		validTo             sql.NullString
+		lastVerified        string
+		verifyCount         int64
+		halfLifeDays        float64
+		scopeService        string
+		scopeEnv            string
+		scopeTeam           string
+		sourceDocument      string
+		sourceType          string
+		sourceAuthority     float64
+		liveness            string
+		lastExecuted        string
+		citationCount       int64
+		provenanceRationale string
+		testID              string
+		testRequirementRef  string
+		testAuthor          string
+		testLastModified    string
+		testLastRunAt       string
+		testPassCount       int64
+		testFailCount       int64
+		visibility          string
 	)
 
 	if err := scanner.Scan(
@@ -701,16 +770,58 @@ func scanClaim(scanner claimRowScanner) (domain.Claim, error) {
 		&scopeService,
 		&scopeEnv,
 		&scopeTeam,
+		&sourceDocument,
+		&sourceType,
+		&sourceAuthority,
+		&liveness,
+		&lastExecuted,
+		&citationCount,
+		&provenanceRationale,
+		&testID,
+		&testRequirementRef,
+		&testAuthor,
+		&testLastModified,
+		&testLastRunAt,
+		&testPassCount,
+		&testFailCount,
+		&visibility,
 	); err != nil {
 		return domain.Claim{}, err
 	}
 	claim.VerifyCount = int(verifyCount)
 	claim.HalfLifeDays = halfLifeDays
 	claim.Scope = domain.Scope{Service: scopeService, Env: scopeEnv, Team: scopeTeam}
+	claim.SourceDocument = sourceDocument
+	claim.SourceType = domain.SourceType(sourceType)
+	claim.SourceAuthority = sourceAuthority
+	claim.Liveness = domain.LivenessStatus(liveness)
+	claim.CitationCount = int(citationCount)
+	claim.ProvenanceRationale = provenanceRationale
+	claim.TestID = testID
+	claim.TestRequirementRef = testRequirementRef
+	claim.TestAuthor = testAuthor
+	claim.TestPassCount = int(testPassCount)
+	claim.TestFailCount = int(testFailCount)
+	claim.Visibility = domain.Visibility(visibilityOrDefault(domain.Visibility(visibility)))
 	if lastVerified != "" {
 		if t, perr := time.Parse(time.RFC3339Nano, lastVerified); perr == nil {
 			claim.LastVerified = t
 		}
+	}
+	if le, perr := parseOptionalTime(lastExecuted); perr != nil {
+		return domain.Claim{}, fmt.Errorf("parse claim last_executed: %w", perr)
+	} else {
+		claim.LastExecuted = le
+	}
+	if tlm, perr := parseOptionalTime(testLastModified); perr != nil {
+		return domain.Claim{}, fmt.Errorf("parse claim test_last_modified: %w", perr)
+	} else {
+		claim.TestLastModified = tlm
+	}
+	if tlr, perr := parseOptionalTime(testLastRunAt); perr != nil {
+		return domain.Claim{}, fmt.Errorf("parse claim test_last_run_at: %w", perr)
+	} else {
+		claim.TestLastRunAt = tlr
 	}
 
 	claim.Type = domain.ClaimType(claimType)
@@ -740,4 +851,16 @@ func scanClaim(scanner claimRowScanner) (domain.Claim, error) {
 	}
 
 	return claim, nil
+}
+
+// visibilityOrDefault normalises a Visibility value: empty string and any
+// unrecognised value fall back to domain.DefaultVisibility ("team") so that
+// legacy rows written before v10 automatically present as team-visible.
+func visibilityOrDefault(v domain.Visibility) string {
+	switch v {
+	case domain.VisibilityPersonal, domain.VisibilityTeam, domain.VisibilityOrg:
+		return string(v)
+	default:
+		return string(domain.DefaultVisibility)
+	}
 }

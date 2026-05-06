@@ -31,22 +31,37 @@ type Agent struct {
 }
 
 type Claim struct {
-	ID           string         `json:"id"`
-	Text         string         `json:"text"`
-	Type         string         `json:"type"`
-	Confidence   float64        `json:"confidence"`
-	Status       string         `json:"status"`
-	CreatedAt    string         `json:"created_at"`
-	CreatedBy    string         `json:"created_by"`
-	TrustScore   float64        `json:"trust_score"`
-	ValidFrom    string         `json:"valid_from"`
-	ValidTo      sql.NullString `json:"valid_to"`
-	LastVerified string         `json:"last_verified"`
-	VerifyCount  int64          `json:"verify_count"`
-	HalfLifeDays float64        `json:"half_life_days"`
-	ScopeService string         `json:"scope_service"`
-	ScopeEnv     string         `json:"scope_env"`
-	ScopeTeam    string         `json:"scope_team"`
+	ID                  string         `json:"id"`
+	Text                string         `json:"text"`
+	Type                string         `json:"type"`
+	Confidence          float64        `json:"confidence"`
+	Status              string         `json:"status"`
+	CreatedAt           string         `json:"created_at"`
+	CreatedBy           string         `json:"created_by"`
+	TrustScore          float64        `json:"trust_score"`
+	ValidFrom           string         `json:"valid_from"`
+	ValidTo             sql.NullString `json:"valid_to"`
+	LastVerified        string         `json:"last_verified"`
+	VerifyCount         int64          `json:"verify_count"`
+	HalfLifeDays        float64        `json:"half_life_days"`
+	ScopeService        string         `json:"scope_service"`
+	ScopeEnv            string         `json:"scope_env"`
+	ScopeTeam           string         `json:"scope_team"`
+	SourceDocument      string         `json:"source_document"`
+	SourceType          string         `json:"source_type"`
+	SourceAuthority     float64        `json:"source_authority"`
+	Liveness            string         `json:"liveness"`
+	LastExecuted        string         `json:"last_executed"`
+	CitationCount       int64          `json:"citation_count"`
+	ProvenanceRationale string         `json:"provenance_rationale"`
+	TestID              string         `json:"test_id"`
+	TestRequirementRef  string         `json:"test_requirement_ref"`
+	TestAuthor          string         `json:"test_author"`
+	TestLastModified    string         `json:"test_last_modified"`
+	TestLastRunAt       string         `json:"test_last_run_at"`
+	TestPassCount       int64          `json:"test_pass_count"`
+	TestFailCount       int64          `json:"test_fail_count"`
+	Visibility          string         `json:"visibility"`
 }
 
 type ClaimEntity struct {
@@ -81,19 +96,21 @@ type CompilationJob struct {
 }
 
 type Decision struct {
-	ID               string `json:"id"`
-	Statement        string `json:"statement"`
-	Plan             string `json:"plan"`
-	Reasoning        string `json:"reasoning"`
-	RiskLevel        string `json:"risk_level"`
-	AlternativesJson string `json:"alternatives_json"`
-	OutcomeID        string `json:"outcome_id"`
-	ChosenAt         string `json:"chosen_at"`
-	CreatedBy        string `json:"created_by"`
-	CreatedAt        string `json:"created_at"`
-	ScopeService     string `json:"scope_service"`
-	ScopeEnv         string `json:"scope_env"`
-	ScopeTeam        string `json:"scope_team"`
+	ID                 string `json:"id"`
+	Statement          string `json:"statement"`
+	Plan               string `json:"plan"`
+	Reasoning          string `json:"reasoning"`
+	RiskLevel          string `json:"risk_level"`
+	AlternativesJson   string `json:"alternatives_json"`
+	OutcomeID          string `json:"outcome_id"`
+	ChosenAt           string `json:"chosen_at"`
+	CreatedBy          string `json:"created_by"`
+	CreatedAt          string `json:"created_at"`
+	ScopeService       string `json:"scope_service"`
+	ScopeEnv           string `json:"scope_env"`
+	ScopeTeam          string `json:"scope_team"`
+	RefutedBeliefsJson string `json:"refuted_beliefs_json"`
+	FailedOutcomeID    string `json:"failed_outcome_id"`
 }
 
 type DecisionBelief struct {
@@ -156,6 +173,7 @@ type Lesson struct {
 	LastVerified string  `json:"last_verified"`
 	Source       string  `json:"source"`
 	CreatedBy    string  `json:"created_by"`
+	Polarity     string  `json:"polarity"`
 }
 
 type LessonEvidence struct {

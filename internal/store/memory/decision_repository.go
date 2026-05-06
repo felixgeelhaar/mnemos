@@ -27,17 +27,19 @@ func (r DecisionRepository) Append(_ context.Context, decision domain.Decision) 
 		createdAt = time.Now().UTC()
 	}
 	stored := storedDecision{
-		ID:           decision.ID,
-		Statement:    decision.Statement,
-		Plan:         decision.Plan,
-		Reasoning:    decision.Reasoning,
-		RiskLevel:    decision.RiskLevel,
-		Alternatives: append([]string(nil), decision.Alternatives...),
-		OutcomeID:    decision.OutcomeID,
-		Scope:        decision.Scope,
-		ChosenAt:     decision.ChosenAt.UTC(),
-		CreatedBy:    actorOr(decision.CreatedBy),
-		CreatedAt:    createdAt.UTC(),
+		ID:              decision.ID,
+		Statement:       decision.Statement,
+		Plan:            decision.Plan,
+		Reasoning:       decision.Reasoning,
+		RiskLevel:       decision.RiskLevel,
+		Alternatives:    append([]string(nil), decision.Alternatives...),
+		OutcomeID:       decision.OutcomeID,
+		Scope:           decision.Scope,
+		ChosenAt:        decision.ChosenAt.UTC(),
+		CreatedBy:       actorOr(decision.CreatedBy),
+		CreatedAt:       createdAt.UTC(),
+		RefutedBeliefs:  append([]string(nil), decision.RefutedBeliefs...),
+		FailedOutcomeID: decision.FailedOutcomeID,
 	}
 	if _, exists := r.state.decisions[decision.ID]; !exists {
 		r.state.decisionOrder = append(r.state.decisionOrder, decision.ID)
@@ -156,31 +158,35 @@ func (r DecisionRepository) beliefsForLocked(decisionID string) []string {
 }
 
 type storedDecision struct {
-	ID           string
-	Statement    string
-	Plan         string
-	Reasoning    string
-	RiskLevel    domain.RiskLevel
-	Alternatives []string
-	OutcomeID    string
-	Scope        domain.Scope
-	ChosenAt     time.Time
-	CreatedBy    string
-	CreatedAt    time.Time
+	ID              string
+	Statement       string
+	Plan            string
+	Reasoning       string
+	RiskLevel       domain.RiskLevel
+	Alternatives    []string
+	OutcomeID       string
+	Scope           domain.Scope
+	ChosenAt        time.Time
+	CreatedBy       string
+	CreatedAt       time.Time
+	RefutedBeliefs  []string
+	FailedOutcomeID string
 }
 
 func (s storedDecision) toDomain() domain.Decision {
 	return domain.Decision{
-		ID:           s.ID,
-		Statement:    s.Statement,
-		Plan:         s.Plan,
-		Reasoning:    s.Reasoning,
-		RiskLevel:    s.RiskLevel,
-		Alternatives: append([]string(nil), s.Alternatives...),
-		OutcomeID:    s.OutcomeID,
-		Scope:        s.Scope,
-		ChosenAt:     s.ChosenAt,
-		CreatedBy:    s.CreatedBy,
-		CreatedAt:    s.CreatedAt,
+		ID:              s.ID,
+		Statement:       s.Statement,
+		Plan:            s.Plan,
+		Reasoning:       s.Reasoning,
+		RiskLevel:       s.RiskLevel,
+		Alternatives:    append([]string(nil), s.Alternatives...),
+		OutcomeID:       s.OutcomeID,
+		Scope:           s.Scope,
+		ChosenAt:        s.ChosenAt,
+		CreatedBy:       s.CreatedBy,
+		CreatedAt:       s.CreatedAt,
+		RefutedBeliefs:  append([]string(nil), s.RefutedBeliefs...),
+		FailedOutcomeID: s.FailedOutcomeID,
 	}
 }

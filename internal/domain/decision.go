@@ -44,13 +44,22 @@ type Decision struct {
 	Plan         string
 	Reasoning    string
 	RiskLevel    RiskLevel
-	Beliefs      []string // claim ids
-	Alternatives []string // human-readable alternatives that were considered
+	Beliefs      []string // claim ids that were load-bearing inputs
+	Alternatives []string // human-readable alternatives considered but not chosen
 	OutcomeID    string   // optional; empty until an outcome is observed and attached
-	Scope        Scope    // optional operational context
-	ChosenAt     time.Time
-	CreatedBy    string
-	CreatedAt    time.Time
+	// RefutedBeliefs lists the claim IDs from Beliefs that were later
+	// contradicted or invalidated by the observed outcome. Populated by
+	// the decision audit trail query or by the caller when the outcome is
+	// known to have failed.
+	RefutedBeliefs []string
+	// FailedOutcomeID is the ID of the outcome that caused this decision's
+	// beliefs to be refuted. Empty when the outcome succeeded or is not yet
+	// known.
+	FailedOutcomeID string
+	Scope           Scope // optional operational context
+	ChosenAt        time.Time
+	CreatedBy       string
+	CreatedAt       time.Time
 }
 
 // Validate enforces minimum invariants for persistence. Beliefs and

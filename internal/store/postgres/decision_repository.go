@@ -28,26 +28,34 @@ func (r DecisionRepository) Append(ctx context.Context, decision domain.Decision
 	if err != nil {
 		return fmt.Errorf("marshal decision alternatives: %w", err)
 	}
+	refuted, err := json.Marshal(decision.RefutedBeliefs)
+	if err != nil {
+		return fmt.Errorf("marshal decision refuted_beliefs: %w", err)
+	}
 	createdAt := decision.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
 	_, err = r.db.ExecContext(ctx, fmt.Sprintf(`
-INSERT INTO %s (id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at)
-VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)
+INSERT INTO %s (id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at, refuted_beliefs_json, failed_outcome_id)
+VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11::jsonb, $12)
 ON CONFLICT (id) DO UPDATE SET
   statement = EXCLUDED.statement,
   plan = EXCLUDED.plan,
   reasoning = EXCLUDED.reasoning,
   risk_level = EXCLUDED.risk_level,
   alternatives_json = EXCLUDED.alternatives_json,
-  outcome_id = EXCLUDED.outcome_id`, qualify(r.ns, "decisions")),
+  outcome_id = EXCLUDED.outcome_id,
+  refuted_beliefs_json = EXCLUDED.refuted_beliefs_json,
+  failed_outcome_id = EXCLUDED.failed_outcome_id`, qualify(r.ns, "decisions")),
 		decision.ID, decision.Statement, decision.Plan, decision.Reasoning,
 		string(decision.RiskLevel), string(alts),
 		decision.OutcomeID,
 		decision.ChosenAt.UTC(),
 		actorOr(decision.CreatedBy),
 		createdAt.UTC(),
+		string(refuted),
+		decision.FailedOutcomeID,
 	)
 	if err != nil {
 		return fmt.Errorf("insert decision: %w", err)
@@ -63,7 +71,7 @@ ON CONFLICT (id) DO UPDATE SET
 // GetByID returns the decision plus its beliefs.
 func (r DecisionRepository) GetByID(ctx context.Context, id string) (domain.Decision, error) {
 	row := r.db.QueryRowContext(ctx, fmt.Sprintf(`
-SELECT id, statement, plan, reasoning, risk_level, alternatives_json::text, outcome_id, chosen_at, created_by, created_at
+SELECT id, statement, plan, reasoning, risk_level, alternatives_json::text, outcome_id, chosen_at, created_by, created_at, refuted_beliefs_json::text, failed_outcome_id
 FROM %s WHERE id = $1`, qualify(r.ns, "decisions")), id)
 	d, err := scanDecisionRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -83,7 +91,7 @@ FROM %s WHERE id = $1`, qualify(r.ns, "decisions")), id)
 // ListAll returns every decision newest-first.
 func (r DecisionRepository) ListAll(ctx context.Context) ([]domain.Decision, error) {
 	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
-SELECT id, statement, plan, reasoning, risk_level, alternatives_json::text, outcome_id, chosen_at, created_by, created_at
+SELECT id, statement, plan, reasoning, risk_level, alternatives_json::text, outcome_id, chosen_at, created_by, created_at, refuted_beliefs_json::text, failed_outcome_id
 FROM %s ORDER BY chosen_at DESC`, qualify(r.ns, "decisions")))
 	if err != nil {
 		return nil, fmt.Errorf("list all decisions: %w", err)
@@ -95,7 +103,7 @@ FROM %s ORDER BY chosen_at DESC`, qualify(r.ns, "decisions")))
 // ListByRiskLevel returns decisions filtered by risk level.
 func (r DecisionRepository) ListByRiskLevel(ctx context.Context, level string) ([]domain.Decision, error) {
 	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
-SELECT id, statement, plan, reasoning, risk_level, alternatives_json::text, outcome_id, chosen_at, created_by, created_at
+SELECT id, statement, plan, reasoning, risk_level, alternatives_json::text, outcome_id, chosen_at, created_by, created_at, refuted_beliefs_json::text, failed_outcome_id
 FROM %s WHERE risk_level = $1 ORDER BY chosen_at DESC`, qualify(r.ns, "decisions")), level)
 	if err != nil {
 		return nil, fmt.Errorf("list decisions by risk_level: %w", err)
@@ -197,15 +205,19 @@ func (r DecisionRepository) collectDecisionRows(ctx context.Context, rows *sql.R
 
 func scanDecisionRow(row *sql.Row) (domain.Decision, error) {
 	var d domain.Decision
-	var risk, altsRaw string
+	var risk, altsRaw, refutedRaw string
 	if err := row.Scan(
 		&d.ID, &d.Statement, &d.Plan, &d.Reasoning, &risk,
 		&altsRaw, &d.OutcomeID, &d.ChosenAt, &d.CreatedBy, &d.CreatedAt,
+		&refutedRaw, &d.FailedOutcomeID,
 	); err != nil {
 		return domain.Decision{}, err
 	}
 	d.RiskLevel = domain.RiskLevel(risk)
 	if err := unmarshalStrings(altsRaw, &d.Alternatives); err != nil {
+		return domain.Decision{}, err
+	}
+	if err := unmarshalStrings(refutedRaw, &d.RefutedBeliefs); err != nil {
 		return domain.Decision{}, err
 	}
 	return d, nil
@@ -213,15 +225,19 @@ func scanDecisionRow(row *sql.Row) (domain.Decision, error) {
 
 func scanDecisionRows(rows *sql.Rows) (domain.Decision, error) {
 	var d domain.Decision
-	var risk, altsRaw string
+	var risk, altsRaw, refutedRaw string
 	if err := rows.Scan(
 		&d.ID, &d.Statement, &d.Plan, &d.Reasoning, &risk,
 		&altsRaw, &d.OutcomeID, &d.ChosenAt, &d.CreatedBy, &d.CreatedAt,
+		&refutedRaw, &d.FailedOutcomeID,
 	); err != nil {
 		return domain.Decision{}, err
 	}
 	d.RiskLevel = domain.RiskLevel(risk)
 	if err := unmarshalStrings(altsRaw, &d.Alternatives); err != nil {
+		return domain.Decision{}, err
+	}
+	if err := unmarshalStrings(refutedRaw, &d.RefutedBeliefs); err != nil {
 		return domain.Decision{}, err
 	}
 	return d, nil

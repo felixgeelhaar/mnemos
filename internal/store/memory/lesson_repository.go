@@ -48,6 +48,7 @@ func (r LessonRepository) Append(_ context.Context, lesson domain.Lesson) error 
 		Trigger:      lesson.Trigger,
 		Kind:         lesson.Kind,
 		Confidence:   lesson.Confidence,
+		Polarity:     lesson.Polarity,
 		DerivedAt:    lesson.DerivedAt.UTC(),
 		LastVerified: lesson.LastVerified.UTC(),
 		Source:       source,
@@ -191,6 +192,7 @@ type storedLesson struct {
 	Trigger      string
 	Kind         string
 	Confidence   float64
+	Polarity     domain.LessonPolarity
 	DerivedAt    time.Time
 	LastVerified time.Time
 	Source       string
@@ -205,6 +207,7 @@ func (s storedLesson) toDomain() domain.Lesson {
 		Trigger:      s.Trigger,
 		Kind:         s.Kind,
 		Confidence:   s.Confidence,
+		Polarity:     s.Polarity,
 		DerivedAt:    s.DerivedAt,
 		LastVerified: s.LastVerified,
 		Source:       s.Source,

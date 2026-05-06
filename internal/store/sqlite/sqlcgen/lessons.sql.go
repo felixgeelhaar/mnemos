@@ -39,13 +39,14 @@ func (q *Queries) CountLessons(ctx context.Context) (int64, error) {
 }
 
 const createLesson = `-- name: CreateLesson :exec
-INSERT INTO lessons (id, statement, scope_service, scope_env, scope_team, trigger, kind, confidence, derived_at, last_verified, source, created_by)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO lessons (id, statement, scope_service, scope_env, scope_team, trigger, kind, confidence, derived_at, last_verified, source, created_by, polarity)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   statement = excluded.statement,
   confidence = excluded.confidence,
   last_verified = excluded.last_verified,
-  derived_at = excluded.derived_at
+  derived_at = excluded.derived_at,
+  polarity = excluded.polarity
 `
 
 type CreateLessonParams struct {
@@ -61,6 +62,7 @@ type CreateLessonParams struct {
 	LastVerified string  `json:"last_verified"`
 	Source       string  `json:"source"`
 	CreatedBy    string  `json:"created_by"`
+	Polarity     string  `json:"polarity"`
 }
 
 // Idempotent on id. Updates statement/confidence/last_verified on
@@ -80,6 +82,7 @@ func (q *Queries) CreateLesson(ctx context.Context, arg CreateLessonParams) erro
 		arg.LastVerified,
 		arg.Source,
 		arg.CreatedBy,
+		arg.Polarity,
 	)
 	return err
 }
@@ -112,7 +115,7 @@ func (q *Queries) DeleteLessonEvidence(ctx context.Context, lessonID string) err
 }
 
 const getLessonByID = `-- name: GetLessonByID :one
-SELECT id, statement, scope_service, scope_env, scope_team, trigger, kind, confidence, derived_at, last_verified, source, created_by
+SELECT id, statement, scope_service, scope_env, scope_team, trigger, kind, confidence, derived_at, last_verified, source, created_by, polarity
 FROM lessons
 WHERE id = ?
 `
@@ -133,12 +136,13 @@ func (q *Queries) GetLessonByID(ctx context.Context, id string) (Lesson, error) 
 		&i.LastVerified,
 		&i.Source,
 		&i.CreatedBy,
+		&i.Polarity,
 	)
 	return i, err
 }
 
 const listAllLessons = `-- name: ListAllLessons :many
-SELECT id, statement, scope_service, scope_env, scope_team, trigger, kind, confidence, derived_at, last_verified, source, created_by
+SELECT id, statement, scope_service, scope_env, scope_team, trigger, kind, confidence, derived_at, last_verified, source, created_by, polarity
 FROM lessons
 ORDER BY confidence DESC, derived_at DESC
 `
@@ -165,6 +169,7 @@ func (q *Queries) ListAllLessons(ctx context.Context) ([]Lesson, error) {
 			&i.LastVerified,
 			&i.Source,
 			&i.CreatedBy,
+			&i.Polarity,
 		); err != nil {
 			return nil, err
 		}
@@ -209,7 +214,7 @@ func (q *Queries) ListLessonEvidence(ctx context.Context, lessonID string) ([]Le
 }
 
 const listLessonsByService = `-- name: ListLessonsByService :many
-SELECT id, statement, scope_service, scope_env, scope_team, trigger, kind, confidence, derived_at, last_verified, source, created_by
+SELECT id, statement, scope_service, scope_env, scope_team, trigger, kind, confidence, derived_at, last_verified, source, created_by, polarity
 FROM lessons
 WHERE scope_service = ?
 ORDER BY confidence DESC, derived_at DESC
@@ -237,6 +242,7 @@ func (q *Queries) ListLessonsByService(ctx context.Context, scopeService string)
 			&i.LastVerified,
 			&i.Source,
 			&i.CreatedBy,
+			&i.Polarity,
 		); err != nil {
 			return nil, err
 		}
@@ -252,7 +258,7 @@ func (q *Queries) ListLessonsByService(ctx context.Context, scopeService string)
 }
 
 const listLessonsByTrigger = `-- name: ListLessonsByTrigger :many
-SELECT id, statement, scope_service, scope_env, scope_team, trigger, kind, confidence, derived_at, last_verified, source, created_by
+SELECT id, statement, scope_service, scope_env, scope_team, trigger, kind, confidence, derived_at, last_verified, source, created_by, polarity
 FROM lessons
 WHERE trigger = ?
 ORDER BY confidence DESC, derived_at DESC
@@ -280,6 +286,7 @@ func (q *Queries) ListLessonsByTrigger(ctx context.Context, trigger string) ([]L
 			&i.LastVerified,
 			&i.Source,
 			&i.CreatedBy,
+			&i.Polarity,
 		); err != nil {
 			return nil, err
 		}

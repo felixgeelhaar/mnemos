@@ -57,31 +57,35 @@ func (q *Queries) CountDecisions(ctx context.Context) (int64, error) {
 }
 
 const createDecision = `-- name: CreateDecision :exec
-INSERT INTO decisions (id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at, scope_service, scope_env, scope_team)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO decisions (id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at, scope_service, scope_env, scope_team, refuted_beliefs_json, failed_outcome_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
   statement = excluded.statement,
   plan = excluded.plan,
   reasoning = excluded.reasoning,
   risk_level = excluded.risk_level,
   alternatives_json = excluded.alternatives_json,
-  outcome_id = excluded.outcome_
+  outcome_id = excluded.outcome_id,
+  refuted_beliefs_json = excluded.refuted_beliefs_json,
+  failed_outcome_id = excluded.failed_outcome_id
 `
 
 type CreateDecisionParams struct {
-	ID               string `json:"id"`
-	Statement        string `json:"statement"`
-	Plan             string `json:"plan"`
-	Reasoning        string `json:"reasoning"`
-	RiskLevel        string `json:"risk_level"`
-	AlternativesJson string `json:"alternatives_json"`
-	OutcomeID        string `json:"outcome_id"`
-	ChosenAt         string `json:"chosen_at"`
-	CreatedBy        string `json:"created_by"`
-	CreatedAt        string `json:"created_at"`
-	ScopeService     string `json:"scope_service"`
-	ScopeEnv         string `json:"scope_env"`
-	ScopeTeam        string `json:"scope_team"`
+	ID                 string `json:"id"`
+	Statement          string `json:"statement"`
+	Plan               string `json:"plan"`
+	Reasoning          string `json:"reasoning"`
+	RiskLevel          string `json:"risk_level"`
+	AlternativesJson   string `json:"alternatives_json"`
+	OutcomeID          string `json:"outcome_id"`
+	ChosenAt           string `json:"chosen_at"`
+	CreatedBy          string `json:"created_by"`
+	CreatedAt          string `json:"created_at"`
+	ScopeService       string `json:"scope_service"`
+	ScopeEnv           string `json:"scope_env"`
+	ScopeTeam          string `json:"scope_team"`
+	RefutedBeliefsJson string `json:"refuted_beliefs_json"`
+	FailedOutcomeID    string `json:"failed_outcome_id"`
 }
 
 // Idempotent on id. Re-recording the same decision id refreshes
@@ -103,6 +107,8 @@ func (q *Queries) CreateDecision(ctx context.Context, arg CreateDecisionParams) 
 		arg.ScopeService,
 		arg.ScopeEnv,
 		arg.ScopeTeam,
+		arg.RefutedBeliefsJson,
+		arg.FailedOutcomeID,
 	)
 	return err
 }
@@ -141,11 +147,9 @@ func (q *Queries) DeleteDecisionBeliefs(ctx context.Context, decisionID string) 
 }
 
 const getDecisionByID = `-- name: GetDecisionByID :one
-d;
-
-SELECT id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at, scope_service, scope_env, scope_team
+SELECT id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at, scope_service, scope_env, scope_team, refuted_beliefs_json, failed_outcome_id
 FROM decisions
-WHERE id =
+WHERE id = ?
 `
 
 func (q *Queries) GetDecisionByID(ctx context.Context, id string) (Decision, error) {
@@ -165,16 +169,16 @@ func (q *Queries) GetDecisionByID(ctx context.Context, id string) (Decision, err
 		&i.ScopeService,
 		&i.ScopeEnv,
 		&i.ScopeTeam,
+		&i.RefutedBeliefsJson,
+		&i.FailedOutcomeID,
 	)
 	return i, err
 }
 
 const listAllDecisions = `-- name: ListAllDecisions :many
-?;
-
-SELECT id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at, scope_service, scope_env, scope_team
+SELECT id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at, scope_service, scope_env, scope_team, refuted_beliefs_json, failed_outcome_id
 FROM decisions
-ORDER BY chosen_at DE
+ORDER BY chosen_at DESC
 `
 
 func (q *Queries) ListAllDecisions(ctx context.Context) ([]Decision, error) {
@@ -200,6 +204,8 @@ func (q *Queries) ListAllDecisions(ctx context.Context) ([]Decision, error) {
 			&i.ScopeService,
 			&i.ScopeEnv,
 			&i.ScopeTeam,
+			&i.RefutedBeliefsJson,
+			&i.FailedOutcomeID,
 		); err != nil {
 			return nil, err
 		}
@@ -246,12 +252,10 @@ func (q *Queries) ListDecisionBeliefs(ctx context.Context, decisionID string) ([
 }
 
 const listDecisionsByRiskLevel = `-- name: ListDecisionsByRiskLevel :many
-C;
-
-SELECT id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at, scope_service, scope_env, scope_team
+SELECT id, statement, plan, reasoning, risk_level, alternatives_json, outcome_id, chosen_at, created_by, created_at, scope_service, scope_env, scope_team, refuted_beliefs_json, failed_outcome_id
 FROM decisions
 WHERE risk_level = ?
-ORDER BY chosen_at DE
+ORDER BY chosen_at DESC
 `
 
 func (q *Queries) ListDecisionsByRiskLevel(ctx context.Context, riskLevel string) ([]Decision, error) {
@@ -277,6 +281,8 @@ func (q *Queries) ListDecisionsByRiskLevel(ctx context.Context, riskLevel string
 			&i.ScopeService,
 			&i.ScopeEnv,
 			&i.ScopeTeam,
+			&i.RefutedBeliefsJson,
+			&i.FailedOutcomeID,
 		); err != nil {
 			return nil, err
 		}

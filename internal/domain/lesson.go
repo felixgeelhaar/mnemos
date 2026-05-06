@@ -61,6 +61,21 @@ func (s Scope) Matches(f Scope) bool {
 	return true
 }
 
+// LessonPolarity classifies a lesson as a positive pattern to repeat
+// or a negative pattern (anti-lesson) to avoid.
+type LessonPolarity string
+
+// Supported LessonPolarity values.
+const (
+	// LessonPolarityPositive marks clusters where the dominant outcome
+	// is success — a pattern worth repeating.
+	LessonPolarityPositive LessonPolarity = "positive"
+	// LessonPolarityNegative marks clusters where the dominant outcome
+	// is failure — an anti-lesson that warns operators away from a
+	// known bad pattern.
+	LessonPolarityNegative LessonPolarity = "negative"
+)
+
 // Lesson is a validated operational truth derived from one or more
 // Action -> Outcome chains. Lessons are the synthesis layer's output:
 // they answer "what have we learned?" rather than "what do we
@@ -73,6 +88,10 @@ func (s Scope) Matches(f Scope) bool {
 // LastVerified ticks forward when a fresh action+outcome pair re-
 // confirms the lesson, supporting the temporal-validity hardening of
 // Phase 4 (decay-aware trust).
+//
+// Polarity is "positive" for success patterns and "negative" for
+// anti-lessons derived from failure clusters. Empty is treated as
+// positive for backward compatibility.
 type Lesson struct {
 	ID           string
 	Statement    string
@@ -81,6 +100,7 @@ type Lesson struct {
 	Kind         string   // optional free-form classifier (e.g. "rollback", "scale-up"), preserved verbatim
 	Evidence     []string // Action ids that corroborated this lesson
 	Confidence   float64
+	Polarity     LessonPolarity // "positive" or "negative"; empty is treated as positive for backward compat
 	DerivedAt    time.Time
 	LastVerified time.Time
 	Source       string // "synthesize" for engine-derived, "human" for hand-authored

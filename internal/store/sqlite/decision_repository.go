@@ -33,21 +33,30 @@ func (r DecisionRepository) Append(ctx context.Context, decision domain.Decision
 	if err != nil {
 		return fmt.Errorf("marshal decision alternatives: %w", err)
 	}
+	refuted, err := json.Marshal(decision.RefutedBeliefs)
+	if err != nil {
+		return fmt.Errorf("marshal decision refuted_beliefs: %w", err)
+	}
 	createdAt := decision.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
 	if err := r.q.CreateDecision(ctx, sqlcgen.CreateDecisionParams{
-		ID:               decision.ID,
-		Statement:        decision.Statement,
-		Plan:             decision.Plan,
-		Reasoning:        decision.Reasoning,
-		RiskLevel:        string(decision.RiskLevel),
-		AlternativesJson: string(alts),
-		OutcomeID:        decision.OutcomeID,
-		ChosenAt:         decision.ChosenAt.UTC().Format(time.RFC3339Nano),
-		CreatedBy:        actorOr(decision.CreatedBy),
-		CreatedAt:        createdAt.UTC().Format(time.RFC3339Nano),
+		ID:                 decision.ID,
+		Statement:          decision.Statement,
+		Plan:               decision.Plan,
+		Reasoning:          decision.Reasoning,
+		RiskLevel:          string(decision.RiskLevel),
+		AlternativesJson:   string(alts),
+		OutcomeID:          decision.OutcomeID,
+		ChosenAt:           decision.ChosenAt.UTC().Format(time.RFC3339Nano),
+		CreatedBy:          actorOr(decision.CreatedBy),
+		CreatedAt:          createdAt.UTC().Format(time.RFC3339Nano),
+		ScopeService:       decision.Scope.Service,
+		ScopeEnv:           decision.Scope.Env,
+		ScopeTeam:          decision.Scope.Team,
+		RefutedBeliefsJson: string(refuted),
+		FailedOutcomeID:    decision.FailedOutcomeID,
 	}); err != nil {
 		return fmt.Errorf("insert decision: %w", err)
 	}
@@ -179,6 +188,14 @@ func mapSQLDecision(row sqlcgen.Decision) (domain.Decision, error) {
 			return domain.Decision{}, fmt.Errorf("unmarshal decision.alternatives_json: %w", err)
 		}
 	}
+	var refuted []string
+	src := row.RefutedBeliefsJson
+	if src == "" {
+		src = "[]"
+	}
+	if err := json.Unmarshal([]byte(src), &refuted); err != nil {
+		return domain.Decision{}, fmt.Errorf("unmarshal decision.refuted_beliefs_json: %w", err)
+	}
 	return domain.Decision{
 		ID:           row.ID,
 		Statement:    row.Statement,
@@ -190,5 +207,12 @@ func mapSQLDecision(row sqlcgen.Decision) (domain.Decision, error) {
 		ChosenAt:     chosen,
 		CreatedBy:    row.CreatedBy,
 		CreatedAt:    createdAt,
+		Scope: domain.Scope{
+			Service: row.ScopeService,
+			Env:     row.ScopeEnv,
+			Team:    row.ScopeTeam,
+		},
+		RefutedBeliefs:  refuted,
+		FailedOutcomeID: row.FailedOutcomeID,
 	}, nil
 }

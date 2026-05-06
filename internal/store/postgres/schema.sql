@@ -301,9 +301,11 @@ CREATE TABLE IF NOT EXISTS playbook_lessons (
 
 CREATE INDEX IF NOT EXISTS idx_playbook_lessons_lesson_id ON playbook_lessons(lesson_id);
 
-ALTER TABLE decisions ADD COLUMN IF NOT EXISTS scope_service text NOT NULL DEFAULT '';
-ALTER TABLE decisions ADD COLUMN IF NOT EXISTS scope_env     text NOT NULL DEFAULT '';
-ALTER TABLE decisions ADD COLUMN IF NOT EXISTS scope_team    text NOT NULL DEFAULT '';
+ ALTER TABLE decisions ADD COLUMN IF NOT EXISTS scope_service          text NOT NULL DEFAULT '';
+ ALTER TABLE decisions ADD COLUMN IF NOT EXISTS scope_env              text NOT NULL DEFAULT '';
+ ALTER TABLE decisions ADD COLUMN IF NOT EXISTS scope_team             text NOT NULL DEFAULT '';
+ ALTER TABLE decisions ADD COLUMN IF NOT EXISTS refuted_beliefs_json   text NOT NULL DEFAULT '[]';
+ ALTER TABLE decisions ADD COLUMN IF NOT EXISTS failed_outcome_id      text NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS lesson_versions (
   version_id   bigserial   PRIMARY KEY,

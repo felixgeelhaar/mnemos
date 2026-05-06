@@ -87,6 +87,7 @@ func openProvider(_ context.Context, dsn string) (*store.Conn, error) {
 		Decisions:     DecisionRepository{state: st},
 		Playbooks:     PlaybookRepository{state: st},
 		EntityRels:    EntityRelationshipRepository{state: st},
+		Incidents:     IncidentRepository{state: st},
 		Raw:           st,
 		Closer:        func() error { st.clear(); return nil },
 	}, nil
@@ -139,6 +140,8 @@ type state struct {
 	entityRels       map[string]domain.EntityRelationship
 	entityRelOrder   []string
 	entityRelKey     map[entityRelKey]string // (kind,from_type,from_id,to_type,to_id) → id
+	incidents        map[string]domain.Incident
+	incidentOrder    []string
 }
 
 // storedEntityVersion is the in-memory analogue of a row in
@@ -178,6 +181,7 @@ func newState() *state {
 		playbookVersions: map[string][]storedEntityVersion{},
 		entityRels:       map[string]domain.EntityRelationship{},
 		entityRelKey:     map[entityRelKey]string{},
+		incidents:        map[string]domain.Incident{},
 	}
 }
 
@@ -224,6 +228,8 @@ func (s *state) clear() {
 	s.entityRels = map[string]domain.EntityRelationship{}
 	s.entityRelOrder = nil
 	s.entityRelKey = map[entityRelKey]string{}
+	s.incidents = map[string]domain.Incident{}
+	s.incidentOrder = nil
 }
 
 // actorOr mirrors sqlite.actorOr: an empty actor falls back to the

@@ -137,3 +137,81 @@ func TestClaimRepositoryUpsertAndListByEventIDs(t *testing.T) {
 		t.Fatalf("ListByEventIDs() claim id = %q, want cl_1", claims[0].ID)
 	}
 }
+
+// TestClaimVisibility_DefaultsToTeam verifies that a claim stored without an
+// explicit Visibility value is retrieved with Visibility == VisibilityTeam.
+func TestClaimVisibility_DefaultsToTeam(t *testing.T) {
+	db := openTestDB(t)
+	defer closeDB(db)
+
+	ctx := context.Background()
+	repo := NewClaimRepository(db)
+
+	claim := domain.Claim{
+		ID:         "cl_vis_default",
+		Text:       "default visibility claim",
+		Type:       domain.ClaimTypeFact,
+		Confidence: 0.8,
+		Status:     domain.ClaimStatusActive,
+		CreatedAt:  time.Now().UTC(),
+		// Visibility intentionally omitted — should default to "team".
+	}
+	if err := repo.Upsert(ctx, []domain.Claim{claim}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+
+	got, err := repo.ListAll(ctx)
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(ListAll) = %d, want 1", len(got))
+	}
+	if got[0].Visibility != domain.VisibilityTeam {
+		t.Errorf("Visibility = %q, want %q", got[0].Visibility, domain.VisibilityTeam)
+	}
+}
+
+// TestClaimVisibility_RoundTrip verifies that each explicit Visibility value
+// survives a persist-and-retrieve cycle unchanged.
+func TestClaimVisibility_RoundTrip(t *testing.T) {
+	cases := []domain.Visibility{
+		domain.VisibilityPersonal,
+		domain.VisibilityTeam,
+		domain.VisibilityOrg,
+	}
+
+	for _, vis := range cases {
+		t.Run(string(vis), func(t *testing.T) {
+			db := openTestDB(t)
+			defer closeDB(db)
+
+			ctx := context.Background()
+			repo := NewClaimRepository(db)
+
+			claim := domain.Claim{
+				ID:         "cl_vis_" + string(vis),
+				Text:       "visibility round-trip: " + string(vis),
+				Type:       domain.ClaimTypeFact,
+				Confidence: 0.75,
+				Status:     domain.ClaimStatusActive,
+				CreatedAt:  time.Now().UTC(),
+				Visibility: vis,
+			}
+			if err := repo.Upsert(ctx, []domain.Claim{claim}); err != nil {
+				t.Fatalf("Upsert: %v", err)
+			}
+
+			got, err := repo.ListAll(ctx)
+			if err != nil {
+				t.Fatalf("ListAll: %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("len(ListAll) = %d, want 1", len(got))
+			}
+			if got[0].Visibility != vis {
+				t.Errorf("Visibility = %q, want %q", got[0].Visibility, vis)
+			}
+		})
+	}
+}

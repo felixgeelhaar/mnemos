@@ -283,3 +283,97 @@ func TestSynthesizePlaybooks_IsIdempotent(t *testing.T) {
 		t.Fatalf("want 1 playbook after 3 runs, got %d", count)
 	}
 }
+
+// seedClusterFailure inserts a (subject, kind) cluster with N failed outcomes.
+func seedClusterFailure(t *testing.T, conn *store.Conn, subject string, kind domain.ActionKind, n int, base time.Time) []string {
+	t.Helper()
+	ctx := context.Background()
+	ids := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		aid := "fail_ac_" + subject + "_" + string(kind) + "_" + itoa(i)
+		oid := "fail_oc_" + subject + "_" + string(kind) + "_" + itoa(i)
+		at := base.Add(time.Duration(i) * time.Hour)
+		if err := conn.Actions.Append(ctx, domain.Action{
+			ID: aid, Kind: kind, Subject: subject, At: at,
+		}); err != nil {
+			t.Fatalf("seed action: %v", err)
+		}
+		if err := conn.Outcomes.Append(ctx, domain.Outcome{
+			ID: oid, ActionID: aid, Result: domain.OutcomeResultFailure,
+			ObservedAt: at.Add(5 * time.Minute),
+		}); err != nil {
+			t.Fatalf("seed outcome: %v", err)
+		}
+		ids = append(ids, aid)
+	}
+	return ids
+}
+
+// TestSynthesize_EmitsAntiLessonOnConsistentFailure verifies that a
+// cluster of ≥3 failures is synthesised into a negative-polarity lesson.
+func TestSynthesize_EmitsAntiLessonOnConsistentFailure(t *testing.T) {
+	conn := openTestStore(t)
+	now := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	seedClusterFailure(t, conn, "payments", domain.ActionKindDeploy, 3, now.Add(-12*time.Hour))
+
+	res, err := Synthesize(context.Background(), conn.Actions, conn.Outcomes, conn.Lessons, Options{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatalf("synthesize: %v", err)
+	}
+	if res.LessonsEmitted != 1 {
+		t.Fatalf("want 1 anti-lesson, got %d (clusters=%d skipped=%d)", res.LessonsEmitted, res.Clusters, res.Skipped)
+	}
+	lessons, err := conn.Lessons.ListAll(context.Background())
+	if err != nil {
+		t.Fatalf("list lessons: %v", err)
+	}
+	if len(lessons) != 1 {
+		t.Fatalf("want 1 lesson stored, got %d", len(lessons))
+	}
+	l := lessons[0]
+	if l.Polarity != domain.LessonPolarityNegative {
+		t.Errorf("polarity = %q, want %q", l.Polarity, domain.LessonPolarityNegative)
+	}
+	if l.Statement == "" {
+		t.Error("statement must not be empty for anti-lesson")
+	}
+}
+
+// TestSynthesize_PositiveLessonHasPositivePolarity verifies that a
+// success cluster is tagged with positive polarity.
+func TestSynthesize_PositiveLessonHasPositivePolarity(t *testing.T) {
+	conn := openTestStore(t)
+	now := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	seedClusterSuccess(t, conn, "payments", domain.ActionKindRollback, 3, now.Add(-12*time.Hour))
+
+	_, err := Synthesize(context.Background(), conn.Actions, conn.Outcomes, conn.Lessons, Options{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatalf("synthesize: %v", err)
+	}
+	lessons, err := conn.Lessons.ListAll(context.Background())
+	if err != nil {
+		t.Fatalf("list lessons: %v", err)
+	}
+	if len(lessons) != 1 {
+		t.Fatalf("want 1 lesson, got %d", len(lessons))
+	}
+	if lessons[0].Polarity != domain.LessonPolarityPositive {
+		t.Errorf("polarity = %q, want %q", lessons[0].Polarity, domain.LessonPolarityPositive)
+	}
+}
+
+// TestSynthesize_AntiLessonBelowCorroborationThreshold verifies that
+// a failure cluster with only 2 actions is not emitted (below MinCorroboration=3).
+func TestSynthesize_AntiLessonBelowCorroborationThreshold(t *testing.T) {
+	conn := openTestStore(t)
+	now := time.Date(2026, 5, 1, 10, 0, 0, 0, time.UTC)
+	seedClusterFailure(t, conn, "search", domain.ActionKindDeploy, 2, now.Add(-12*time.Hour))
+
+	res, err := Synthesize(context.Background(), conn.Actions, conn.Outcomes, conn.Lessons, Options{Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatalf("synthesize: %v", err)
+	}
+	if res.LessonsEmitted != 0 {
+		t.Fatalf("want 0 lessons for under-corroborated failure cluster, got %d", res.LessonsEmitted)
+	}
+}

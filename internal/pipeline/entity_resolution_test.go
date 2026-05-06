@@ -60,14 +60,17 @@ func TestMatchByContainment_HandlesMissingNormalizedName(t *testing.T) {
 }
 
 func TestNormalizeEntityName_LowercaseAndCollapseWhitespace(t *testing.T) {
-	cases := map[string]string{
-		"  Alice  Smith ": "alice smith",
-		"BOB":             "bob",
-		"":                "",
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"  Alice  Smith ", "alice smith"},
+		{"BOB", "bob"},
+		{"", ""},
 	}
-	for in, want := range cases {
-		if got := normalizeEntityName(in); got != want {
-			t.Errorf("normalizeEntityName(%q) = %q, want %q", in, got, want)
+	for _, tc := range cases {
+		if got := normalizeEntityName(tc.in); got != tc.want {
+			t.Errorf("normalizeEntityName(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }

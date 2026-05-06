@@ -182,6 +182,7 @@ func (e Engine) eventLister() interface {
 
 type runListAdapter struct{ e Engine }
 
+// ListByRunID returns all events belonging to the given runID.
 func (r runListAdapter) ListByRunID(ctx context.Context, runID string) ([]domain.Event, error) {
 	all, err := r.e.events.ListAll(ctx)
 	if err != nil {

@@ -59,6 +59,107 @@ type playbookStepYAML struct {
 	Condition   string `yaml:"condition,omitempty"`
 }
 
+// claimFrontmatter is the YAML shape for exported claim documents.
+// It extends the core fields with provenance annotations so that the
+// exported file is both human-readable and auditable without a second
+// API call.
+type claimFrontmatter struct {
+	ID              string    `yaml:"id"`
+	Kind            string    `yaml:"kind"` // always "claim"
+	Type            string    `yaml:"type,omitempty"`
+	Status          string    `yaml:"status,omitempty"`
+	Scope           scopeYAML `yaml:"scope,omitempty"`
+	Confidence      float64   `yaml:"confidence,omitempty"`
+	TrustScore      float64   `yaml:"trust_score,omitempty"`
+	Liveness        string    `yaml:"liveness,omitempty"`
+	SourceDocument  string    `yaml:"source_document,omitempty"`
+	SourceType      string    `yaml:"source_type,omitempty"`
+	SourceAuthority float64   `yaml:"source_authority,omitempty"`
+	ValidFrom       string    `yaml:"valid_from,omitempty"`
+	LastVerified    string    `yaml:"last_verified,omitempty"`
+	CreatedBy       string    `yaml:"created_by,omitempty"`
+	CreatedAt       string    `yaml:"created_at,omitempty"`
+	Visibility      string    `yaml:"visibility,omitempty"`
+	// Provenance annotation fields (populated when a ProvenanceReport is provided).
+	ProvenanceScore     float64  `yaml:"provenance_score,omitempty"`
+	ProvenanceRationale string   `yaml:"provenance_rationale,omitempty"`
+	ProvenanceSources   []string `yaml:"provenance_sources,omitempty"`
+}
+
+// ExportClaim renders a Claim as YAML-frontmatter + markdown body.
+// When report is non-nil the frontmatter is enriched with trust score,
+// per-signal breakdown, source links, and confidence rationale so that
+// a reader understands why Mnemos trusts this claim without making a
+// second API call.
+func ExportClaim(c domain.Claim, report *domain.ProvenanceReport) (string, error) {
+	fm := claimFrontmatter{
+		ID:              c.ID,
+		Kind:            "claim",
+		Type:            string(c.Type),
+		Status:          string(c.Status),
+		Scope:           scopeYAML{Service: c.Scope.Service, Env: c.Scope.Env, Team: c.Scope.Team},
+		Confidence:      c.Confidence,
+		TrustScore:      c.TrustScore,
+		Liveness:        string(c.Liveness),
+		SourceDocument:  c.SourceDocument,
+		SourceType:      string(c.SourceType),
+		SourceAuthority: c.SourceAuthority,
+		ValidFrom:       formatTime(c.ValidFrom),
+		LastVerified:    formatTime(c.LastVerified),
+		CreatedBy:       c.CreatedBy,
+		CreatedAt:       formatTime(c.CreatedAt),
+		Visibility:      string(c.Visibility),
+	}
+	var body strings.Builder
+	body.WriteString("# Claim\n\n")
+	body.WriteString(c.Text)
+	body.WriteString("\n")
+
+	if report != nil {
+		fm.ProvenanceScore = report.Score
+		fm.ProvenanceRationale = report.Rationale
+		if report.SourceDocument != "" {
+			fm.ProvenanceSources = []string{report.SourceDocument}
+		}
+		// Append human-readable provenance section to the markdown body.
+		body.WriteString("\n## Provenance\n\n")
+		body.WriteString("**Trust score:** ")
+		fmt.Fprintf(&body, "%.2f", report.Score)
+		body.WriteString("\n\n")
+		body.WriteString("**Rationale:** ")
+		body.WriteString(report.Rationale)
+		body.WriteString("\n\n")
+		if len(report.Signals) > 0 {
+			body.WriteString("### Signals\n\n")
+			body.WriteString("| Signal | Value | Weight | Contribution |\n")
+			body.WriteString("|--------|-------|--------|--------------|\n")
+			for _, s := range report.Signals {
+				fmt.Fprintf(&body, "| %s | %.3f | %.3f | %.3f |\n",
+					s.Name, s.Value, s.Weight, s.Contribution)
+			}
+			body.WriteString("\n")
+		}
+	}
+
+	return assembleClaim(fm, body.String())
+}
+
+func assembleClaim(fm claimFrontmatter, body string) (string, error) {
+	var b bytes.Buffer
+	b.WriteString("---\n")
+	enc := yaml.NewEncoder(&b)
+	enc.SetIndent(2)
+	if err := enc.Encode(fm); err != nil {
+		return "", fmt.Errorf("encode claim frontmatter: %w", err)
+	}
+	if err := enc.Close(); err != nil {
+		return "", fmt.Errorf("close yaml encoder: %w", err)
+	}
+	b.WriteString("---\n\n")
+	b.WriteString(body)
+	return b.String(), nil
+}
+
 // ExportLesson renders a Lesson as YAML-frontmatter + markdown body.
 // Returns the file content as a string. Stable: re-exporting the same
 // lesson byte-for-byte returns the same string, so committing the

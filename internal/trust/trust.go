@@ -122,6 +122,22 @@ func Score(confidence float64, evidenceCount int, latestEvidence, now time.Time)
 	return clamp01(c * corroboration * freshness)
 }
 
+// ScoreWithAuthority is Score extended with an agentAuthority signal.
+// agentAuthority is a 0.0–1.0 weight derived from the submitting
+// agent's historical success rate and verification count
+// (see domain.Agent.AuthorityScore). A value of 0 is treated as 1.0
+// (unknown authority — no penalty) so legacy call sites that do not
+// carry an agent are unaffected.
+//
+//	trust_score = confidence × corroboration × freshness × agentAuthority
+func ScoreWithAuthority(confidence float64, evidenceCount int, latestEvidence, now time.Time, agentAuthority float64) float64 {
+	base := Score(confidence, evidenceCount, latestEvidence, now)
+	if agentAuthority <= 0 {
+		return base
+	}
+	return clamp01(base * clamp01(agentAuthority))
+}
+
 // freshnessFactor returns a multiplier in [FreshnessFloor, 1].
 // Exponential decay with half-life FreshnessHalfLifeDays. A zero
 // timestamp short-circuits to 1.0 so callers that lack a timestamp

@@ -50,7 +50,7 @@ func TestBuildContextBlock_OrdersByTrustDescending(t *testing.T) {
 	if highIdx < 0 || midIdx < 0 || lowIdx < 0 {
 		t.Fatalf("missing one of the claim ids in output:\n%s", out)
 	}
-	if !(highIdx < midIdx && midIdx < lowIdx) {
+	if highIdx >= midIdx || midIdx >= lowIdx {
 		t.Errorf("claims not ordered by trust desc: high=%d mid=%d low=%d\n%s", highIdx, midIdx, lowIdx, out)
 	}
 }

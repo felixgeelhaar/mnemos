@@ -169,3 +169,42 @@ func TestIsStale_PerClaimHalfLifeShortensDecay(t *testing.T) {
 		t.Fatal("5-day half-life should flag a 10-day-old claim as stale")
 	}
 }
+
+func TestScoreWithAuthority_ZeroAuthorityIsNeutral(t *testing.T) {
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	base := Score(0.8, 5, now, now)
+	got := ScoreWithAuthority(0.8, 5, now, now, 0)
+	if got != base {
+		t.Fatalf("zero agentAuthority should not change score: base=%.4f got=%.4f", base, got)
+	}
+}
+
+func TestScoreWithAuthority_HighAuthorityPreservesScore(t *testing.T) {
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	base := Score(0.8, 5, now, now)
+	got := ScoreWithAuthority(0.8, 5, now, now, 1.0)
+	if math.Abs(got-base) > 1e-9 {
+		t.Fatalf("authority=1.0 should preserve score: base=%.4f got=%.4f", base, got)
+	}
+}
+
+func TestScoreWithAuthority_LowAuthorityDeflatesScore(t *testing.T) {
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	base := Score(0.8, 5, now, now)
+	got := ScoreWithAuthority(0.8, 5, now, now, 0.5)
+	if got >= base {
+		t.Fatalf("low authority should deflate score: base=%.4f got=%.4f", base, got)
+	}
+	// deflated should be approximately base * 0.5
+	if math.Abs(got-base*0.5) > 1e-9 {
+		t.Fatalf("authority=0.5 should halve the score: want %.4f got %.4f", base*0.5, got)
+	}
+}
+
+func TestScoreWithAuthority_ClampedToOne(t *testing.T) {
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	got := ScoreWithAuthority(2.0, 1, now, now, 2.0)
+	if got > 1.0 {
+		t.Fatalf("score must not exceed 1.0; got %v", got)
+	}
+}

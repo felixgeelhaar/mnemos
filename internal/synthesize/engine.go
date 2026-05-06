@@ -131,6 +131,7 @@ func Synthesize(ctx context.Context, actions ports.ActionRepository, outcomes po
 			Kind:         c.Kind,
 			Evidence:     actionIDs(c.Actions),
 			Confidence:   score,
+			Polarity:     clusterPolarity(c),
 			DerivedAt:    now,
 			LastVerified: now,
 			Source:       opts.Source,
@@ -293,12 +294,23 @@ func composeStatement(c cluster) string {
 	case domain.OutcomeResultSuccess:
 		return fmt.Sprintf("%s on %s reliably succeeds in this corpus", c.Kind, c.Scope.Service)
 	case domain.OutcomeResultFailure:
-		return fmt.Sprintf("%s on %s reliably fails in this corpus — investigate before retrying", c.Kind, c.Scope.Service)
+		return fmt.Sprintf("ANTI-LESSON: %s on %s reliably fails — do not retry without a fix", c.Kind, c.Scope.Service)
 	case domain.OutcomeResultPartial:
 		return fmt.Sprintf("%s on %s tends to land partial outcomes — expect manual cleanup", c.Kind, c.Scope.Service)
 	default:
 		return fmt.Sprintf("%s on %s has been observed but the outcome is unclear", c.Kind, c.Scope.Service)
 	}
+}
+
+// clusterPolarity returns the polarity label for a cluster based on
+// its dominant outcome result.
+func clusterPolarity(c cluster) domain.LessonPolarity {
+	flat := flattenOutcomes(c)
+	dom, _ := dominantResult(flat)
+	if dom == domain.OutcomeResultFailure {
+		return domain.LessonPolarityNegative
+	}
+	return domain.LessonPolarityPositive
 }
 
 func actionIDs(as []domain.Action) []string {

@@ -52,6 +52,8 @@ var negationWords = map[string]struct{}{
 	"failed": {},
 }
 
+var claimIDRefRE = regexp.MustCompile(`\bcl_[A-Za-z0-9_-]+\b`)
+
 // minContentTokenOverlap is the minimum number of content (non-stop) tokens
 // that must overlap for two claims to be considered related.
 const minContentTokenOverlap = 2
@@ -201,6 +203,25 @@ func (e Engine) Detect(claims []domain.Claim) ([]domain.Relationship, error) {
 		}
 	}
 
+	// Explicit citations: if a claim text references another claim ID,
+	// add a directed cites edge to form a citation graph.
+	claimByID := make(map[string]struct{}, len(claims))
+	for _, c := range claims {
+		claimByID[c.ID] = struct{}{}
+	}
+	var err error
+	rels, err = e.appendCitationRelationships(rels, claims, claimByID, now)
+	if err != nil {
+		return nil, err
+	}
+
+	// Test-conflict detection: test_result pairs covering the same requirement.
+	testRels, err := e.DetectTestConflicts(claims)
+	if err != nil {
+		return nil, err
+	}
+	rels = mergeRelationships(rels, testRels)
+
 	return rels, nil
 }
 
@@ -275,7 +296,177 @@ func (e Engine) DetectIncremental(newClaims []domain.Claim, existingClaims []dom
 		}
 	}
 
+	// Citation edges from new claims to any known claim IDs in scope
+	// (existing + new batch). This keeps citation graph tracking active
+	// in incremental ingest paths.
+	claimByID := make(map[string]struct{}, len(newClaims)+len(existingClaims))
+	for _, c := range existingClaims {
+		claimByID[c.ID] = struct{}{}
+	}
+	for _, c := range newClaims {
+		claimByID[c.ID] = struct{}{}
+	}
+	var err error
+	rels, err = e.appendCitationRelationships(rels, newClaims, claimByID, now)
+	if err != nil {
+		return nil, err
+	}
+
+	// Test-conflict detection across new + existing test_result claims.
+	allClaims := make([]domain.Claim, 0, len(newClaims)+len(existingClaims))
+	allClaims = append(allClaims, newClaims...)
+	allClaims = append(allClaims, existingClaims...)
+	testRels, err := e.DetectTestConflicts(allClaims)
+	if err != nil {
+		return nil, err
+	}
+	rels = mergeRelationships(rels, testRels)
+
 	return rels, nil
+}
+
+func (e Engine) appendCitationRelationships(rels []domain.Relationship, fromClaims []domain.Claim, validClaimIDs map[string]struct{}, now time.Time) ([]domain.Relationship, error) {
+	seen := make(map[string]struct{}, len(rels))
+	for _, r := range rels {
+		seen[string(r.Type)+"|"+r.FromClaimID+"|"+r.ToClaimID] = struct{}{}
+	}
+
+	for _, c := range fromClaims {
+		refs := claimIDRefRE.FindAllString(c.Text, -1)
+		if len(refs) == 0 {
+			continue
+		}
+		localSeen := make(map[string]struct{}, len(refs))
+		for _, targetID := range refs {
+			if targetID == c.ID {
+				continue
+			}
+			if _, ok := validClaimIDs[targetID]; !ok {
+				continue
+			}
+			if _, dup := localSeen[targetID]; dup {
+				continue
+			}
+			localSeen[targetID] = struct{}{}
+
+			k := string(domain.RelationshipTypeCites) + "|" + c.ID + "|" + targetID
+			if _, dup := seen[k]; dup {
+				continue
+			}
+			seen[k] = struct{}{}
+
+			id, err := e.nextID()
+			if err != nil {
+				return nil, err
+			}
+			rels = append(rels, domain.Relationship{
+				ID:          id,
+				Type:        domain.RelationshipTypeCites,
+				FromClaimID: c.ID,
+				ToClaimID:   targetID,
+				CreatedAt:   now,
+			})
+		}
+	}
+
+	return rels, nil
+}
+
+// DetectTestConflicts scans all claims, isolates pairs of type
+// ClaimTypeTestResult that share the same non-empty TestRequirementRef, and
+// emits a relationship for each pair:
+//
+//   - contradicts — one test is net-passing (PassCount > FailCount) and the
+//     other is net-failing, meaning two tests that cover the same requirement
+//     produce conflicting evidence about whether it is met.
+//   - supports — both tests agree (both net-passing or both net-failing).
+//
+// Pairs that share no scope signal (both Scope == "") are still compared
+// because a blank scope means "global" — the conflict is real. Pairs that
+// both have a non-empty Scope but whose Scopes differ are skipped: they may
+// cover the same requirement in intentionally different environments (e.g.
+// staging vs prod) and divergent results there are expected rather than
+// conflicting.
+//
+// DetectTestConflicts is called inside Detect and DetectIncremental and its
+// results are deduplicated against any relationships already in the slice
+// passed in. Callers do not need to call it directly.
+func (e Engine) DetectTestConflicts(claims []domain.Claim) ([]domain.Relationship, error) {
+	now := e.now().UTC()
+	rels := make([]domain.Relationship, 0)
+
+	// Collect only test_result claims with a non-empty requirement reference.
+	type testClaim struct {
+		idx   int
+		claim domain.Claim
+	}
+	var tests []testClaim
+	for i, c := range claims {
+		if c.Type == domain.ClaimTypeTestResult && c.TestRequirementRef != "" {
+			tests = append(tests, testClaim{idx: i, claim: c})
+		}
+	}
+	if len(tests) < 2 {
+		return rels, nil
+	}
+
+	for i := 0; i < len(tests); i++ {
+		for j := i + 1; j < len(tests); j++ {
+			a, b := tests[i].claim, tests[j].claim
+
+			// Same requirement reference required.
+			if a.TestRequirementRef != b.TestRequirementRef {
+				continue
+			}
+
+			// Scope guard: if both have an explicit scope that differs, skip.
+			if !a.Scope.IsEmpty() && !b.Scope.IsEmpty() && !a.Scope.Equal(b.Scope) {
+				continue
+			}
+
+			netA := testNetResult(a)
+			netB := testNetResult(b)
+
+			// Indeterminate (no pass/fail counts at all) — skip.
+			if netA == 0 || netB == 0 {
+				continue
+			}
+
+			var relType domain.RelationshipType
+			if (netA > 0) != (netB > 0) {
+				relType = domain.RelationshipTypeContradicts
+			} else {
+				relType = domain.RelationshipTypeSupports
+			}
+
+			id, err := e.nextID()
+			if err != nil {
+				return nil, err
+			}
+			rels = append(rels, domain.Relationship{
+				ID:          id,
+				Type:        relType,
+				FromClaimID: a.ID,
+				ToClaimID:   b.ID,
+				CreatedAt:   now,
+			})
+		}
+	}
+	return rels, nil
+}
+
+// testNetResult returns +1 when the test is net-passing (PassCount > FailCount),
+// -1 when net-failing (FailCount > PassCount), and 0 when indeterminate (both
+// zero or equal — no signal to reason about).
+func testNetResult(c domain.Claim) int {
+	switch {
+	case c.TestPassCount > c.TestFailCount:
+		return 1
+	case c.TestFailCount > c.TestPassCount:
+		return -1
+	default:
+		return 0
+	}
 }
 
 // DetectCausal scans claim pairs and emits `causes` edges when one
@@ -590,4 +781,22 @@ func newRelationshipID() (string, error) {
 		return "", err
 	}
 	return "rl_" + hex.EncodeToString(buf), nil
+}
+
+// mergeRelationships appends additions to base, skipping any pair that already
+// has a relationship of the same type between the same two claims.
+func mergeRelationships(base, additions []domain.Relationship) []domain.Relationship {
+	seen := make(map[string]struct{}, len(base))
+	for _, r := range base {
+		seen[string(r.Type)+"|"+r.FromClaimID+"|"+r.ToClaimID] = struct{}{}
+	}
+	for _, r := range additions {
+		k := string(r.Type) + "|" + r.FromClaimID + "|" + r.ToClaimID
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+		base = append(base, r)
+	}
+	return base
 }

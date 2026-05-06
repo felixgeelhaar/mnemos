@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Mnemos — Self-hosted memory for AI apps</title>
-  <meta name="description" content="The open-source memory layer for AI apps you actually own. Self-hosted, MIT-licensed, single Go binary. Every claim has evidence, every contradiction surfaces, every decision replays.">
+  <meta name="description" content="Self-hosted memory infrastructure for AI teams with strict data boundaries. Own your memory layer, replay decisions with evidence, and catch contradictions before they ship to users.">
   <meta property="og:title" content="Mnemos — Self-hosted memory for AI apps">
-  <meta property="og:description" content="AI memory that doesn't leave your servers. No vendor cloud, no per-call billing, no SDK to install — just a Go binary, an HTTP API, and your data.">
+  <meta property="og:description" content="For teams building AI in regulated or private environments: self-hosted memory, evidence-linked claims, contradiction detection, and auditable replay.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -30,30 +30,30 @@
 <main id="main" class="wrap">
 
 <section class="hero">
-  <p class="kicker">For AI engineers building apps that can't ship customer data to a vendor cloud.</p>
-  <h1>AI memory <span class="accent">you actually own.</span></h1>
+  <p class="kicker">For AI product and platform teams with data residency, auditability, or on-prem requirements.</p>
+  <h1>The memory layer for <span class="accent">high-trust AI products.</span></h1>
   <p class="lede">
-    Self-hosted memory for AI apps. No vendor cloud, no per-call
-    billing, no SDK to install — just a Go binary, an HTTP API, and
-    your data. Every claim has evidence, every contradiction
-    surfaces, every decision replays — months later, in your infra.
+    Mnemos is self-hosted memory infrastructure for AI apps. Keep data
+    in your environment, preserve evidence per claim, surface contradictions
+    before the model answers, and replay decision history months later.
+    No managed vendor dependency required.
   </p>
   <div class="cta-row">
-    <a class="cta primary" href="#snippet">5-line example ↓</a>
-    <a class="cta" href="https://github.com/felixgeelhaar/mnemos" aria-label="View Mnemos on GitHub">★ on GitHub</a>
-    <a class="cta ghost" href="#run">Run it locally</a>
+    <a class="cta primary" href="#run">Run locally in 5 minutes</a>
+    <a class="cta" href="https://github.com/felixgeelhaar/mnemos" aria-label="View Mnemos on GitHub">View on GitHub</a>
+    <a class="cta ghost" href="mailto:felix.geelhaar@gmail.com?subject=Mnemos%20Design%20Partner">Become a design partner</a>
   </div>
   <div class="use-cases">
-    <div><p><strong>Add memory to your AI app</strong>Five lines of HTTP. No SDK. No API key. No data leaving your servers.</p></div>
-    <div><p><strong>Catch contradictions automatically</strong>Two facts disagree, Mnemos flags it before your agent quotes either.</p></div>
-    <div><p><strong>Audit any agent</strong>Wrap a LangGraph / CrewAI / MCP agent. Every step emits one event; replay the full chain months later.</p></div>
-    <div><p><strong>Run it anywhere</strong>SQLite by default. Postgres, MySQL, libSQL, in-memory all supported. No CGO.</p></div>
+    <div><p><strong>Own your memory infrastructure</strong>Single Go binary, MIT license, and storage in your stack.</p></div>
+    <div><p><strong>Reduce hallucination risk from memory drift</strong>Contradictions are first-class and surfaced before response generation.</p></div>
+    <div><p><strong>Pass audits faster</strong>Every claim links to evidence and every correction carries a reason.</p></div>
+    <div><p><strong>Integrate with your current agent runtime</strong>Use HTTP, CLI, gRPC, or MCP with LangGraph, CrewAI, and custom systems.</p></div>
   </div>
 </section>
 
 <section id="snippet" aria-labelledby="snippet-heading">
-  <p class="kicker">Five lines of code</p>
-  <h2 id="snippet-heading">Add memory to an AI app, no SDK required.</h2>
+  <p class="kicker">Fast activation</p>
+  <h2 id="snippet-heading">Start with one endpoint, expand only when needed.</h2>
   <p>
     Mnemos exposes one HTTP API. Any language with an HTTP client can
     add memory in five lines — copy/paste, then own it.
@@ -83,7 +83,7 @@ events = httpx.get(f"{m}/v1/events", params={"run_id": run}).json()</code></pre>
   </div>
 
   <div class="callout">
-    <strong>What you get for those five lines.</strong>
+    <strong>Why this matters.</strong>
     Every event keyed by <code>run_id</code> — full chain replay
     months later. Add structured claims (<code>fact</code>,
     <code>decision</code>, <code>hypothesis</code>) when you need
@@ -93,8 +93,8 @@ events = httpx.get(f"{m}/v1/events", params={"run_id": run}).json()</code></pre>
 </section>
 
 <section id="scenario" aria-labelledby="scenario-heading">
-  <p class="kicker">A fuller example</p>
-  <h2 id="scenario-heading">Two facts disagree. Mnemos surfaces it before your agent quotes either.</h2>
+  <p class="kicker">Proof of value</p>
+  <h2 id="scenario-heading">When facts conflict, Mnemos surfaces it before your AI response hardens the error.</h2>
   <p>
     Beyond the five-line memory write, Mnemos extracts structured
     claims, links evidence, and detects contradictions — the parts
@@ -137,7 +137,7 @@ $ mnemos query --at 2026-05-01 "What happened with the deployment?"
   </div>
 
   <div class="callout">
-    <strong>What this proves.</strong>
+    <strong>Operational outcome.</strong>
     Rule-based extraction, contradiction detection, evidence linking,
     and point-in-time replay — all without a single LLM call. The
     audit chain is the differentiator: every claim points at the event
@@ -148,7 +148,7 @@ $ mnemos query --at 2026-05-01 "What happened with the deployment?"
 
 <section id="vs" aria-labelledby="vs-heading">
   <p class="kicker">Where it fits</p>
-  <h2 id="vs-heading">Pick the category that fits your stack.</h2>
+  <h2 id="vs-heading">Choose the memory approach that matches your risk profile.</h2>
   <p>
     Mnemos is one of several ways to add memory to an AI app. The
     right choice depends on whether you need a hosted SDK, raw
@@ -173,14 +173,14 @@ $ mnemos query --at 2026-05-01 "What happened with the deployment?"
       <span role="cell">No claim/contradiction structure, no evidence trace, no replay.</span>
     </div>
     <div class="vs-row" role="row">
-      <span role="cell"><strong>Notes apps</strong> (Notion, Obsidian, Roam)</strong></span>
+      <span role="cell"><strong>Notes apps</strong> (Notion, Obsidian, Roam)</span>
       <span role="cell">Humans organising their own thinking.</span>
       <span role="cell">Not built to be queried by an AI agent at scale; no programmatic API for memory writes.</span>
     </div>
     <div class="vs-row" role="row">
       <span role="cell"><strong>Mnemos</strong></span>
       <span role="cell">AI memory in stacks that can't leave your servers — regulated, on-prem, air-gapped.</span>
-      <span role="cell">You run a binary. (Hopefully a feature, not a cost.)</span>
+      <span role="cell">You operate infrastructure (binary + database) in exchange for control.</span>
     </div>
   </div>
 
@@ -240,7 +240,7 @@ $ mnemos query --at 2026-05-01 "What happened with the deployment?"
 
 <section id="run" aria-labelledby="run-heading">
   <p class="kicker">Run it</p>
-  <h2 id="run-heading">Five minutes from install to first contradiction.</h2>
+  <h2 id="run-heading">From install to first contradiction check in about five minutes.</h2>
   <pre><code>brew install felixgeelhaar/tap/mnemos
 # or: go install github.com/felixgeelhaar/mnemos/cmd/mnemos@latest
 
@@ -268,7 +268,7 @@ mnemos query --llm "What happened with the deployment?"</code></pre>
 mnemos verify cl_a                  # re-check against source events
 mnemos export --kind=lesson         # YAML-frontmatter markdown for review</code></pre>
 
-  <h3 class="subhead">Wrap a LangGraph / CrewAI / MCP agent</h3>
+  <h3 class="subhead">Wrap LangGraph, CrewAI, or any MCP-compatible agent</h3>
   <p>
     Mnemos doubles as the audit substrate beneath any AI agent. Each
     node-or-step posts one event keyed to a single <code>run_id</code>;
@@ -288,7 +288,7 @@ curl -s "http://localhost:7777/v1/events?run_id=&lt;run-id&gt;" | jq</code></pre
 
 <section id="stack" aria-labelledby="stack-heading">
   <p class="kicker">Related projects</p>
-  <h2 id="stack-heading">Mnemos works alone. It plays well with three siblings.</h2>
+  <h2 id="stack-heading">Mnemos is standalone, and composes with the wider cognitive stack.</h2>
   <p>
     Mnemos is a memory layer first. The same author maintains three
     related services and a runtime that drives all four together.

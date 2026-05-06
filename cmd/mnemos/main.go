@@ -204,6 +204,8 @@ func main() {
 		handleVerify(args, flags)
 	case "decision":
 		handleDecision(args, flags)
+	case "incident":
+		handleIncident(args, flags)
 	case "playbook":
 		handlePlaybook(args, flags)
 	case "export":
@@ -212,6 +214,8 @@ func main() {
 		handleImport(args, flags)
 	case "history":
 		handleHistory(args, flags)
+	case "quality":
+		handleQuality(flags)
 	default:
 		fmt.Fprintf(os.Stderr, "error: unknown command %q\n", command)
 		if suggestion := suggestCommand(command); suggestion != "" {
@@ -384,6 +388,9 @@ func handleQuery(args []string, f Flags) {
 	if includeHistory {
 		scope["include_history"] = "true"
 	}
+	if qa.whyWrong {
+		scope["why_wrong"] = "true"
+	}
 
 	err = runJob("query", scope, f.Verbose, func(ctx context.Context, job *workflow.Job, conn *store.Conn) error {
 		if err := job.SetStatus("loading", ""); err != nil {
@@ -391,7 +398,8 @@ func handleQuery(args []string, f Flags) {
 		}
 		eventRepo := conn.Events
 		claimRepo := conn.Claims
-		engine := query.NewEngine(eventRepo, claimRepo, conn.Relationships)
+		engine := query.NewEngine(eventRepo, claimRepo, conn.Relationships).
+			WithDecisions(conn.Decisions)
 		// WithTextSearch is an optional capability (FTS5 etc); engage
 		// it only when both repos satisfy the TextSearcher port.
 		if eventSearcher, ok := eventRepo.(ports.TextSearcher); ok {
@@ -429,6 +437,51 @@ func handleQuery(args []string, f Flags) {
 			}
 		}
 
+		// --why-wrong: audit-trail mode — list decisions refuted by failed outcomes.
+		if qa.whyWrong {
+			if statusErr := job.SetStatus("auditing", ""); statusErr != nil {
+				return statusErr
+			}
+			auditOpts := query.AuditTrailOptions{
+				Service: qa.scope.Service,
+			}
+			entries, auditErr := engine.AuditTrail(ctx, auditOpts)
+			if auditErr != nil {
+				return NewSystemError(auditErr, "audit trail query failed")
+			}
+			if f.Human {
+				printAuditTrail(entries)
+			} else {
+				encoded, encErr := json.MarshalIndent(entries, "", "  ")
+				if encErr != nil {
+					return NewSystemError(encErr, "failed to encode audit trail")
+				}
+				fmt.Println(string(encoded))
+			}
+			return nil
+		}
+
+		// --why-trust <id>: provenance mode — explain how a claim's trust score was computed.
+		if qa.whyTrust != "" {
+			if statusErr := job.SetStatus("provenance", ""); statusErr != nil {
+				return statusErr
+			}
+			report, provErr := engine.WhyTrustClaim(ctx, qa.whyTrust)
+			if provErr != nil {
+				return NewSystemError(provErr, "provenance query failed for claim %q", qa.whyTrust)
+			}
+			if f.Human {
+				printProvenanceReport(report)
+			} else {
+				encoded, encErr := json.MarshalIndent(report, "", "  ")
+				if encErr != nil {
+					return NewSystemError(encErr, "failed to encode provenance report")
+				}
+				fmt.Println(string(encoded))
+			}
+			return nil
+		}
+
 		if statusErr := job.SetStatus("querying", ""); statusErr != nil {
 			return statusErr
 		}
@@ -442,6 +495,7 @@ func handleQuery(args []string, f Flags) {
 			AsOf:           asOf,
 			RecordedAsOf:   qa.recordedAsOf,
 			IncludeHistory: includeHistory,
+			Visibility:     qa.visibility,
 		}
 		if entity != "" {
 			entRepo := conn.Entities
@@ -481,6 +535,7 @@ func handleQuery(args []string, f Flags) {
 				"claims":         answer.Claims,
 				"contradictions": answer.Contradictions,
 				"timeline":       answer.TimelineEventIDs,
+				"confidence":     answer.Confidence,
 			}
 			encoded, err := json.MarshalIndent(response, "", "  ")
 			if err != nil {
@@ -542,6 +597,91 @@ func resolveContradictionClaimText(ctx context.Context, claimRepo ports.ClaimRep
 			}
 		}
 	}
+}
+
+// printAuditTrail renders a human-readable decision audit trail produced by
+// the --why-wrong flag. Each entry shows the decision statement, its risk
+// level, the failed outcome that refuted it, and the belief claim IDs that
+// were invalidated.
+func printAuditTrail(entries []query.AuditEntry) {
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println("  Decision Audit Trail  (decisions refuted by failed outcomes)")
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	if len(entries) == 0 {
+		fmt.Println("  No refuted decisions found.")
+		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		return
+	}
+	for i, e := range entries {
+		fmt.Printf("\n  [%d] %s\n", i+1, e.Decision.Statement)
+		fmt.Printf("      risk:           %s\n", e.Decision.RiskLevel)
+		fmt.Printf("      decided:        %s\n", e.Decision.ChosenAt.UTC().Format("2006-01-02 15:04 UTC"))
+		if e.FailedOutcomeID != "" {
+			fmt.Printf("      failed outcome: %s\n", e.FailedOutcomeID)
+		}
+		if len(e.RefutedBeliefs) > 0 {
+			fmt.Printf("      refuted beliefs (%d):\n", len(e.RefutedBeliefs))
+			for _, b := range e.RefutedBeliefs {
+				fmt.Printf("        - %s\n", b)
+			}
+		}
+		if e.Decision.Scope.Service != "" || e.Decision.Scope.Env != "" || e.Decision.Scope.Team != "" {
+			fmt.Printf("      scope:          service=%s env=%s team=%s\n",
+				e.Decision.Scope.Service, e.Decision.Scope.Env, e.Decision.Scope.Team)
+		}
+	}
+	fmt.Println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Printf("  Total refuted decisions: %d\n", len(entries))
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+}
+
+// printProvenanceReport renders a human-readable trust provenance report
+// produced by the --why-trust flag. It shows the overall trust score for
+// the claim and a ranked breakdown of every signal that contributed to it.
+func printProvenanceReport(r domain.ProvenanceReport) {
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Println("  Trust Provenance Report")
+	fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	fmt.Printf("  claim:       %s\n", r.ClaimID)
+	fmt.Printf("  trust score: %.2f  (%s)\n", r.Score, r.Rationale)
+	if len(r.Signals) == 0 {
+		fmt.Println("  (no signals)")
+		fmt.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		return
+	}
+	fmt.Println("\n  signal breakdown (highest contribution first):")
+	for _, s := range r.Signals {
+		bar := trustBar(s.Contribution)
+		fmt.Printf("    %-20s  %s  %+.3f  %s\n", s.Name, bar, s.Contribution, s.Detail)
+	}
+	fmt.Println("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+}
+
+// trustBar returns a 10-char ASCII bar proportional to abs(contribution).
+// Positive contributions use '█', negative use '░'.
+func trustBar(v float64) string {
+	const width = 10
+	abs := v
+	if abs < 0 {
+		abs = -abs
+	}
+	filled := int(abs * float64(width) * 2) // scale: max contrib ~0.55 → full bar
+	if filled > width {
+		filled = width
+	}
+	ch := '█'
+	if v < 0 {
+		ch = '░'
+	}
+	bar := make([]rune, width)
+	for i := range bar {
+		if i < filled {
+			bar[i] = ch
+		} else {
+			bar[i] = '·'
+		}
+	}
+	return string(bar)
 }
 
 func printHumanReadableAnswer(question string, answer domain.Answer) {
@@ -949,6 +1089,40 @@ func handleProcess(args []string, f Flags) {
 	exitWithMnemosError(f.Verbose, err)
 }
 
+func handleQuality(f Flags) {
+	err := runJob("quality", map[string]string{}, f.Verbose, func(ctx context.Context, job *workflow.Job, conn *store.Conn) error {
+		if err := job.SetStatus("computing", ""); err != nil {
+			return err
+		}
+
+		engine := query.NewEngine(conn.Events, conn.Claims, conn.Relationships).
+			WithDecisions(conn.Decisions).
+			WithIncidents(conn.Incidents)
+
+		metrics, err := engine.ComputeMemoryQuality(ctx)
+		if err != nil {
+			return fmt.Errorf("compute memory quality: %w", err)
+		}
+
+		response := map[string]any{
+			"total_claims":        metrics.TotalClaims,
+			"avg_trust_score":     metrics.AvgTrustScore,
+			"avg_confidence":      metrics.AvgConfidence,
+			"stale_count":         metrics.StaleCount,
+			"contested_count":     metrics.ContestedCount,
+			"contradiction_count": metrics.ContradictionCount,
+			"avg_citation_count":  metrics.AvgCitationCount,
+		}
+		encoded, err := json.MarshalIndent(response, "", "  ")
+		if err != nil {
+			return fmt.Errorf("encode quality metrics: %w", err)
+		}
+		fmt.Println(string(encoded))
+		return nil
+	})
+	exitWithMnemosError(f.Verbose, err)
+}
+
 func handleMetrics(f Flags) {
 	err := runJob("metrics", map[string]string{}, f.Verbose, func(ctx context.Context, job *workflow.Job, conn *store.Conn) error {
 		if err := job.SetStatus("loading", ""); err != nil {
@@ -1178,6 +1352,17 @@ type queryArgs struct {
 	entity         string // filter answer to claims linked to this entity (id or name)
 	hopKinds       []domain.RelationshipType
 	scope          domain.Scope
+	// whyWrong, when true, switches the query to audit-trail mode: instead
+	// of answering a question the engine returns decisions that were refuted
+	// by a failed outcome. Use --service to scope to one service.
+	whyWrong bool
+	// whyTrust, when non-empty, switches the query to provenance mode: the
+	// engine returns a structured ProvenanceReport for the given claim ID
+	// explaining how its trust score was computed.
+	whyTrust string
+	// visibility controls workspace isolation. personal/team/org.
+	// Zero value treated as "team" (see AnswerOptions.Visibility).
+	visibility domain.Visibility
 }
 
 func parseQueryArgs(args []string) (queryArgs, error) {
@@ -1275,6 +1460,30 @@ func parseQueryArgs(args []string) (queryArgs, error) {
 			}
 			out.scope.Team = strings.TrimSpace(questionArgs[1])
 			questionArgs = questionArgs[2:]
+		case "--why-wrong":
+			out.whyWrong = true
+			questionArgs = questionArgs[1:]
+		case "--why-trust":
+			if len(questionArgs) < 2 {
+				return queryArgs{}, NewUserError("--why-trust flag requires a claim ID")
+			}
+			out.whyTrust = strings.TrimSpace(questionArgs[1])
+			if out.whyTrust == "" {
+				return queryArgs{}, NewUserError("--why-trust flag requires a non-empty claim ID")
+			}
+			questionArgs = questionArgs[2:]
+		case "--visibility":
+			if len(questionArgs) < 2 {
+				return queryArgs{}, NewUserError("--visibility requires a value: personal, team, or org")
+			}
+			v := domain.Visibility(strings.TrimSpace(questionArgs[1]))
+			switch v {
+			case domain.VisibilityPersonal, domain.VisibilityTeam, domain.VisibilityOrg:
+				out.visibility = v
+			default:
+				return queryArgs{}, NewUserError("--visibility must be one of: personal, team, org")
+			}
+			questionArgs = questionArgs[2:]
 		default:
 			goto done
 		}
@@ -1282,7 +1491,7 @@ func parseQueryArgs(args []string) (queryArgs, error) {
 done:
 
 	out.question = strings.TrimSpace(strings.Join(questionArgs, " "))
-	if out.question == "" {
+	if out.question == "" && !out.whyWrong && out.whyTrust == "" {
 		return queryArgs{}, NewUserError("query requires a question")
 	}
 

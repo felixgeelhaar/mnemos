@@ -27,7 +27,56 @@ const (
 	ClaimTypeFact       ClaimType = "fact"
 	ClaimTypeHypothesis ClaimType = "hypothesis"
 	ClaimTypeDecision   ClaimType = "decision"
+	ClaimTypeTestResult ClaimType = "test_result"
 )
+
+// SourceType classifies the origin of a claim.
+type SourceType string
+
+// Supported SourceType values.
+const (
+	SourceTypeDocument    SourceType = "document"
+	SourceTypeTranscript  SourceType = "transcript"
+	SourceTypeGitCommit   SourceType = "git_commit"
+	SourceTypeWebPage     SourceType = "web_page"
+	SourceTypeAPIResponse SourceType = "api_response"
+	SourceTypeManualEntry SourceType = "manual_entry"
+)
+
+// LivenessStatus indicates whether a source is still actively used/executed.
+type LivenessStatus string
+
+// Supported LivenessStatus values.
+const (
+	LivenessLive    LivenessStatus = "live"   // actively referenced/executed
+	LivenessStale   LivenessStatus = "stale"  // not recently used but not dead
+	LivenessZombie  LivenessStatus = "zombie" // old but still trusted
+	LivenessDead    LivenessStatus = "dead"   // no longer valid or used
+	LivenessUnknown LivenessStatus = "unknown"
+)
+
+// Visibility controls who can see a claim — inspired by Nomi's room model.
+// It is intentionally separate from Scope (service/env/team filtering): Scope
+// narrows operational context, Visibility gates access by audience.
+//
+//   - Personal  — visible only to the submitting user / agent; a private
+//     working note not yet ready for teammates.
+//   - Team      — visible to every member of the team named in Scope.Team
+//     (or the default workspace team when Scope is empty). The
+//     default for all new claims.
+//   - Org       — organisational truth; visible to all principals in the
+//     workspace. Requires explicit promotion from team.
+type Visibility string
+
+// Visibility values controlling audience access.
+const (
+	VisibilityPersonal Visibility = "personal"
+	VisibilityTeam     Visibility = "team" // default
+	VisibilityOrg      Visibility = "org"
+)
+
+// DefaultVisibility is the value applied when no Visibility is specified.
+const DefaultVisibility = VisibilityTeam
 
 // ClaimStatus represents the lifecycle state of a claim.
 type ClaimStatus string
@@ -62,6 +111,10 @@ type RelationshipType string
 const (
 	RelationshipTypeSupports    RelationshipType = "supports"
 	RelationshipTypeContradicts RelationshipType = "contradicts"
+	// RelationshipTypeCites links a claim to another claim it explicitly
+	// references, forming a directed citation graph used for convergence
+	// analysis (how many independent claims point to a source claim).
+	RelationshipTypeCites RelationshipType = "cites"
 
 	// RelationshipTypeCauses asserts that From caused To (cause -> effect).
 	RelationshipTypeCauses RelationshipType = "causes"
@@ -92,6 +145,7 @@ func IsValidRelationshipType(t RelationshipType) bool {
 	switch t {
 	case RelationshipTypeSupports,
 		RelationshipTypeContradicts,
+		RelationshipTypeCites,
 		RelationshipTypeCauses,
 		RelationshipTypeCausedBy,
 		RelationshipTypeActionOf,
@@ -170,6 +224,44 @@ type Claim struct {
 	// when Answer is requested with a non-empty filter; synthesis
 	// already routes through claim->action->lesson scope upstream.
 	Scope Scope
+
+	// --- Epistemic Provenance Fields ---
+
+	// SourceDocument is the original source (URL, file path, doc ID)
+	// from which this claim was extracted or where it is primarily stated.
+	SourceDocument string
+	// SourceType classifies the kind of source (document, transcript, git_commit, etc.).
+	SourceType SourceType
+	// SourceAuthority is a 0.0-1.0 score of the source's authority/trustworthiness.
+	// Can be user-defined or inferred from reputation systems.
+	SourceAuthority float64
+	// Liveness indicates whether the source is still actively used/executed.
+	// A 12-year-old process doc still being executed = live (zombie).
+	Liveness LivenessStatus
+	// LastExecuted is the last time the source was referenced, executed, or accessed.
+	// Zero value means unknown. Used to compute liveness.
+	LastExecuted time.Time
+	// CitationCount is the number of other claims/sources that link to this claim.
+	// Derived from the citation graph; higher = more corroboration.
+	CitationCount int
+	// ProvenanceRationale is a human-readable explanation of why this claim
+	// is trusted over alternatives (e.g. "3 sources agree, source is live, recent").
+	ProvenanceRationale string
+
+	// Test provenance fields (used when Type == test_result).
+	TestID             string
+	TestRequirementRef string
+	TestAuthor         string
+	TestLastModified   time.Time
+	TestLastRunAt      time.Time
+	TestPassCount      int
+	TestFailCount      int
+
+	// Visibility gates audience access independent of Scope.
+	// Personal = submitting user/agent only; Team = workspace team (default);
+	// Org = all principals in the workspace.
+	// Zero value is treated as VisibilityTeam at read/write time.
+	Visibility Visibility
 }
 
 // IsValidAt reports whether the claim was in force at instant t.
@@ -405,6 +497,23 @@ type Agent struct {
 	Quota       AgentQuota
 	Status      AgentStatus
 	CreatedAt   time.Time
+
+	// AuthorityScore is a 0.0–1.0 signal of how much trust claims
+	// submitted by this agent should receive. It is derived from
+	// SuccessRate and VerificationCount and updated asynchronously;
+	// it is not the caller's job to compute it on write.
+	AuthorityScore float64
+
+	// SuccessRate is the fraction of this agent's claims that were
+	// subsequently corroborated by independent evidence (verified /
+	// total). Zero when no data has been collected yet.
+	SuccessRate float64
+
+	// VerificationCount is the total number of claims from this
+	// agent that have been independently verified. Used to weight
+	// SuccessRate: a 100% rate on 3 claims is much weaker than 80%
+	// on 500.
+	VerificationCount int
 }
 
 // AgentQuota caps an agent's write volume. WindowSeconds is the
@@ -479,6 +588,62 @@ type EmbeddingRecord struct {
 	CreatedBy  string    // user id of the actor that generated this embedding
 }
 
+// VerdictAction describes what the engine recommends an agent do after
+// resolving a contradiction.
+type VerdictAction string
+
+// Supported VerdictAction values.
+const (
+	// VerdictActionTrust indicates the winning claim should be trusted and
+	// acted on; the loser has been demoted.
+	VerdictActionTrust VerdictAction = "trust"
+	// VerdictActionUpdate indicates the agent should update its beliefs to
+	// reflect the winning claim before acting.
+	VerdictActionUpdate VerdictAction = "update"
+	// VerdictActionEscalate indicates the engine could not resolve the
+	// contradiction automatically and a human must decide.
+	VerdictActionEscalate VerdictAction = "escalate"
+)
+
+// Verdict is the structured resolution output for agent consumers. One Verdict
+// is produced per contradicting claim pair. When Action is VerdictActionEscalate
+// the WinnerClaimID/LoserClaimID fields are empty and EscalationReason explains why.
+type Verdict struct {
+	// WinnerClaimID is the ID of the claim the engine selected as authoritative.
+	// Empty when Action is VerdictActionEscalate.
+	WinnerClaimID string `json:"winner_claim_id"`
+	// LoserClaimID is the ID of the demoted claim.
+	// Empty when Action is VerdictActionEscalate.
+	LoserClaimID string `json:"loser_claim_id"`
+	// Confidence is the structural confidence of the winning claim (0–1).
+	Confidence float64 `json:"confidence"`
+	// Rationale explains which provenance signals tipped the scale.
+	// E.g. "recency: winner 3d vs loser 47d; authority: 0.92 vs 0.71".
+	Rationale string `json:"rationale"`
+	// Action is the recommended agent action.
+	Action VerdictAction `json:"action"`
+	// EscalationReason is non-empty when Action is VerdictActionEscalate and
+	// explains why automatic resolution was not possible.
+	EscalationReason string `json:"escalation_reason,omitempty"`
+}
+
+// Consumer identifies who is consuming a query answer. It controls how
+// contradictions are handled: agents receive an automatic resolution verdict
+// so they can act without ambiguity; human users receive a full explanation
+// of the contradiction so they can reason about it themselves.
+type Consumer string
+
+const (
+	// ConsumerAgent requests automatic contradiction resolution using the
+	// trust scoring engine. The winning claim is surfaced; the losing claim
+	// is demoted. AutoResolved is set to true in the Answer.
+	ConsumerAgent Consumer = "agent"
+	// ConsumerUser requests that contradictions be surfaced with a human-
+	// readable explanation. AutoResolved is false; ContradictionExplanation
+	// is populated.
+	ConsumerUser Consumer = "user"
+)
+
 // Answer holds the result of a query, including supporting claims and contradictions.
 type Answer struct {
 	AnswerText       string
@@ -503,6 +668,24 @@ type Answer struct {
 	// in the answer are stale; nil when the engine could not compute
 	// staleness (e.g. timestamps absent).
 	StaleClaimIDs []string
+	// AutoResolved is true when the engine automatically resolved one or
+	// more contradictions on behalf of an agent consumer. The Claims slice
+	// contains only the winning claims; demoted claims are omitted.
+	AutoResolved bool
+	// ContradictionExplanation is a human-readable explanation of any
+	// unresolved contradictions surfaced for a user consumer. Empty when
+	// there are no contradictions or when the consumer is ConsumerAgent.
+	ContradictionExplanation string
+	// Verdicts contains one structured resolution entry per contradicting
+	// claim pair. Only populated when the consumer is ConsumerAgent.
+	// Agents should inspect Action on each Verdict to decide whether to
+	// trust, update beliefs, or escalate to a human.
+	Verdicts []Verdict
+	// Confidence is a 0–1 score indicating how confident the system is
+	// in the answer, based on evidence quality (trust scores, citation
+	// density, contradiction presence, and recency). A value ≥ 0.9
+	// means the answer is "never wrong on recall" grade.
+	Confidence float64
 }
 
 // Validate checks that the Claim has a non-empty ID and text, a confidence
@@ -518,9 +701,12 @@ func (c Claim) Validate() error {
 		return errors.New("claim confidence must be between 0 and 1")
 	}
 	switch c.Type {
-	case ClaimTypeFact, ClaimTypeHypothesis, ClaimTypeDecision:
+	case ClaimTypeFact, ClaimTypeHypothesis, ClaimTypeDecision, ClaimTypeTestResult:
 	default:
 		return errors.New("claim type is invalid")
+	}
+	if c.Type == ClaimTypeTestResult && strings.TrimSpace(c.TestID) == "" {
+		return errors.New("claim test_id is required for test_result type")
 	}
 	switch c.Status {
 	case ClaimStatusActive, ClaimStatusContested, ClaimStatusResolved, ClaimStatusDeprecated:
@@ -528,6 +714,132 @@ func (c Claim) Validate() error {
 		return errors.New("claim status is invalid")
 	}
 	return nil
+}
+
+// IncidentSeverity classifies the impact of an incident.
+type IncidentSeverity string
+
+const (
+	// IncidentSeverityCritical — service is down or data is lost.
+	IncidentSeverityCritical IncidentSeverity = "critical"
+	// IncidentSeverityHigh — major functionality degraded.
+	IncidentSeverityHigh IncidentSeverity = "high"
+	// IncidentSeverityMedium — partial degradation, workaround exists.
+	IncidentSeverityMedium IncidentSeverity = "medium"
+	// IncidentSeverityLow — minor impact, monitored.
+	IncidentSeverityLow IncidentSeverity = "low"
+)
+
+// IncidentStatus represents the lifecycle state of an incident.
+type IncidentStatus string
+
+const (
+	// IncidentStatusOpen — incident is active and being investigated.
+	IncidentStatusOpen IncidentStatus = "open"
+	// IncidentStatusResolved — incident has been mitigated and verified.
+	IncidentStatusResolved IncidentStatus = "resolved"
+	// IncidentStatusPostmortem — incident closed; postmortem complete.
+	IncidentStatusPostmortem IncidentStatus = "postmortem"
+)
+
+// Incident records a failure event with a structured timeline, root-cause
+// claim, linked decisions, and associated outcomes. It is the primary
+// entry point for "Why Were We Wrong?" analysis: an agent or operator
+// opens an Incident, attaches the claim that turned out to be wrong
+// (RootCauseClaimID), the decisions made on that belief (DecisionIDs),
+// and the outcomes that proved the belief false (OutcomeIDs). The
+// synthesise engine can then generate anti-lessons automatically.
+type Incident struct {
+	// ID is a caller-supplied stable identifier (UUID or human-readable slug).
+	ID string `json:"id"`
+	// Title is a short human-readable label for the incident.
+	Title string `json:"title"`
+	// Summary is a prose description of what happened and what was affected.
+	Summary string `json:"summary"`
+	// Severity classifies the blast radius / impact.
+	Severity IncidentSeverity `json:"severity"`
+	// Status tracks the incident lifecycle.
+	Status IncidentStatus `json:"status"`
+	// TimelineEventIDs is an ordered list of event IDs that constitute the
+	// evidence timeline for this incident (detection, mitigation, resolution).
+	TimelineEventIDs []string `json:"timeline_event_ids,omitempty"`
+	// RootCauseClaimID points at the claim that was believed to be true
+	// but turned out to be wrong — the epistemic root cause.
+	RootCauseClaimID string `json:"root_cause_claim_id,omitempty"`
+	// DecisionIDs links the decisions that were made on the basis of the
+	// now-refuted belief.
+	DecisionIDs []string `json:"decision_ids,omitempty"`
+	// OutcomeIDs links the observed outcomes that proved the belief wrong.
+	OutcomeIDs []string `json:"outcome_ids,omitempty"`
+	// PlaybookID is set once a playbook has been synthesised from this
+	// incident's lessons.
+	PlaybookID string `json:"playbook_id,omitempty"`
+	// OpenedAt is when the incident was first recorded.
+	OpenedAt time.Time `json:"opened_at"`
+	// ResolvedAt is when the incident was closed; zero if still open.
+	ResolvedAt time.Time `json:"resolved_at,omitempty"`
+	// CreatedBy is the principal (user or agent ID) that opened the incident.
+	CreatedBy string `json:"created_by,omitempty"`
+}
+
+// Validate checks that an Incident has the minimum required fields.
+func (i Incident) Validate() error {
+	if strings.TrimSpace(i.ID) == "" {
+		return errors.New("incident id is required")
+	}
+	if strings.TrimSpace(i.Title) == "" {
+		return errors.New("incident title is required")
+	}
+	switch i.Severity {
+	case IncidentSeverityCritical, IncidentSeverityHigh, IncidentSeverityMedium, IncidentSeverityLow:
+	default:
+		return fmt.Errorf("incident severity %q is invalid", i.Severity)
+	}
+	switch i.Status {
+	case IncidentStatusOpen, IncidentStatusResolved, IncidentStatusPostmortem:
+	default:
+		return fmt.Errorf("incident status %q is invalid", i.Status)
+	}
+	if i.OpenedAt.IsZero() {
+		return errors.New("incident opened_at is required")
+	}
+	return nil
+}
+
+// ProvenanceSignal is a named component of a credibility score breakdown.
+// Each signal carries its raw value and a human-readable label so callers
+// can surface exactly which factors drove the trust decision.
+type ProvenanceSignal struct {
+	// Name is the signal identifier (e.g. "authority", "recency", "citations").
+	Name string `json:"name"`
+	// Value is the raw signal value before weighting (0.0–1.0 unless otherwise noted).
+	Value float64 `json:"value"`
+	// Weight is the fractional contribution of this signal to the final score.
+	Weight float64 `json:"weight"`
+	// Contribution is Value × Weight — the signal's additive share of the score.
+	Contribution float64 `json:"contribution"`
+	// Detail is a short prose note explaining the value (e.g. "3 citations", "47 days old").
+	Detail string `json:"detail,omitempty"`
+}
+
+// ProvenanceReport is the structured output of Engine.WhyTrustClaim. It
+// explains the credibility decision for a single claim in machine-readable
+// form (Signals, Score) and human-readable form (Rationale).
+type ProvenanceReport struct {
+	// ClaimID is the claim this report describes.
+	ClaimID string `json:"claim_id"`
+	// ClaimText is the verbatim claim text for display without a second lookup.
+	ClaimText string `json:"claim_text"`
+	// Score is the final credibility score (0.0–1.0) after all signals are combined.
+	Score float64 `json:"score"`
+	// Signals is the per-component breakdown in contribution-descending order.
+	Signals []ProvenanceSignal `json:"signals"`
+	// Rationale is the same compact rationale string returned by trust.ScoreCredibility.
+	Rationale string `json:"rationale"`
+	// SourceDocument is the primary source of the claim, for attribution.
+	SourceDocument string `json:"source_document,omitempty"`
+	// Liveness is the evaluated liveness status of the source at query time.
+	Liveness LivenessStatus `json:"liveness,omitempty"`
 }
 
 // Validate checks that both ClaimID and EventID are non-empty.

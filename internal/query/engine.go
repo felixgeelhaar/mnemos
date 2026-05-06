@@ -27,6 +27,8 @@ type Engine struct {
 	events          eventLister
 	claims          ports.ClaimRepository
 	relationships   ports.RelationshipRepository
+	decisions       ports.DecisionRepository
+	incidents       ports.IncidentRepository
 	embeddings      ports.EmbeddingRepository
 	embedClient     embedding.Client
 	llmClient       llm.Client
@@ -37,6 +39,20 @@ type Engine struct {
 // NewEngine returns an Engine wired to the given event, claim, and relationship stores.
 func NewEngine(events eventLister, claims ports.ClaimRepository, relationships ports.RelationshipRepository) Engine {
 	return Engine{events: events, claims: claims, relationships: relationships}
+}
+
+// WithDecisions wires a DecisionRepository so the engine can serve audit-trail
+// queries via AuditTrail.
+func (e Engine) WithDecisions(decisions ports.DecisionRepository) Engine {
+	e.decisions = decisions
+	return e
+}
+
+// WithIncidents wires an IncidentRepository so the engine can serve
+// WhyWereWeWrong analysis.
+func (e Engine) WithIncidents(incidents ports.IncidentRepository) Engine {
+	e.incidents = incidents
+	return e
 }
 
 // WithEmbeddings configures semantic search support on the engine.
@@ -82,9 +98,9 @@ func (e Engine) WithTextSearch(events, claims ports.TextSearcher) Engine {
 // disables temporal filtering entirely — callers see superseded claims
 // alongside current ones, useful for `--history` / audit views.
 type AnswerOptions struct {
-	Hops           int
-	MinTrust       float64
-	AsOf           time.Time
+	Hops     int
+	MinTrust float64
+	AsOf     time.Time
 	// RecordedAsOf is the ingestion-time axis. When non-zero, the
 	// engine drops claims with CreatedAt > RecordedAsOf so the
 	// response reproduces what the store knew as of that timestamp.
@@ -109,6 +125,18 @@ type AnswerOptions struct {
 	// filter of {Service:"payments"} matches any claim with
 	// Service="payments" regardless of Env/Team.
 	Scope domain.Scope
+	// Consumer controls contradiction handling. ConsumerAgent triggers
+	// automatic trust-based resolution (the winning claim is kept; the
+	// loser is demoted from the Claims slice). ConsumerUser surfaces
+	// contradictions with a human-readable explanation. The zero value
+	// is treated as ConsumerUser for backward compatibility.
+	Consumer domain.Consumer
+	// Visibility controls which claims the query sees.
+	//   VisibilityPersonal – only personal claims (the caller's own notes).
+	//   VisibilityTeam    – personal + team claims (default; zero value).
+	//   VisibilityOrg     – all claims: personal, team, and org-wide.
+	// The zero value is treated as VisibilityTeam for backward compatibility.
+	Visibility domain.Visibility
 }
 
 // Answer searches all stored events for the best answer to the given question.
@@ -173,6 +201,40 @@ func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents
 	if err != nil {
 		return domain.Answer{}, fmt.Errorf("load claims for query: %w", err)
 	}
+	nowUTC := time.Now().UTC()
+	for i := range claims {
+		if claims[i].LastExecuted.IsZero() {
+			claims[i].LastExecuted = trust.EffectiveExecutionTime(
+				claims[i].LastExecuted,
+				claims[i].LastVerified,
+				claims[i].ValidFrom,
+				claims[i].CreatedAt,
+			)
+		}
+		if claims[i].Liveness == "" || claims[i].Liveness == domain.LivenessUnknown {
+			claims[i].Liveness = trust.EvaluateLiveness(
+				claims[i].LastExecuted,
+				claims[i].LastVerified,
+				claims[i].ValidFrom,
+				claims[i].CreatedAt,
+				nowUTC,
+				claims[i].TrustScore,
+			)
+		}
+		score, rationale := trust.ScoreCredibility(trust.CredibilityInputs{
+			CurrentTrust:    claims[i].TrustScore,
+			SourceAuthority: claims[i].SourceAuthority,
+			Liveness:        claims[i].Liveness,
+			CitationCount:   claims[i].CitationCount,
+			LastExecuted:    claims[i].LastExecuted,
+			LastVerified:    claims[i].LastVerified,
+			ValidFrom:       claims[i].ValidFrom,
+			CreatedAt:       claims[i].CreatedAt,
+			Now:             nowUTC,
+		})
+		claims[i].TrustScore = score
+		claims[i].ProvenanceRationale = rationale
+	}
 
 	// Entity scope: if the caller restricted the answer to claims
 	// linked to a specific entity (--entity in the CLI), drop
@@ -195,6 +257,31 @@ func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents
 		filtered := make([]domain.Claim, 0, len(claims))
 		for _, c := range claims {
 			if c.Scope.Matches(opts.Scope) {
+				filtered = append(filtered, c)
+			}
+		}
+		claims = filtered
+	}
+
+	// Visibility filter: enforce workspace isolation. The zero value is
+	// treated as VisibilityTeam. Resolution is additive — each tier
+	// includes claims visible to narrower tiers:
+	//   personal → only VisibilityPersonal claims
+	//   team     → VisibilityPersonal + VisibilityTeam claims (default)
+	//   org      → all claims (no filter needed)
+	vis := opts.Visibility
+	if vis == "" {
+		vis = domain.VisibilityTeam
+	}
+	if vis != domain.VisibilityOrg {
+		allowed := visibilityAllowed(vis)
+		filtered := make([]domain.Claim, 0, len(claims))
+		for _, c := range claims {
+			cv := c.Visibility
+			if cv == "" {
+				cv = domain.VisibilityTeam
+			}
+			if allowed[cv] {
 				filtered = append(filtered, c)
 			}
 		}
@@ -291,20 +378,216 @@ func (e Engine) answerWithEvents(ctx context.Context, question string, allEvents
 		}
 	}
 
-	stale := computeStaleClaims(claims, time.Now().UTC())
+	stale := computeStaleClaims(claims, nowUTC)
+
+	// Dual-mode contradiction handling:
+	//   agent  → auto-resolve via trust scoring; demote losing claims
+	//   user   → surface contradictions with human-readable explanation
+	autoResolved := false
+	contradictionExplanation := ""
+	var verdicts []domain.Verdict
+	if len(contradictions) > 0 {
+		if opts.Consumer == domain.ConsumerAgent {
+			claims, verdicts, autoResolved = resolveContradictionsForAgent(claims, contradictions, nowUTC)
+			if autoResolved {
+				// Re-collect contradictions against the pruned claim set so
+				// the returned slice reflects reality after resolution.
+				contradictions, _ = collectContradictions(ctx, e.relationships, claims)
+			}
+		} else {
+			// Default: ConsumerUser — explain but do not resolve.
+			contradictionExplanation = buildContradictionExplanation(contradictions, claims)
+		}
+	}
+
+	// Compute confidence score for the answer.
+	confidence := computeConfidence(claims, contradictions, nowUTC)
 
 	return domain.Answer{
-		AnswerText:       answerText,
-		Claims:           claims,
-		Contradictions:   contradictions,
-		TimelineEventIDs: eventIDs,
-		ClaimProvenance:  provenance,
-		ClaimHopDistance: hopDistance,
-		StaleClaimIDs:    stale,
+		AnswerText:               answerText,
+		Claims:                   claims,
+		Contradictions:           contradictions,
+		TimelineEventIDs:         eventIDs,
+		ClaimProvenance:          provenance,
+		ClaimHopDistance:         hopDistance,
+		StaleClaimIDs:            stale,
+		AutoResolved:             autoResolved,
+		ContradictionExplanation: contradictionExplanation,
+		Verdicts:                 verdicts,
+		Confidence:               confidence,
 	}, nil
 }
 
-// computeStaleClaims returns the ids of claims whose freshness factor
+// resolveContradictionsForAgent automatically resolves contradictions using
+// structural confidence scores. For each contradicting pair:
+//   - if either claim's Confidence is below the floor (0.7) or the margin
+//     is too slim (< 0.2), TrustScore is used as a tiebreak; if the trust
+//     margin is also slim the pair is escalated;
+//   - otherwise the lower-confidence claim is demoted and a trust/update
+//     Verdict is produced with a rationale string.
+//
+// Returns the (possibly pruned) claim slice, a slice of Verdicts (one per
+// pair processed), and a bool that is true when at least one claim was demoted.
+func resolveContradictionsForAgent(claims []domain.Claim, contradictions []domain.Relationship, _ time.Time) ([]domain.Claim, []domain.Verdict, bool) {
+	const (
+		confidenceFloor  = 0.7
+		escalationMargin = 0.2
+		trustTiebreak    = 0.05 // minimum TrustScore delta to break a slim-confidence tie
+	)
+	demoted := map[string]struct{}{}
+	verdicts := make([]domain.Verdict, 0, len(contradictions))
+
+	for _, rel := range contradictions {
+		if rel.Type != domain.RelationshipTypeContradicts {
+			continue
+		}
+		var from, to *domain.Claim
+		for i := range claims {
+			if claims[i].ID == rel.FromClaimID {
+				from = &claims[i]
+			}
+			if claims[i].ID == rel.ToClaimID {
+				to = &claims[i]
+			}
+		}
+		if from == nil || to == nil {
+			continue
+		}
+
+		diff := from.Confidence - to.Confidence
+		if diff < 0 {
+			diff = -diff
+		}
+
+		// When confidence is sufficient and the margin is wide enough,
+		// resolve immediately without consulting TrustScore.
+		if from.Confidence >= confidenceFloor && to.Confidence >= confidenceFloor && diff >= escalationMargin {
+			var winner, loser *domain.Claim
+			if from.Confidence >= to.Confidence {
+				winner, loser = from, to
+			} else {
+				winner, loser = to, from
+			}
+			demoted[loser.ID] = struct{}{}
+			action := domain.VerdictActionTrust
+			if loser.TrustScore > 0.5 {
+				action = domain.VerdictActionUpdate
+			}
+			rationale := fmt.Sprintf(
+				"confidence: winner %.2f vs loser %.2f (margin %.2f); trust: winner %.2f vs loser %.2f",
+				winner.Confidence, loser.Confidence, diff,
+				winner.TrustScore, loser.TrustScore,
+			)
+			verdicts = append(verdicts, domain.Verdict{
+				WinnerClaimID: winner.ID,
+				LoserClaimID:  loser.ID,
+				Confidence:    winner.Confidence,
+				Rationale:     rationale,
+				Action:        action,
+			})
+			continue
+		}
+
+		// Slim-confidence case: use TrustScore as a tiebreak.
+		trustDiff := from.TrustScore - to.TrustScore
+		if trustDiff < 0 {
+			trustDiff = -trustDiff
+		}
+		if trustDiff < trustTiebreak {
+			// Trust delta is also too slim — escalate to human.
+			reason := fmt.Sprintf(
+				"cannot auto-resolve: confidence %.2f vs %.2f (floor %.2f, margin %.2f); trust %.2f vs %.2f (min delta %.2f)",
+				from.Confidence, to.Confidence, confidenceFloor, diff,
+				from.TrustScore, to.TrustScore, trustTiebreak,
+			)
+			verdicts = append(verdicts, domain.Verdict{
+				Action:           domain.VerdictActionEscalate,
+				EscalationReason: reason,
+			})
+			continue
+		}
+
+		// TrustScore breaks the tie.
+		var winner, loser *domain.Claim
+		if from.TrustScore >= to.TrustScore {
+			winner, loser = from, to
+		} else {
+			winner, loser = to, from
+		}
+		demoted[loser.ID] = struct{}{}
+		action := domain.VerdictActionTrust
+		if loser.TrustScore > 0.5 {
+			action = domain.VerdictActionUpdate
+		}
+		rationale := fmt.Sprintf(
+			"confidence margin slim (%.2f vs %.2f, Δ%.2f < %.2f); trust tiebreak: winner %.2f vs loser %.2f (Δ%.2f)",
+			from.Confidence, to.Confidence, diff, escalationMargin,
+			winner.TrustScore, loser.TrustScore, trustDiff,
+		)
+		verdicts = append(verdicts, domain.Verdict{
+			WinnerClaimID: winner.ID,
+			LoserClaimID:  loser.ID,
+			Confidence:    winner.Confidence,
+			Rationale:     rationale,
+			Action:        action,
+		})
+	}
+
+	if len(demoted) == 0 {
+		return claims, verdicts, false
+	}
+	pruned := make([]domain.Claim, 0, len(claims)-len(demoted))
+	for _, c := range claims {
+		if _, drop := demoted[c.ID]; !drop {
+			pruned = append(pruned, c)
+		}
+	}
+	return pruned, verdicts, true
+}
+
+// buildContradictionExplanation produces a human-readable prose summary of
+// the contradictions found in the answer, referencing each pair by claim text
+// so the reader can reason about the conflict without having to look up IDs.
+func buildContradictionExplanation(contradictions []domain.Relationship, claims []domain.Claim) string {
+	if len(contradictions) == 0 {
+		return ""
+	}
+	byID := make(map[string]domain.Claim, len(claims))
+	for _, c := range claims {
+		byID[c.ID] = c
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d contradiction(s) detected:\n", len(contradictions))
+	for i, rel := range contradictions {
+		from, fOk := byID[rel.FromClaimID]
+		to, tOk := byID[rel.ToClaimID]
+		if !fOk || !tOk {
+			fmt.Fprintf(&b, "  %d. Claim %s contradicts claim %s (details unavailable).\n", i+1, rel.FromClaimID, rel.ToClaimID)
+			continue
+		}
+		fmt.Fprintf(&b, "  %d. %q (trust: %.2f) contradicts %q (trust: %.2f).",
+			i+1, from.Text, from.TrustScore, to.Text, to.TrustScore)
+		diff := from.TrustScore - to.TrustScore
+		if diff < 0 {
+			diff = -diff
+		}
+		confDiff := from.Confidence - to.Confidence
+		if confDiff < 0 {
+			confDiff = -confDiff
+		}
+		switch {
+		case from.Confidence < 0.7 || to.Confidence < 0.7 || confDiff < 0.2:
+			b.WriteString(" Confidence too low or margin too slim for automatic resolution — human review recommended.")
+		case from.TrustScore > to.TrustScore:
+			fmt.Fprintf(&b, " The first claim has higher trust (Δ%.2f).", diff)
+		default:
+			fmt.Fprintf(&b, " The second claim has higher trust (Δ%.2f).", diff)
+		}
+		b.WriteString("\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 // has decayed below the trust floor. The reference timestamp is the
 // later of LastVerified and ValidFrom (validFrom is set from the
 // source event timestamp by the pipeline, so it doubles as a
@@ -322,6 +605,66 @@ func computeStaleClaims(claims []domain.Claim, now time.Time) []string {
 		}
 	}
 	return out
+}
+
+// computeConfidence returns a 0–1 score indicating how confident the system
+// is in the answer, based on evidence quality:
+//   - average trust score of claims (higher is better)
+//   - citation density (more claims = more evidence)
+//   - contradiction penalty (presence of unresolved contradictions reduces confidence)
+//   - recency (fresher claims = higher confidence)
+//
+// A value ≥ 0.9 means the answer is "never wrong on recall" grade.
+func computeConfidence(claims []domain.Claim, contradictions []domain.Relationship, now time.Time) float64 {
+	if len(claims) == 0 {
+		return 0.0
+	}
+
+	// 1. Average trust score (weight: 0.4)
+	var trustSum float64
+	for _, c := range claims {
+		trustSum += c.TrustScore
+	}
+	avgTrust := trustSum / float64(len(claims))
+
+	// 2. Citation density bonus (weight: 0.2)
+	// More claims = more evidence, but with diminishing returns.
+	densityScore := math.Min(float64(len(claims))/5.0, 1.0)
+
+	// 3. Contradiction penalty (weight: 0.3)
+	// Each contradiction reduces confidence; max penalty for 3+ contradictions.
+	contradictionPenalty := math.Min(float64(len(contradictions))*0.1, 0.3)
+
+	// 4. Recency bonus (weight: 0.1)
+	// Fresher claims = higher confidence.
+	var ageSum float64
+	for _, c := range claims {
+		lastActive := c.LastVerified
+		if lastActive.IsZero() || c.ValidFrom.After(lastActive) {
+			lastActive = c.ValidFrom
+		}
+		if lastActive.IsZero() {
+			lastActive = c.CreatedAt
+		}
+		ageHours := now.Sub(lastActive).Hours()
+		if ageHours < 0 {
+			ageHours = 0
+		}
+		// Claims younger than 24h → 1.0, older than 30 days → 0.0
+		ageScore := 1.0 - math.Min(ageHours/(30*24), 1.0)
+		ageSum += ageScore
+	}
+	avgRecency := ageSum / float64(len(claims))
+
+	// Weighted combination.
+	confidence := avgTrust*0.4 + densityScore*0.2 - contradictionPenalty + avgRecency*0.1
+	if confidence < 0 {
+		confidence = 0
+	}
+	if confidence > 1 {
+		confidence = 1
+	}
+	return confidence
 }
 
 // expandClaimsByHops does a BFS through the relationship graph from the
@@ -1066,4 +1409,499 @@ func countRemoteClaims(claims []domain.Claim, provenance map[string]string) int 
 		}
 	}
 	return n
+}
+
+// AuditEntry is a single row in an AuditTrail report: the decision that went
+// wrong, the claim IDs that underpinned it, and the outcome that falsified it.
+type AuditEntry struct {
+	Decision        domain.Decision
+	RefutedBeliefs  []string
+	FailedOutcomeID string
+}
+
+// AuditTrailOptions controls which decisions appear in the audit trail.
+// All fields are optional — the zero value returns every decision that has
+// a non-empty FailedOutcomeID (i.e. decisions that were later refuted).
+type AuditTrailOptions struct {
+	// Service, when non-empty, restricts results to decisions whose
+	// Scope.Service matches the filter (case-sensitive). Empty means all services.
+	Service string
+	// IncludeSuccessful, when true, also returns decisions that have no
+	// FailedOutcomeID (decisions that were never falsified). Default false
+	// so the audit trail focuses on actionable failures.
+	IncludeSuccessful bool
+	// RiskLevel, when non-empty, restricts results to the given risk level
+	// ("low", "medium", "high", "critical"). Empty means all risk levels.
+	RiskLevel string
+}
+
+// AuditTrail returns the set of decisions that were later refuted by a failed
+// outcome, optionally filtered by service and/or risk level. It requires that
+// WithDecisions was called; if no DecisionRepository is wired it returns an
+// error.
+func (e Engine) AuditTrail(ctx context.Context, opts AuditTrailOptions) ([]AuditEntry, error) {
+	if e.decisions == nil {
+		return nil, fmt.Errorf("query.Engine: AuditTrail called but no DecisionRepository is wired — call WithDecisions first")
+	}
+
+	var decisions []domain.Decision
+	var err error
+
+	switch {
+	case opts.RiskLevel != "":
+		decisions, err = e.decisions.ListByRiskLevel(ctx, opts.RiskLevel)
+	default:
+		decisions, err = e.decisions.ListAll(ctx)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query.Engine: AuditTrail: listing decisions: %w", err)
+	}
+
+	entries := make([]AuditEntry, 0, len(decisions))
+	for _, d := range decisions {
+		if opts.Service != "" && d.Scope.Service != opts.Service { //nolint:gocritic
+			continue
+		}
+		if !opts.IncludeSuccessful && d.FailedOutcomeID == "" {
+			continue
+		}
+		entries = append(entries, AuditEntry{
+			Decision:        d,
+			RefutedBeliefs:  d.RefutedBeliefs,
+			FailedOutcomeID: d.FailedOutcomeID,
+		})
+	}
+	return entries, nil
+}
+
+// WhyWereWeWrongReport is the structured result of a WhyWereWeWrong
+// analysis. It bundles the incident, the root-cause claim with its full
+// provenance breakdown, the decisions that relied on that claim, and a
+// plain-English explanation of what went wrong epistemically.
+type WhyWereWeWrongReport struct {
+	// Incident is the incident under analysis.
+	Incident domain.Incident
+	// RootClaim is the claim that turned out to be wrong. Nil when
+	// the incident has no RootCauseClaimID or the claim is not found.
+	RootClaim *domain.ProvenanceReport
+	// AffectedDecisions are the decisions that were built on the
+	// wrong belief, hydrated from the incident's DecisionIDs.
+	AffectedDecisions []domain.Decision
+	// Explanation is a short prose summary suitable for display.
+	Explanation string
+}
+
+// WhyWereWeWrong performs a post-incident epistemic analysis: given an
+// incident ID it fetches the incident, loads the root-cause claim's full
+// provenance, and surfaces all decisions that were grounded in that claim.
+// This drives the "Why were we wrong?" dashboard and anti-lesson synthesis.
+//
+// Requires WithIncidents and WithDecisions to be called; returns an error
+// if either is missing.
+func (e Engine) WhyWereWeWrong(ctx context.Context, incidentID string) (WhyWereWeWrongReport, error) {
+	if e.incidents == nil {
+		return WhyWereWeWrongReport{}, fmt.Errorf("query.Engine: WhyWereWeWrong called but no IncidentRepository is wired — call WithIncidents first")
+	}
+	if e.decisions == nil {
+		return WhyWereWeWrongReport{}, fmt.Errorf("query.Engine: WhyWereWeWrong called but no DecisionRepository is wired — call WithDecisions first")
+	}
+
+	incident, found, err := e.incidents.GetByID(ctx, incidentID)
+	if err != nil {
+		return WhyWereWeWrongReport{}, fmt.Errorf("WhyWereWeWrong: load incident %s: %w", incidentID, err)
+	}
+	if !found {
+		return WhyWereWeWrongReport{}, fmt.Errorf("WhyWereWeWrong: incident %s not found", incidentID)
+	}
+
+	report := WhyWereWeWrongReport{Incident: incident}
+
+	// Load root-cause claim provenance.
+	if incident.RootCauseClaimID != "" {
+		prov, err := e.WhyTrustClaim(ctx, incident.RootCauseClaimID)
+		if err == nil {
+			report.RootClaim = &prov
+		}
+		// If the claim is not found we proceed without it — the incident
+		// may have been opened with a forward reference to a claim not
+		// yet ingested.
+	}
+
+	// Hydrate affected decisions.
+	for _, did := range incident.DecisionIDs {
+		d, err := e.decisions.ListAll(ctx) // narrow below
+		if err != nil {
+			return WhyWereWeWrongReport{}, fmt.Errorf("WhyWereWeWrong: list decisions: %w", err)
+		}
+		for _, dec := range d {
+			if dec.ID == did {
+				report.AffectedDecisions = append(report.AffectedDecisions, dec)
+				break
+			}
+		}
+	}
+
+	report.Explanation = buildWWWExplanation(report)
+	return report, nil
+}
+
+// buildWWWExplanation produces a plain-English summary of the
+// WhyWereWeWrong analysis. Called after all fields are populated.
+func buildWWWExplanation(r WhyWereWeWrongReport) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Incident %q (%s severity, %s): %s",
+		r.Incident.Title, r.Incident.Severity, r.Incident.Status, r.Incident.Summary)
+
+	if r.RootClaim != nil {
+		fmt.Fprintf(&b, "\n\nThe root-cause claim was: %q (trust score %.2f). %s",
+			r.RootClaim.ClaimText, r.RootClaim.Score, r.RootClaim.Rationale)
+	} else if r.Incident.RootCauseClaimID != "" {
+		fmt.Fprintf(&b, "\n\nRoot-cause claim ID: %s (claim not found in store).",
+			r.Incident.RootCauseClaimID)
+	}
+
+	if len(r.AffectedDecisions) > 0 {
+		fmt.Fprintf(&b, "\n\n%d decision(s) relied on this belief:", len(r.AffectedDecisions))
+		for _, d := range r.AffectedDecisions {
+			fmt.Fprintf(&b, "\n  • [%s] %s (risk: %s)", d.ID, d.Statement, d.RiskLevel)
+		}
+	}
+
+	return b.String()
+}
+
+// visibilityAllowed returns the set of Visibility values a caller at the given
+// tier may see. The tier is additive: team callers see personal + team claims;
+// personal callers see only their own personal claims.
+func visibilityAllowed(vis domain.Visibility) map[domain.Visibility]bool {
+	switch vis {
+	case domain.VisibilityPersonal:
+		return map[domain.Visibility]bool{
+			domain.VisibilityPersonal: true,
+		}
+	default: // VisibilityTeam and anything unexpected
+		return map[domain.Visibility]bool{
+			domain.VisibilityPersonal: true,
+			domain.VisibilityTeam:     true,
+		}
+	}
+}
+
+// WhyTrustClaim builds a ProvenanceReport for the given claim ID: it fetches
+// the claim, re-runs ScoreCredibility with per-signal breakdown, and returns
+// a machine-readable + human-readable explanation of the trust decision.
+//
+// Returns domain.ErrNotFound (wrapped) if the claim does not exist.
+func (e Engine) WhyTrustClaim(ctx context.Context, claimID string) (domain.ProvenanceReport, error) {
+	claims, err := e.claims.ListByIDs(ctx, []string{claimID})
+	if err != nil {
+		return domain.ProvenanceReport{}, fmt.Errorf("WhyTrustClaim: load claim %s: %w", claimID, err)
+	}
+	if len(claims) == 0 {
+		return domain.ProvenanceReport{}, fmt.Errorf("WhyTrustClaim: claim %s not found", claimID)
+	}
+	c := claims[0]
+
+	nowUTC := time.Now().UTC()
+	if c.LastExecuted.IsZero() {
+		c.LastExecuted = trust.EffectiveExecutionTime(c.LastExecuted, c.LastVerified, c.ValidFrom, c.CreatedAt)
+	}
+	if c.Liveness == "" || c.Liveness == domain.LivenessUnknown {
+		c.Liveness = trust.EvaluateLiveness(c.LastExecuted, c.LastVerified, c.ValidFrom, c.CreatedAt, nowUTC, c.TrustScore)
+	}
+
+	in := trust.CredibilityInputs{
+		CurrentTrust:    c.TrustScore,
+		SourceAuthority: c.SourceAuthority,
+		Liveness:        c.Liveness,
+		CitationCount:   c.CitationCount,
+		LastExecuted:    c.LastExecuted,
+		LastVerified:    c.LastVerified,
+		ValidFrom:       c.ValidFrom,
+		CreatedAt:       c.CreatedAt,
+		Now:             nowUTC,
+	}
+	score, rationale := trust.ScoreCredibility(in)
+
+	signals := provenanceSignals(in, score)
+
+	return domain.ProvenanceReport{
+		ClaimID:        c.ID,
+		ClaimText:      c.Text,
+		Score:          score,
+		Signals:        signals,
+		Rationale:      rationale,
+		SourceDocument: c.SourceDocument,
+		Liveness:       c.Liveness,
+	}, nil
+}
+
+// provenanceSignals reconstructs the per-signal breakdown that ScoreCredibility
+// uses internally, so WhyTrustClaim can return it as structured data. The
+// weights and formulas here must stay in sync with credibility.go.
+func provenanceSignals(in trust.CredibilityInputs, _ float64) []domain.ProvenanceSignal {
+	now := in.Now
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+
+	base := clamp01(in.CurrentTrust)
+	if base == 0 {
+		base = 0.5
+	}
+	authority := clamp01(in.SourceAuthority)
+	if in.SourceAuthority == 0 {
+		authority = 0.5
+	}
+	citationSignal := clamp01(math.Log1p(float64(maxInt(0, in.CitationCount))) / math.Log(11))
+	ref := trust.EffectiveExecutionTime(in.LastExecuted, in.LastVerified, in.ValidFrom, in.CreatedAt)
+	recencySignal := 0.5
+	if !ref.IsZero() {
+		days := now.Sub(ref).Hours() / 24
+		if days < 0 {
+			days = 0
+		}
+		recencySignal = clamp01(math.Exp(-days / 180.0))
+	}
+	livenessSignal := livenessWeight(in.Liveness)
+	agentFactor := 1.0
+	if in.AgentAuthority > 0 {
+		agentFactor = clamp01(in.AgentAuthority)
+	}
+
+	const (
+		wBase      = 0.55
+		wAuthority = 0.15
+		wCitation  = 0.15
+		wRecency   = 0.10
+		wLiveness  = 0.05
+	)
+
+	signals := []domain.ProvenanceSignal{
+		{
+			Name:         "base_trust",
+			Value:        base,
+			Weight:       wBase,
+			Contribution: base * wBase,
+			Detail:       fmt.Sprintf("stored trust score %.2f (0.5 when unset)", in.CurrentTrust),
+		},
+		{
+			Name:         "authority",
+			Value:        authority,
+			Weight:       wAuthority,
+			Contribution: authority * wAuthority,
+			Detail:       fmt.Sprintf("source authority %.2f (0.5 when unset)", in.SourceAuthority),
+		},
+		{
+			Name:         "citations",
+			Value:        citationSignal,
+			Weight:       wCitation,
+			Contribution: citationSignal * wCitation,
+			Detail:       fmt.Sprintf("%d citation(s)", in.CitationCount),
+		},
+		{
+			Name:         "recency",
+			Value:        recencySignal,
+			Weight:       wRecency,
+			Contribution: recencySignal * wRecency,
+			Detail:       recencyDetail(ref, now),
+		},
+		{
+			Name:         "liveness",
+			Value:        livenessSignal,
+			Weight:       wLiveness,
+			Contribution: livenessSignal * wLiveness,
+			Detail:       string(in.Liveness),
+		},
+	}
+
+	if agentFactor != 1.0 {
+		signals = append(signals, domain.ProvenanceSignal{
+			Name:         "agent_authority",
+			Value:        agentFactor,
+			Weight:       0, // multiplicative, not additive — weight doesn't apply
+			Contribution: 0,
+			Detail:       fmt.Sprintf("multiplicative factor %.2f from agent authority score", agentFactor),
+		})
+	}
+
+	// Sort by contribution descending so the most influential signal is first.
+	sort.Slice(signals, func(i, j int) bool {
+		return signals[i].Contribution > signals[j].Contribution
+	})
+	return signals
+}
+
+func recencyDetail(ref, now time.Time) string {
+	if ref.IsZero() {
+		return "no reference timestamp available"
+	}
+	days := now.Sub(ref).Hours() / 24
+	if days < 0 {
+		days = 0
+	}
+	return fmt.Sprintf("%.0f days since last evidence", days)
+}
+
+// clamp01 and maxInt are local helpers mirroring the ones in trust/credibility.go.
+// Duplicating them avoids an internal package dependency inversion.
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// livenessWeight mirrors trust.livenessWeight without importing an unexported
+// symbol. Must stay in sync with trust/credibility.go.
+func livenessWeight(s domain.LivenessStatus) float64 {
+	switch s {
+	case domain.LivenessLive:
+		return 1.0
+	case domain.LivenessStale:
+		return 0.75
+	case domain.LivenessZombie:
+		return 0.65
+	case domain.LivenessDead:
+		return 0.25
+	default:
+		return 0.5
+	}
+}
+
+// MemoryQualityMetrics holds telemetry about the current memory store health.
+type MemoryQualityMetrics struct {
+	TotalClaims        int
+	AvgTrustScore      float64
+	AvgConfidence      float64
+	StaleCount         int
+	ContestedCount     int
+	ContradictionCount int
+	AvgCitationCount   float64
+}
+
+// ComputeMemoryQuality scans all claims and returns quality telemetry.
+// This is the "memory-quality telemetry" sub-task of reliability-first recall.
+func (e Engine) ComputeMemoryQuality(ctx context.Context) (MemoryQualityMetrics, error) {
+	claims, err := e.claims.ListAll(ctx)
+	if err != nil {
+		return MemoryQualityMetrics{}, fmt.Errorf("compute memory quality: %w", err)
+	}
+	if len(claims) == 0 {
+		return MemoryQualityMetrics{}, nil
+	}
+
+	var trustSum, confSum, citSum float64
+	staleCount, contestedCount := 0, 0
+	for _, c := range claims {
+		trustSum += c.TrustScore
+		confSum += c.Confidence
+		citSum += float64(c.CitationCount)
+		if c.Status == domain.ClaimStatusContested {
+			contestedCount++
+		}
+	}
+	// Get contradiction count.
+	rels, err := e.relationships.ListAll(ctx)
+	if err != nil {
+		return MemoryQualityMetrics{}, fmt.Errorf("compute memory quality: %w", err)
+	}
+	contradictionCount := 0
+	for _, r := range rels {
+		if r.Type == domain.RelationshipTypeContradicts {
+			contradictionCount++
+		}
+	}
+
+	return MemoryQualityMetrics{
+		TotalClaims:        len(claims),
+		AvgTrustScore:      trustSum / float64(len(claims)),
+		AvgConfidence:      confSum / float64(len(claims)),
+		StaleCount:         staleCount,
+		ContestedCount:     contestedCount,
+		ContradictionCount: contradictionCount,
+		AvgCitationCount:   citSum / float64(len(claims)),
+	}, nil
+}
+
+// EscalateClaimForAgent is trigger-3 escalation: an agent has determined it
+// cannot proceed and explicitly requests a human decision on a specific claim.
+// It records the request as a Verdict with Action=escalate and the
+// agent-provided reason verbatim, so the audit trail captures who escalated
+// and why.  The claim must exist; if not found an error is returned.
+func (e Engine) EscalateClaimForAgent(ctx context.Context, claimID, agentReason string) (domain.Verdict, error) {
+	claims, err := e.claims.ListByIDs(ctx, []string{claimID})
+	if err != nil {
+		return domain.Verdict{}, fmt.Errorf("escalate claim %q: %w", claimID, err)
+	}
+	if len(claims) == 0 {
+		return domain.Verdict{}, fmt.Errorf("escalate claim %q: not found", claimID)
+	}
+	c := claims[0]
+	reason := agentReason
+	if reason == "" {
+		reason = "agent-requested escalation (no reason provided)"
+	}
+	return domain.Verdict{
+		WinnerClaimID:    c.ID,
+		LoserClaimID:     "",
+		Confidence:       c.Confidence,
+		Rationale:        fmt.Sprintf("agent explicitly escalated claim %q: %s", c.ID, reason),
+		Action:           domain.VerdictActionEscalate,
+		EscalationReason: reason,
+	}, nil
+}
+
+// SLOThresholds defines the reliability-first SLOs for rollout guardrails.
+type SLOThresholds struct {
+	MinRecallPassRate  float64 // recall_pass_rate must be >= this
+	MinConfidenceAvg  float64 // avg confidence must be >= this
+	MaxStaleRatio     float64 // stale claims / total must be <= this
+}
+
+var DefaultSLOs = SLOThresholds{
+	MinRecallPassRate:  0.95, // "never wrong on recall" = 95%+
+	MinConfidenceAvg:  0.6,  // reasonably confident answers
+	MaxStaleRatio:     0.1,  // at most 10% stale claims
+}
+
+// CheckSLOs evaluates the current memory quality against SLO thresholds.
+// Returns a list of violation strings (empty when all SLOs pass).
+func (e Engine) CheckSLOs(ctx context.Context, slo SLOThresholds) ([]string, error) {
+	metrics, err := e.ComputeMemoryQuality(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("check SLOs: %w", err)
+	}
+	var violations []string
+
+	// Recall pass rate is only meaningful when we have benchmark results.
+	// This is a placeholder — in practice, the benchmark harness
+	// writes results to benchmarks/results/ and CI checks them.
+	// The SLO check here focuses on memory-store health.
+
+	if metrics.TotalClaims > 0 {
+		staleRatio := float64(metrics.StaleCount) / float64(metrics.TotalClaims)
+		if staleRatio > slo.MaxStaleRatio {
+			violations = append(violations,
+				fmt.Sprintf("stale_ratio %.2f > %.2f (stale: %d / total: %d)",
+					staleRatio, slo.MaxStaleRatio, metrics.StaleCount, metrics.TotalClaims))
+		}
+	}
+
+	if metrics.AvgConfidence < slo.MinConfidenceAvg {
+		violations = append(violations,
+			fmt.Sprintf("avg_confidence %.3f < %.3f", metrics.AvgConfidence, slo.MinConfidenceAvg))
+	}
+
+	return violations, nil
 }

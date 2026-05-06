@@ -20,6 +20,9 @@ dist/
 *.out
 coverage.txt
 
+# Benchmark run artifacts
+benchmarks/results/*.json
+
 # Local databases
 *.db
 

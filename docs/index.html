@@ -30,8 +30,8 @@
 <main id="main" class="wrap">
 
 <section class="hero">
-  <p class="kicker">For AI product and platform teams with data residency, auditability, or on-prem requirements.</p>
-  <h1>The memory layer for <span class="accent">high-trust AI products.</span></h1>
+  <p class="kicker">For AI product and platform teams that need private, auditable memory.</p>
+  <h1>Ship AI memory your team can <span class="accent">defend in production.</span></h1>
   <p class="lede">
     Mnemos is self-hosted memory infrastructure for AI apps. Keep data
     in your environment, preserve evidence per claim, surface contradictions
@@ -39,9 +39,9 @@
     No managed vendor dependency required.
   </p>
   <div class="cta-row">
-    <a class="cta primary" href="#run">Run locally in 5 minutes</a>
+    <a class="cta primary" href="#run">Try it locally in 5 minutes</a>
     <a class="cta" href="https://github.com/felixgeelhaar/mnemos" aria-label="View Mnemos on GitHub">View on GitHub</a>
-    <a class="cta ghost" href="mailto:felix.geelhaar@gmail.com?subject=Mnemos%20Design%20Partner">Become a design partner</a>
+    <a class="cta ghost" href="mailto:felix.geelhaar@gmail.com?subject=Mnemos%20Design%20Partner">Talk to the maintainer</a>
   </div>
   <div class="use-cases">
     <div><p><strong>Own your memory infrastructure</strong>Single Go binary, MIT license, and storage in your stack.</p></div>
@@ -240,7 +240,7 @@ $ mnemos query --at 2026-05-01 "What happened with the deployment?"
 
 <section id="run" aria-labelledby="run-heading">
   <p class="kicker">Run it</p>
-  <h2 id="run-heading">From install to first contradiction check in about five minutes.</h2>
+  <h2 id="run-heading">From install to first contradiction check in under five minutes.</h2>
   <pre><code>brew install felixgeelhaar/tap/mnemos
 # or: go install github.com/felixgeelhaar/mnemos/cmd/mnemos@latest
 
@@ -284,6 +284,29 @@ curl -s "http://localhost:7777/v1/events?run_id=&lt;run-id&gt;" | jq</code></pre
     defensible audit trail. Source:
     <a href="https://github.com/felixgeelhaar/mnemos/tree/main/examples/refund_triage_langgraph"><code>examples/refund_triage_langgraph/</code></a>.
   </p>
+</section>
+
+<section id="faq" aria-labelledby="faq-heading">
+  <p class="kicker">FAQ</p>
+  <h2 id="faq-heading">Common rollout questions</h2>
+  <div class="cols">
+    <div class="card">
+      <h3>Do I need an LLM API key to start?</h3>
+      <p>No. Ingest, extraction, contradiction detection, evidence linking, and replay work offline. Add an LLM later for grounded natural-language answers.</p>
+    </div>
+    <div class="card">
+      <h3>Can we keep data fully in our environment?</h3>
+      <p>Yes. Mnemos is self-hosted. You choose backend and network boundaries. Nothing requires vendor cloud by default.</p>
+    </div>
+    <div class="card">
+      <h3>How hard is migration from a hosted memory API?</h3>
+      <p>Most teams start by dual-writing events for one workflow, validate replay/audit quality, then switch reads after confidence checks pass.</p>
+    </div>
+    <div class="card">
+      <h3>What is the operational burden?</h3>
+      <p>Single Go binary, SQLite by default. Move to Postgres/MySQL/libSQL when you need shared infra and stronger operational controls.</p>
+    </div>
+  </div>
 </section>
 
 <section id="stack" aria-labelledby="stack-heading">

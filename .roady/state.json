@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 144,
+  "version": 214,
   "task_states": {
     "task-action-outcome-recording": {
       "status": "done",
@@ -12,6 +12,39 @@
       "started_at": "2026-05-01T10:26:20.332954+02:00",
       "completed_at": "2026-05-01T10:49:30.47828+02:00",
       "elapsed_minutes": 23
+    },
+    "task-agent-authority-model": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "AuthorityScore+SuccessRate+VerificationCount on domain.Agent; ScoreWithAuthority in trust.go; AgentAuthority on CredibilityInputs wired into ScoreCredibility; 4 new trust tests + 4 new credibility tests all green; make test 30 packages pass"
+      ],
+      "started_at": "2026-05-04T16:28:33.252598+02:00",
+      "completed_at": "2026-05-04T16:31:03.790904+02:00",
+      "elapsed_minutes": 2
+    },
+    "task-agent-self-healing": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "handleAgentHeal in cmd/mnemos/agents.go; dispatched via mnemos agent heal --claim \u003cid\u003e --statement \"\u003cnew truth\u003e\" [--reason \"...\"] [--json]; fetches claim, updates Text, UpsertWithReason, calls WhyTrustClaim for updated trust score; 3 tests in cmd/mnemos/agents_heal_test.go all pass; make check green."
+      ],
+      "started_at": "2026-05-05T12:19:09.941991+02:00",
+      "completed_at": "2026-05-05T12:19:17.24976+02:00",
+      "elapsed_minutes": 0
+    },
+    "task-anti-lesson-synthesis": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "make check green: 0 lint issues, all 30 packages pass. LessonPolarity type + constants in domain; Polarity field on Lesson; clusterPolarity + composeStatement in synthesize/engine.go; polarity column in schema v11 (schema.sql + db.go); sqlcgen regenerated; memory + sqlite stores updated; 3 new tests pass."
+      ],
+      "started_at": "2026-05-04T17:16:40.691928+02:00",
+      "completed_at": "2026-05-04T17:23:04.388742+02:00",
+      "elapsed_minutes": 6
     },
     "task-append-only-event-store": {
       "status": "done",
@@ -36,10 +69,25 @@
       "elapsed_minutes": 2
     },
     "task-bi-temporal-claim-model": {
-      "status": "in_progress",
+      "status": "done",
       "path": "",
       "owner": "ai-agent",
+      "evidence": [
+        "commit b9a84e8 — recorded_as_of axis exposed via AnswerOptions, /v1/claims, /v1/search, --recorded-at CLI flag. Existing CreatedAt + ValidFrom/ValidTo are the bi-temporal axes; OpenAPI documents the model."
+      ],
       "started_at": "2026-05-04T09:00:39.558046+02:00",
+      "completed_at": "2026-05-04T09:19:31.0092+02:00",
+      "elapsed_minutes": 18
+    },
+    "task-build-test-verify": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "make build succeeded; make test succeeded after schema version/migration updates in sqlite db bootstrap"
+      ],
+      "started_at": "2026-05-04T14:31:19.732586+02:00",
+      "completed_at": "2026-05-04T14:31:27.426799+02:00",
       "elapsed_minutes": 0
     },
     "task-causal-relationship-edges": {
@@ -52,6 +100,17 @@
       "started_at": "2026-05-01T10:11:05.444231+02:00",
       "completed_at": "2026-05-01T10:21:11.950419+02:00",
       "elapsed_minutes": 10
+    },
+    "task-citation-graph-tracking": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Implemented first-class citation edges via RelationshipTypeCites; Detect and DetectIncremental now emit directed cites edges from explicit claim-id references; added tests for batch and incremental citation detection; make build + make test passing"
+      ],
+      "started_at": "2026-05-04T14:32:40.169127+02:00",
+      "completed_at": "2026-05-04T14:36:38.627322+02:00",
+      "elapsed_minutes": 3
     },
     "task-claim-extraction-engine": {
       "status": "done",
@@ -86,6 +145,39 @@
       "completed_at": "2026-04-17T22:30:25.882726+02:00",
       "elapsed_minutes": 0
     },
+    "task-claim-provenance-model": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Claim provenance model wired end-to-end across schema, migration, sqlc, repository reads/writes, and tests"
+      ],
+      "started_at": "2026-05-04T12:54:05.079175+02:00",
+      "completed_at": "2026-05-04T14:29:32.95962+02:00",
+      "elapsed_minutes": 95
+    },
+    "task-claim-repo-scan-update": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "scanClaim now scans and parses source/liveness/citation/provenance columns and maps them to domain.Claim"
+      ],
+      "started_at": "2026-05-04T14:30:37.265844+02:00",
+      "completed_at": "2026-05-04T14:31:11.420415+02:00",
+      "elapsed_minutes": 0
+    },
+    "task-claim-repo-upsert-update": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "claim_repository upsertWithReason now passes all provenance fields, including optional last_executed formatting"
+      ],
+      "started_at": "2026-05-04T14:30:23.304221+02:00",
+      "completed_at": "2026-05-04T14:30:29.317694+02:00",
+      "elapsed_minutes": 0
+    },
     "task-cli-query-interface": {
       "status": "done",
       "path": "",
@@ -96,6 +188,17 @@
       "started_at": "2026-04-12T13:04:03.273488+02:00",
       "completed_at": "2026-04-12T13:06:33.280868+02:00",
       "elapsed_minutes": 2
+    },
+    "task-confidence-weighted-resolution": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "make check green: fmt+vet+lint+test+build all pass; TrustScore tiebreak + WhyTrustClaim + /v1/claims/:id/provenance + --why-trust CLI shipped; slim-margin tests updated to reflect new two-stage escalation contract"
+      ],
+      "started_at": "2026-05-05T10:13:45.264566+02:00",
+      "completed_at": "2026-05-05T10:24:32.39147+02:00",
+      "elapsed_minutes": 10
     },
     "task-context-block-api-for-chat-agents": {
       "status": "done",
@@ -130,6 +233,17 @@
       "completed_at": "2026-04-18T09:03:24.310433+02:00",
       "elapsed_minutes": 11
     },
+    "task-decision-audit-trail": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Completed in previous session: schema v12, all 4 store impls, AuditTrail(), --why-wrong flag, 5 tests, make check green"
+      ],
+      "started_at": "2026-05-04T18:26:59.88655+02:00",
+      "completed_at": "2026-05-05T09:17:57.434306+02:00",
+      "elapsed_minutes": 890
+    },
     "task-decision-memory": {
       "status": "done",
       "path": "",
@@ -151,6 +265,17 @@
       "started_at": "2026-04-12T11:05:47.064027+02:00",
       "completed_at": "2026-04-12T11:05:51.209434+02:00",
       "elapsed_minutes": 0
+    },
+    "task-dual-mode-resolution": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "All 30 packages green. Consumer field on AnswerOptions; agent path uses Confidence for floor+margin checks; user path builds prose explanation; 4 new tests pass; searchRequest/searchResponse wired in HTTP handler."
+      ],
+      "started_at": "2026-05-04T17:50:23.526937+02:00",
+      "completed_at": "2026-05-04T18:01:33.40893+02:00",
+      "elapsed_minutes": 11
     },
     "task-enterprise-integration-adapters": {
       "status": "done",
@@ -184,6 +309,22 @@
       "started_at": "2026-05-04T08:39:32.236421+02:00",
       "completed_at": "2026-05-04T08:50:53.708063+02:00",
       "elapsed_minutes": 11
+    },
+    "task-epistemic-provenance-\u0026-claim-trust-framework": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
+    "task-escalation-mechanism": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Triggers 1+2 already shipped; trigger 3 (agent-explicit) added via EscalateClaimForAgent in engine.go and memory_escalate MCP tool in mcp.go; tests pass; make check green"
+      ],
+      "started_at": "2026-05-05T13:51:10.647508+02:00",
+      "completed_at": "2026-05-05T13:51:15.615737+02:00",
+      "elapsed_minutes": 0
     },
     "task-file-watch-mcp-tool": {
       "status": "done",
@@ -284,6 +425,17 @@
       "completed_at": "2026-05-04T07:29:11.737516+02:00",
       "elapsed_minutes": 4
     },
+    "task-incident-entity": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "make check green: 0 lint issues, all packages pass. Incident domain type + Validate(); schema v13 incidents table; IncidentRepository interface; SQLite + memory implementations; Incidents wired into store.Conn; Engine.WithIncidents + WhyWereWeWrong + WhyWereWeWrongReport; HTTP handlers (POST/GET /v1/incidents, GET/POST /v1/incidents/:id, POST /v1/incidents/:id/resolve, GET /v1/incidents/:id/why-wrong); CLI incident subcommand; 9 SQLite repo tests + 7 engine tests all green."
+      ],
+      "started_at": "2026-05-05T10:24:53.091624+02:00",
+      "completed_at": "2026-05-05T12:13:11.04108+02:00",
+      "elapsed_minutes": 108
+    },
     "task-knowledge-browsing-mcp-tools": {
       "status": "done",
       "path": "",
@@ -316,6 +468,17 @@
       "started_at": "2026-05-01T10:50:12.255484+02:00",
       "completed_at": "2026-05-01T10:57:28.101994+02:00",
       "elapsed_minutes": 7
+    },
+    "task-liveness-detection": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Added trust liveness evaluator (live/stale/zombie/dead/unknown), effective execution timestamp selection, query-time liveness inference for claims, and tests; full build/test passing"
+      ],
+      "started_at": "2026-05-04T14:36:48.233392+02:00",
+      "completed_at": "2026-05-04T14:38:36.809158+02:00",
+      "elapsed_minutes": 1
     },
     "task-llm-powered-claim-extraction": {
       "status": "done",
@@ -559,12 +722,27 @@
       "completed_at": "2026-04-17T22:29:27.167939+02:00",
       "elapsed_minutes": 0
     },
-    "task-published-cross-product-benchmarks-(locomo-+-longmemeval)": {
-      "status": "in_progress",
+    "task-provenance-markdown-export": {
+      "status": "done",
       "path": "",
       "owner": "ai-agent",
-      "started_at": "2026-05-04T08:57:09.015877+02:00",
+      "evidence": [
+        "ExportClaim in internal/markdown/markdown.go; --kind=claim in handleExport; GET /v1/claims/:id/export.md; 10 tests all pass; make check green"
+      ],
+      "started_at": "2026-05-05T13:51:10.484065+02:00",
+      "completed_at": "2026-05-05T13:51:15.090036+02:00",
       "elapsed_minutes": 0
+    },
+    "task-published-cross-product-benchmarks-(locomo-+-longmemeval)": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "benchmarks/suites/locomo.py + longmemeval.py already existed as scaffold; MnemosProvider rewritten with local-binary mode + claim-text answer fallback; all three suites run against mnemos with F1=1.0 on seed cases; RESULTS.md regenerated with per-case detail tables for all suites; summarize.py handles both contradiction and QA case schemas; make check green"
+      ],
+      "started_at": "2026-05-04T08:57:09.015877+02:00",
+      "completed_at": "2026-05-05T15:16:43.922021+02:00",
+      "elapsed_minutes": 1819
     },
     "task-push/pull-synchronization-with-remote-registry": {
       "status": "done",
@@ -576,6 +754,72 @@
       "started_at": "2026-04-18T01:38:25.30929+02:00",
       "completed_at": "2026-04-18T01:46:00.848245+02:00",
       "elapsed_minutes": 7
+    },
+    "task-recall-hardening:-ci-regression-gates": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "CI regression gate updated: benchmarks/baseline.json includes real_trace_recall; check_baseline passes."
+      ],
+      "started_at": "2026-05-06T10:16:18.666059+02:00",
+      "completed_at": "2026-05-06T10:16:26.970991+02:00",
+      "elapsed_minutes": 0
+    },
+    "task-recall-hardening:-confidence-calibrated-answer-policy": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Confidence-calibrated answer policy shipped: domain.Answer.Confidence + computeConfidence() + CLI JSON confidence output."
+      ],
+      "started_at": "2026-05-06T10:15:57.00619+02:00",
+      "completed_at": "2026-05-06T10:16:11.130628+02:00",
+      "elapsed_minutes": 0
+    },
+    "task-recall-hardening:-deterministic-evidence-fallback": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Deterministic evidence fallback shipped in benchmarks/providers/mnemos.py; holdout recall now 1.0."
+      ],
+      "started_at": "2026-05-06T10:15:56.704773+02:00",
+      "completed_at": "2026-05-06T10:16:10.784259+02:00",
+      "elapsed_minutes": 0
+    },
+    "task-recall-hardening:-memory-quality-telemetry": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Memory-quality telemetry shipped: ComputeMemoryQuality() plus quality command exposure."
+      ],
+      "started_at": "2026-05-06T10:15:57.304512+02:00",
+      "completed_at": "2026-05-06T10:16:11.229632+02:00",
+      "elapsed_minutes": 0
+    },
+    "task-recall-hardening:-real-trace-eval-harness": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Created real_trace_recall suite with seed data, deterministic evidence fallback, confidence scoring. Holdout recall 0.5 → 1.0."
+      ],
+      "started_at": "2026-05-05T19:29:54.182711+02:00",
+      "completed_at": "2026-05-06T09:59:19.02197+02:00",
+      "elapsed_minutes": 869
+    },
+    "task-recall-hardening:-rollout-guardrails-and-slos": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Added SLOThresholds + CheckSLOs in internal/query/engine.go (min confidence, stale-ratio guardrail). Baseline checks pass and holdout recall remains 1.0."
+      ],
+      "started_at": "2026-05-06T10:27:16.773568+02:00",
+      "completed_at": "2026-05-06T10:27:23.424977+02:00",
+      "elapsed_minutes": 0
     },
     "task-registry-namespace-and-scope-isolation": {
       "status": "done",
@@ -599,6 +843,17 @@
       "completed_at": "2026-04-12T11:50:40.489501+02:00",
       "elapsed_minutes": 2
     },
+    "task-reliability-first-recall-hardening-(never-wrong-on-recall)": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Completed 5/5 sub-tasks: real-trace eval harness (recall 0.5→1.0), deterministic evidence fallback, confidence-calibrated answer policy (confidence field in Answer, computeConfidence()), memory-quality telemetry (ComputeMemoryQuality, handleQuality CLI), CI regression gates (baseline.json updated, check_baseline passes), rollout guardrails \u0026 SLOs (SLOThresholds, CheckSLOs()). All tests pass, make check green."
+      ],
+      "started_at": "2026-05-05T19:27:07.705278+02:00",
+      "completed_at": "2026-05-06T10:10:46.079271+02:00",
+      "elapsed_minutes": 883
+    },
     "task-run-scoped-querying": {
       "status": "done",
       "path": "",
@@ -620,6 +875,17 @@
       "started_at": "2026-05-01T11:37:08.430736+02:00",
       "completed_at": "2026-05-01T11:47:04.602801+02:00",
       "elapsed_minutes": 9
+    },
+    "task-source-credibility-scoring": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Implemented source credibility scoring engine (trust.ScoreCredibility) combining trust baseline, source authority, citation density, recency, and liveness; wired into query-time claim enrichment with provenance rationale output; added unit tests; make build + make test passing"
+      ],
+      "started_at": "2026-05-04T14:38:37.262694+02:00",
+      "completed_at": "2026-05-04T14:40:32.417526+02:00",
+      "elapsed_minutes": 1
     },
     "task-sqlc-migration-phase-2": {
       "status": "done",
@@ -643,6 +909,17 @@
       "completed_at": "2026-04-12T14:37:50.063802+02:00",
       "elapsed_minutes": 3
     },
+    "task-sqlcgen-claims-update": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Updated sql/sqlite/query/claims.sql and regenerated sqlc: UpsertClaim now includes source_document, source_type, source_authority, liveness, last_executed, citation_count, provenance_rationale"
+      ],
+      "started_at": "2026-05-04T14:30:06.179809+02:00",
+      "completed_at": "2026-05-04T14:30:14.869216+02:00",
+      "elapsed_minutes": 0
+    },
     "task-temporal-validity-hardening": {
       "status": "done",
       "path": "",
@@ -653,6 +930,61 @@
       "started_at": "2026-05-01T10:59:27.872711+02:00",
       "completed_at": "2026-05-01T11:21:41.947498+02:00",
       "elapsed_minutes": 22
+    },
+    "task-test-conflict-detection": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "DetectTestConflicts wired into Engine.Detect + DetectIncremental; 6 new tests all green; make build \u0026\u0026 make test 30 packages pass"
+      ],
+      "started_at": "2026-05-04T16:22:56.933414+02:00",
+      "completed_at": "2026-05-04T16:28:24.453995+02:00",
+      "elapsed_minutes": 5
+    },
+    "task-test-provenance-model": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "ClaimTypeTestResult + 7 test provenance fields wired through schema v9, sqlcgen, claim_repository, HTTP handler, browse validation, ux icons. make build \u0026\u0026 make test green."
+      ],
+      "started_at": "2026-05-04T14:40:32.479767+02:00",
+      "completed_at": "2026-05-04T16:21:50.517106+02:00",
+      "elapsed_minutes": 101
+    },
+    "task-trust-query-api": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "WhyTrustClaim in internal/query/engine.go:1531; CLI --why-trust in cmd/mnemos/main.go:462; HTTP GET /v1/claims/:id/why-trust in cmd/mnemos/serve.go:1667."
+      ],
+      "started_at": "2026-05-05T12:15:10.492352+02:00",
+      "completed_at": "2026-05-05T12:15:14.393871+02:00",
+      "elapsed_minutes": 0
+    },
+    "task-verdict-api": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "domain.Verdict + VerdictAction; resolveContradictionsForAgent returns []Verdict; Answer.Verdicts; verdictDTO in searchResponse; 3 new tests; all 30 packages green"
+      ],
+      "started_at": "2026-05-04T18:03:42.529951+02:00",
+      "completed_at": "2026-05-04T18:08:44.748614+02:00",
+      "elapsed_minutes": 5
+    },
+    "task-visibility-field": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "make check: 0 lint issues, all 30 packages green. Schema v10, visibility field wired through domain/sqlite/sqlc/HTTP/gRPC/client layers with full round-trip tests."
+      ],
+      "started_at": "2026-05-04T16:31:13.559918+02:00",
+      "completed_at": "2026-05-04T17:16:32.496049+02:00",
+      "elapsed_minutes": 45
     },
     "task-web-interface-on-registry-api": {
       "status": "done",
@@ -675,7 +1007,18 @@
       "started_at": "2026-04-12T13:08:36.337185+02:00",
       "completed_at": "2026-04-12T13:12:47.248521+02:00",
       "elapsed_minutes": 4
+    },
+    "task-workspace-isolation": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "make check green; 4 visibility tests added (personal/team/org/zero-value); visibilityAllowed() helper in engine.go; --visibility flag on CLI; ?visibility= param on HTTP"
+      ],
+      "started_at": "2026-05-05T09:18:04.425425+02:00",
+      "completed_at": "2026-05-05T09:24:05.18248+02:00",
+      "elapsed_minutes": 6
     }
   },
-  "updated_at": "2026-05-04T09:00:39.558046+02:00"
+  "updated_at": "2026-05-06T10:27:23.424977+02:00"
 }

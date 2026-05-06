@@ -559,9 +559,335 @@
       "estimate": "",
       "depends_on": [],
       "feature_id": "entity-resolution-at-ingest"
+    },
+    {
+      "id": "task-epistemic-provenance-\u0026-claim-trust-framework",
+      "title": "Implement Epistemic Provenance \u0026 Claim Trust Framework",
+      "description": "Implement the feature: Epistemic Provenance \u0026 Claim Trust Framework. Implement epistemic provenance tracking to explain *why* a claim or data source is trusted over others, addressing user feedback on broad knowledge bases (e.g. Obsidian/Karpathy-style setups) needing trust differentiation. Covers two core areas:\n1. Source Credibility Signals: Score claim trustworthiness using link density (convergence across multiple resources), liveness (e.g. 12-year-old process doc still being actively executed), recency, authoritativeness, and citation graph analysis.\n2. Test Conflict Resolution: Resolve conflicting test results (e.g. Test1 passes, Test2 fails for same functionality) via test provenance (recency, authority), confidence-weighted resolution, and first-class \"which source/test to trust?\" query support.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "epistemic-provenance-\u0026-claim-trust-framework"
+    },
+    {
+      "id": "task-reliability-first-recall-hardening-(never-wrong-on-recall)",
+      "title": "Implement Reliability-first recall hardening (never wrong on recall)",
+      "description": "Implement the feature: Reliability-first recall hardening (never wrong on recall). Prioritize product trust strategy: \"never wrong on recall\". Add a reliability-first initiative that hardens retrieval/answering so factual recall is lossless and deterministic before any advanced synthesis expansion.\n\nScope:\n- Build a production eval harness using real anonymized conversation traces plus golden answers and required-substring assertions.\n- Enforce deterministic answer fallback: when generated answer omits required facts, return evidence-grounded claim text block.\n- Add confidence-calibrated answer policy with strict modes:\n  - high confidence + no conflict: concise direct answer\n  - low confidence or unresolved conflict: explicit uncertainty + evidence citations + escalation path\n- Add CI regression gates for recall metrics (hard fail on any drop beyond tolerance).\n- Add per-workspace memory quality telemetry: unresolved contradictions, stale claims, low-trust clusters, recall pass-rate trend.\n\nNon-goals:\n- New broad AI synthesis features.\n- Fancy UI redesign.\n\nSuccess metrics:\n- Recall pass-rate (required-substring) \u003e= 99% on held-out eval set.\n- Zero false factual omissions on golden critical set.\n- Regenerate rate and user correction rate decrease sprint-over-sprint.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "reliability-first-recall-hardening-(never-wrong-on-recall)"
+    },
+    {
+      "id": "task-recall-hardening:-real-trace-eval-harness",
+      "title": "Implement Recall hardening: real-trace eval harness",
+      "description": "Implement the feature: Recall hardening: real-trace eval harness. Create a reproducible eval harness with anonymized real conversation traces, golden answers, required-substring assertions, and critical recall sets. Include train/validation/holdout split and deterministic runner.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "recall-hardening:-real-trace-eval-harness"
+    },
+    {
+      "id": "task-recall-hardening:-deterministic-evidence-fallback",
+      "title": "Implement Recall hardening: deterministic evidence fallback",
+      "description": "Implement the feature: Recall hardening: deterministic evidence fallback. Implement deterministic answer fallback in query path: when generated answer omits required evidence facts or falls below recall checks, return evidence-grounded claim text block with citations.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "recall-hardening:-deterministic-evidence-fallback"
+    },
+    {
+      "id": "task-recall-hardening:-confidence-calibrated-answer-policy",
+      "title": "Implement Recall hardening: confidence-calibrated answer policy",
+      "description": "Implement the feature: Recall hardening: confidence-calibrated answer policy. Add confidence-calibrated answer policy modes: direct answer for high-confidence/no-conflict, uncertainty mode for low-confidence/unresolved conflicts with explicit citations and escalation options.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "recall-hardening:-confidence-calibrated-answer-policy"
+    },
+    {
+      "id": "task-recall-hardening:-ci-regression-gates",
+      "title": "Implement Recall hardening: CI regression gates",
+      "description": "Implement the feature: Recall hardening: CI regression gates. Add CI benchmark gates for recall reliability with hard fail thresholds and baseline comparison. Enforce no-regression policy on required-substring recall and omission rate.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "recall-hardening:-ci-regression-gates"
+    },
+    {
+      "id": "task-recall-hardening:-memory-quality-telemetry",
+      "title": "Implement Recall hardening: memory quality telemetry",
+      "description": "Implement the feature: Recall hardening: memory quality telemetry. Add per-workspace memory quality telemetry: unresolved contradictions, stale claim ratio, low-trust clusters, recall pass-rate trend, and correction/regenerate proxies.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "recall-hardening:-memory-quality-telemetry"
+    },
+    {
+      "id": "task-recall-hardening:-rollout-guardrails-and-slos",
+      "title": "Implement Recall hardening: rollout guardrails and SLOs",
+      "description": "Implement the feature: Recall hardening: rollout guardrails and SLOs. Ship trust-focused documentation and rollout controls: feature flags, runbooks, acceptance checklist, and SLO definitions for never-wrong recall operation.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "recall-hardening:-rollout-guardrails-and-slos"
+    },
+    {
+      "id": "task-incident-entity",
+      "title": "Incident Entity (Optional, for 'Why Were We Wrong?')",
+      "description": "Optional new Incident entity type with Severity, Timeline []EventID, RootCause claim ID, DecisionIDs []string, OutcomeIDs []string, PlaybookID. Or repurpose Decision with Type: 'postmortem'. Provides structured incident analysis.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [
+        "task-decision-audit-trail"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-dual-mode-resolution",
+      "title": "Dual-Mode Resolution (Agent vs. Human)",
+      "description": "Two resolution modes based on ?consumer= parameter: consumer=agent → automatic resolution wired to internal/trust (THE brain), consumer=user → surface contradictions + explanation (second brain). Add Consumer field to AnswerOptions, wire auto-resolution path in query engine.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [
+        "task-agent-authority-model",
+        "task-visibility-field"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-anti-lesson-synthesis",
+      "title": "Anti-Lesson Synthesis (Failed Patterns)",
+      "description": "Extend internal/synthesize/engine.go to emit Anti-Lessons from failed outcomes: when outcome.Result == Failure \u0026\u0026 corroboration \u003e= 3, emit anti-lesson with trigger, warning, failed_actions, root_cause_claim. Learn from failures, not just successes.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [
+        "task-source-credibility-scoring"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-visibility-field",
+      "title": "Visibility Field (Nomi-Inspired Workspace Model)",
+      "description": "Add separate Visibility field to Claim model: personal (like Nomi 1:1 chat), team (like Nomi group chat), org (organizational truth/THE brain). Separate from Scope (Service/Env/Team) which remains for filtering. Update schema, domain types, repository.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [
+        "task-claim-provenance-model"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-test-conflict-detection",
+      "title": "Test Conflict Detection Engine",
+      "description": "Detect when two tests cover the same functionality but produce different results. Use semantic similarity + scope overlap to identify conflicting test pairs. Store conflicts as first-class relations with both test IDs.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [
+        "task-test-provenance-model"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-claim-repo-upsert-update",
+      "title": "Update claim_repository.go upsertWithReason for Provenance",
+      "description": "Update upsertWithReason (lines 83-95) to pass provenance fields to UpsertClaimParams: SourceDocument, SourceType, SourceAuthority, Liveness, LastExecuted, CitationCount, ProvenanceRationale.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [
+        "task-sqlcgen-claims-update"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-agent-authority-model",
+      "title": "Agent Authority Score (Extend internal/trust)",
+      "description": "Add authority score to domain.Agent (success rate, verification count). Extend internal/trust/trust.go Score() function to accept agentAuthority parameter: trust_score = confidence × corroboration × freshness × agentAuthority.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [
+        "task-source-credibility-scoring"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-escalation-mechanism",
+      "title": "Escalation to Human (Confidence \u003c 0.7)",
+      "description": "Three escalation triggers: (1) Confidence \u003c 0.7, (2) Winner-loser margin \u003c 0.2 (too close to call), (3) Agent explicitly requests escalation. Add escalation_reason to Verdict. Wire to human notification (MCP tool, API response).",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [
+        "task-agent-self-healing"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-sqlcgen-claims-update",
+      "title": "Update sqlcgen/claims.sql.go for Provenance Fields",
+      "description": "Update upsertClaim SQL to include new columns: source_document, source_type, source_authority, liveness, last_executed, citation_count, provenance_rationale. Update UpsertClaimParams struct with new fields. Update UpsertClaim function to pass new parameters.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [
+        "task-claim-provenance-model"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-liveness-detection",
+      "title": "Liveness Detection for Documents/Processes",
+      "description": "Detect if a source is 'live': still being referenced, executed, or updated. Track last-access timestamps, execution evidence (e.g. git commits referencing a process doc), staleness indicators. Flag zombie docs (old but trusted) vs live docs.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [
+        "task-claim-provenance-model"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-decision-audit-trail",
+      "title": "Decision Audit Trail (Refuted Beliefs)",
+      "description": "Extend Decision model with RefutedBeliefs []string and FailedOutcomeID. Create query path: 'mnemos query --why-wrong \u003cservice\u003e' that finds decisions with refuted beliefs, traces decision → action → failed outcome, surfaces contradicting claims.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [
+        "task-anti-lesson-synthesis"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-provenance-markdown-export",
+      "title": "Human-Readable Provenance Markdown Export",
+      "description": "Extend the human-editable markdown layer to include provenance annotations. When exporting claims, include trust score, source links, and confidence rationale in markdown frontmatter or inline annotations.",
+      "priority": "low",
+      "estimate": "",
+      "depends_on": [
+        "task-trust-query-api"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-source-credibility-scoring",
+      "title": "Source Credibility Scoring Engine",
+      "description": "Combine multiple signals into a per-claim or per-source trust score: link density (citation count), liveness, recency, authority (user-defined or inferred), and conflict history. Output: trust_score 0.0-1.0 + rationale string.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [
+        "task-citation-graph-tracking",
+        "task-liveness-detection"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-claim-repo-scan-update",
+      "title": "Update claim_repository.go scanClaim for Provenance",
+      "description": "Update scanClaim function (lines 671-710) to scan new provenance fields: source_document, source_type, source_authority, liveness, last_executed, citation_count, provenance_rationale. Populate Claim struct with scanned values.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [
+        "task-sqlcgen-claims-update"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-test-provenance-model",
+      "title": "Test Provenance Data Model",
+      "description": "Model test metadata: test ID, associated requirement/claim, creation timestamp, last-modified, author, execution history, confidence level. Support first-class 'test result' as a type of claim with provenance.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-confidence-weighted-resolution",
+      "title": "Confidence-Weighted Conflict Resolution",
+      "description": "Resolve conflicting tests/claims using provenance signals: prefer newer tests, tests with higher authority, tests with more recent successful executions. Output: winning claim + rationale (which signals tipped the scale).",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [
+        "task-test-conflict-detection",
+        "task-source-credibility-scoring"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-build-test-verify",
+      "title": "Build and Test Verification for Provenance Model",
+      "description": "Run make build to verify compilation. Run make test to ensure nothing breaks. Transition task-claim-provenance-model to complete.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [
+        "task-claim-repo-upsert-update",
+        "task-claim-repo-scan-update"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-agent-self-healing",
+      "title": "Agent Self-Healing Loop (Verdict → Action)",
+      "description": "When agent gets 'wrong' verdict with action=update_claim: agent self-heals by updating code/docs, calling mnemos update to sync new truth. Add agent workflow: Query → Verdict → Action → Update Mnemos.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [
+        "task-verdict-api"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-verdict-api",
+      "title": "Verdict API Output Type (Structured JSON for Agents)",
+      "description": "Add Verdict struct to domain/types.go: winner_claim_id, loser_claim_id, confidence, rationale (recency/authority/staleness), action (trust/update/escalate), escalation_reason. Return Verdict instead of just claims+contradictions when consumer=agent.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [
+        "task-dual-mode-resolution"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-trust-query-api",
+      "title": "Provenance Query API \u0026 CLI (Why Trust This?)",
+      "description": "First-class query: 'why should I trust claim X?' Returns: trust score, top signals (citations, liveness, recency), conflicting evidence, and resolution rationale if conflicts exist. Expose via CLI (mnemos query --explain-trust \u003cclaim-id\u003e) and HTTP/gRPC.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [
+        "task-source-credibility-scoring",
+        "task-confidence-weighted-resolution"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-workspace-isolation",
+      "title": "Workspace Isolation (personal/team/org)",
+      "description": "Implement workspace isolation: agents see team+org visibility claims; personal queries only see personal visibility. Extend query engine to filter by visibility. Update HTTP API, gRPC, MCP tools to respect visibility.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [
+        "task-visibility-field"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-claim-provenance-model",
+      "title": "Claim Provenance Data Model",
+      "description": "Extend claim model with provenance metadata. DOMAIN TYPES DONE, SCHEMA DONE, SQLC REGENERATED. REMAINING: (1) Update sqlcgen/claims.sql.go - upsertClaim SQL + UpsertClaimParams + UpsertClaim function, (2) Update claim_repository.go - upsertWithReason (lines 83-95) + scanClaim (lines 671-710), (3) make build, (4) make test, (5) transition complete.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-citation-graph-tracking",
+      "title": "Citation Graph \u0026 Link Density Tracking",
+      "description": "Track which sources reference/link to other sources. Build citation graph at ingest time. Store directed edges (source A cites source B). Enable queries for convergence: how many independent sources support a claim?",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [
+        "task-claim-provenance-model"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
     }
   ],
   "approval_status": "approved",
   "created_at": "2026-04-12T11:03:09.397775+02:00",
-  "updated_at": "2026-05-04T08:05:19.080166+02:00"
+  "updated_at": "2026-05-05T19:29:31.300158+02:00"
 }

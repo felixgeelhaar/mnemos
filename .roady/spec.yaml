@@ -369,5 +369,59 @@ features:
         - Cross-language entity resolution.
         - LLM-driven entity resolution (rule-based + embedding similarity is enough for the first pass).
       requirements: []
+    - id: epistemic-provenance-&-claim-trust-framework
+      title: Epistemic Provenance & Claim Trust Framework
+      description: |-
+        Implement epistemic provenance tracking to explain *why* a claim or data source is trusted over others, addressing user feedback on broad knowledge bases (e.g. Obsidian/Karpathy-style setups) needing trust differentiation. Covers two core areas:
+        1. Source Credibility Signals: Score claim trustworthiness using link density (convergence across multiple resources), liveness (e.g. 12-year-old process doc still being actively executed), recency, authoritativeness, and citation graph analysis.
+        2. Test Conflict Resolution: Resolve conflicting test results (e.g. Test1 passes, Test2 fails for same functionality) via test provenance (recency, authority), confidence-weighted resolution, and first-class "which source/test to trust?" query support.
+      requirements: []
+    - id: reliability-first-recall-hardening-(never-wrong-on-recall)
+      title: Reliability-first recall hardening (never wrong on recall)
+      description: |-
+        Prioritize product trust strategy: "never wrong on recall". Add a reliability-first initiative that hardens retrieval/answering so factual recall is lossless and deterministic before any advanced synthesis expansion.
+
+        Scope:
+        - Build a production eval harness using real anonymized conversation traces plus golden answers and required-substring assertions.
+        - Enforce deterministic answer fallback: when generated answer omits required facts, return evidence-grounded claim text block.
+        - Add confidence-calibrated answer policy with strict modes:
+          - high confidence + no conflict: concise direct answer
+          - low confidence or unresolved conflict: explicit uncertainty + evidence citations + escalation path
+        - Add CI regression gates for recall metrics (hard fail on any drop beyond tolerance).
+        - Add per-workspace memory quality telemetry: unresolved contradictions, stale claims, low-trust clusters, recall pass-rate trend.
+
+        Non-goals:
+        - New broad AI synthesis features.
+        - Fancy UI redesign.
+
+        Success metrics:
+        - Recall pass-rate (required-substring) >= 99% on held-out eval set.
+        - Zero false factual omissions on golden critical set.
+        - Regenerate rate and user correction rate decrease sprint-over-sprint.
+      requirements: []
+    - id: recall-hardening:-real-trace-eval-harness
+      title: 'Recall hardening: real-trace eval harness'
+      description: Create a reproducible eval harness with anonymized real conversation traces, golden answers, required-substring assertions, and critical recall sets. Include train/validation/holdout split and deterministic runner.
+      requirements: []
+    - id: recall-hardening:-deterministic-evidence-fallback
+      title: 'Recall hardening: deterministic evidence fallback'
+      description: 'Implement deterministic answer fallback in query path: when generated answer omits required evidence facts or falls below recall checks, return evidence-grounded claim text block with citations.'
+      requirements: []
+    - id: recall-hardening:-confidence-calibrated-answer-policy
+      title: 'Recall hardening: confidence-calibrated answer policy'
+      description: 'Add confidence-calibrated answer policy modes: direct answer for high-confidence/no-conflict, uncertainty mode for low-confidence/unresolved conflicts with explicit citations and escalation options.'
+      requirements: []
+    - id: recall-hardening:-ci-regression-gates
+      title: 'Recall hardening: CI regression gates'
+      description: Add CI benchmark gates for recall reliability with hard fail thresholds and baseline comparison. Enforce no-regression policy on required-substring recall and omission rate.
+      requirements: []
+    - id: recall-hardening:-memory-quality-telemetry
+      title: 'Recall hardening: memory quality telemetry'
+      description: 'Add per-workspace memory quality telemetry: unresolved contradictions, stale claim ratio, low-trust clusters, recall pass-rate trend, and correction/regenerate proxies.'
+      requirements: []
+    - id: recall-hardening:-rollout-guardrails-and-slos
+      title: 'Recall hardening: rollout guardrails and SLOs'
+      description: 'Ship trust-focused documentation and rollout controls: feature flags, runbooks, acceptance checklist, and SLO definitions for never-wrong recall operation.'
+      requirements: []
 constraints: []
 version: 0.1.0

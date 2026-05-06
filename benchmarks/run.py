@@ -9,7 +9,7 @@ from datetime import datetime
 
 from .providers.mnemos import MnemosProvider
 from .providers.mem0 import Mem0Provider
-from .suites import contradiction_detection, locomo, longmemeval
+from .suites import contradiction_detection, locomo, longmemeval, real_trace_recall
 
 PROVIDERS = {
     "mnemos": MnemosProvider,
@@ -21,6 +21,7 @@ SUITES = {
     "contradiction_detection": contradiction_detection.run,
     "longmemeval": longmemeval.run,
     "locomo": locomo.run,
+    "real_trace_recall": real_trace_recall.run,
     # replay_completeness, evidence_traceability follow.
 }
 
@@ -30,6 +31,12 @@ def main() -> int:
     p.add_argument("--provider", choices=[*PROVIDERS, "all"], required=True)
     p.add_argument("--suite", choices=[*SUITES, "all"], required=True)
     p.add_argument("--output", default="benchmarks/results", help="Directory for JSON results")
+    p.add_argument(
+        "--split",
+        default="holdout",
+        choices=["train", "validation", "holdout", "all"],
+        help="Dataset split for suites that support split-aware evaluation",
+    )
     args = p.parse_args()
 
     providers = list(PROVIDERS) if args.provider == "all" else [args.provider]
@@ -44,7 +51,10 @@ def main() -> int:
         for suite_name in suites:
             suite_fn = SUITES[suite_name]
             print(f"→ {prov_name} :: {suite_name}")
-            result = suite_fn(provider)
+            if suite_name == "real_trace_recall":
+                result = suite_fn(provider, split=args.split)
+            else:
+                result = suite_fn(provider)
             agg = result.aggregate()
             payload = {
                 "provider": prov_name,

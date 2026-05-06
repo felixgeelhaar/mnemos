@@ -14,11 +14,13 @@ class QueryResult:
         memories: list[dict],
         contradictions: list[dict] | None = None,
         evidence_ids: list[str] | None = None,
+        confidence: float = 0.0,
     ):
         self.answer = answer
         self.memories = memories
         self.contradictions = contradictions or []
         self.evidence_ids = evidence_ids or []
+        self.confidence = confidence
 
 
 class Provider(Protocol):

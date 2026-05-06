@@ -52,13 +52,34 @@ def write_summary(results: dict[tuple[str, str], dict], outfile: Path) -> None:
         leader = max(runs, key=lambda x: x["summary"].get("f1_avg", 0))
         lines.append(f"### Per-case detail — {leader['provider']}")
         lines.append("")
-        lines.append("| Case | Expected | Detected | P | R | F1 |")
-        lines.append("|---|---|---|---|---|---|")
-        for c in leader.get("cases", []):
-            lines.append(
-                f"| {c['name']} | {c['expected']} | {c['detected']} | "
-                f"{c['precision']:.2f} | {c['recall']:.2f} | {c['f1']:.2f} |"
-            )
+
+        cases = leader.get("cases", [])
+        # Detect schema: contradiction_detection cases have 'expected'/'detected'/'f1';
+        # QA suites (locomo, longmemeval) have 'answered'/'matched_substrings'.
+        if cases and "expected" in cases[0]:
+            lines.append("| Case | Expected | Detected | P | R | F1 |")
+            lines.append("|---|---|---|---|---|---|")
+            for c in cases:
+                lines.append(
+                    f"| {c['name']} | {c['expected']} | {c['detected']} | "
+                    f"{c['precision']:.2f} | {c['recall']:.2f} | {c['f1']:.2f} |"
+                )
+        elif cases and "passed" in cases[0]:
+            lines.append("| Case | Split | Critical | Passed | Missing substrings |")
+            lines.append("|---|---|---|---|---|")
+            for c in cases:
+                missing = ", ".join(c.get("missing_substrings", []))
+                critical = "yes" if c.get("critical") else "no"
+                passed = "✓" if c.get("passed") else "✗"
+                lines.append(f"| {c['id']} | {c.get('split', '')} | {critical} | {passed} | {missing} |")
+        else:
+            lines.append("| Case | Answered | Matched substrings | Answer excerpt |")
+            lines.append("|---|---|---|---|")
+            for c in cases:
+                matched = ", ".join(c.get("matched_substrings", []))
+                excerpt = c.get("answer_excerpt", "")[:80].replace("|", "\\|")
+                answered = "✓" if c.get("answered") else "✗"
+                lines.append(f"| {c['name']} | {answered} | {matched} | {excerpt} |")
         lines.append("")
 
     outfile.write_text("\n".join(lines))

@@ -1,0 +1,74 @@
+[
+  {
+    "id": "rt-001",
+    "split": "train",
+    "critical": true,
+    "facts": [
+      "User identity: Maya Chen.",
+      "Maya's primary work city is Lisbon.",
+      "Maya asked for coworking spaces near Cais do Sodre."
+    ],
+    "question": "What city does Maya primarily work in?",
+    "required_substrings": ["lisbon"]
+  },
+  {
+    "id": "rt-002",
+    "split": "train",
+    "critical": false,
+    "facts": [
+      "User says they avoid dairy.",
+      "User says they are allergic to shellfish.",
+      "User asked for dinner recommendations."
+    ],
+    "question": "What dietary constraints should the dinner plan follow?",
+    "required_substrings": ["dairy", "shellfish"]
+  },
+  {
+    "id": "rt-003",
+    "split": "validation",
+    "critical": true,
+    "facts": [
+      "Incident bridge owner is Rafael Gomez.",
+      "Rafael's pager number ends with 4421.",
+      "The current incident is SEV-2."
+    ],
+    "question": "Who owns the incident bridge right now?",
+    "required_substrings": ["rafael"]
+  },
+  {
+    "id": "rt-004",
+    "split": "validation",
+    "critical": false,
+    "facts": [
+      "The customer changed from annual billing to monthly billing.",
+      "Contract renewal date remains October 1.",
+      "The customer requests invoices to accounts@northline.example."
+    ],
+    "question": "What is the customer billing cadence now?",
+    "required_substrings": ["monthly"]
+  },
+  {
+    "id": "rt-005",
+    "split": "holdout",
+    "critical": true,
+    "facts": [
+      "User corrected earlier preference: tea was replaced by coffee.",
+      "User requests medium roast coffee beans.",
+      "Delivery address is 15 Harbor Street."
+    ],
+    "question": "What drink preference should we remember for this user?",
+    "required_substrings": ["coffee"]
+  },
+  {
+    "id": "rt-006",
+    "split": "holdout",
+    "critical": true,
+    "facts": [
+      "Policy exception ticket ID is EX-1932.",
+      "Exception expires on 2026-09-30.",
+      "Approver is Lena Ortiz."
+    ],
+    "question": "When does exception EX-1932 expire?",
+    "required_substrings": ["2026-09-30"]
+  }
+]

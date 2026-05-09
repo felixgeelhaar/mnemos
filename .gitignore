@@ -28,3 +28,8 @@ benchmarks/results/*.json
 
 # Local extraction cache
 data/cache/
+
+# Mutation harness reports
+mutation-*.json
+mutation-*.log
+/mutate

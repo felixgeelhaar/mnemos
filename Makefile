@@ -9,7 +9,7 @@ LDFLAGS := -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main
 PROTO_DIR := proto
 PROTO_GEN := proto/gen
 
-.PHONY: fmt lint test test-integration build check sqlc install release-snapshot release-check proto
+.PHONY: fmt lint test test-integration build check sqlc install release-snapshot release-check proto mutation mutation-trust mutation-relate mutation-query
 
 fmt:
 	$(GO) fmt ./...
@@ -66,3 +66,18 @@ release-check:
 
 release-snapshot:
 	goreleaser release --snapshot --clean
+
+# mutation runs the in-tree mutation harness against internal/trust
+# and gates on a 0.70 kill rate. See docs/testing/mutation.md for
+# rationale and the threshold-ratchet plan. Add internal/relate and
+# internal/query as advisory (non-gating) runs.
+mutation: mutation-trust
+
+mutation-trust:
+	$(GO) run ./tools/mutate -pkg ./internal/trust -threshold 0.70 -v
+
+mutation-relate:
+	$(GO) run ./tools/mutate -pkg ./internal/relate -threshold 0.0 -v -json mutation-relate.json
+
+mutation-query:
+	$(GO) run ./tools/mutate -pkg ./internal/query -threshold 0.0 -v -json mutation-query.json

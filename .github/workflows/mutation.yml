@@ -1,0 +1,116 @@
+name: Mutation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "internal/trust/**"
+      - "internal/relate/**"
+      - "internal/query/**"
+      - "tools/mutate/**"
+      - ".github/workflows/mutation.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "internal/trust/**"
+      - "internal/relate/**"
+      - "internal/query/**"
+      - "tools/mutate/**"
+      - ".github/workflows/mutation.yml"
+  schedule:
+    # 04:00 UTC daily
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  trust:
+    name: Mutation gate (internal/trust)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run mutation harness on internal/trust
+        run: |
+          go run ./tools/mutate \
+            -pkg ./internal/trust \
+            -threshold 0.70 \
+            -json mutation-trust.json \
+            -v | tee mutation-trust.log
+
+      - name: Append summary
+        if: always()
+        run: |
+          {
+            echo "## internal/trust mutation kill rate"
+            echo
+            python3 -c "import json; d=json.load(open('mutation-trust.json')); print(f\"- killed: {d['killed']}/{d['total']}\"); print(f\"- kill_rate: {d['kill_rate']:.4f}\"); print(f\"- threshold: {d['threshold']:.4f}\"); print(f\"- elapsed: {d['elapsed']}\")"
+            echo
+            if [ $(python3 -c "import json; d=json.load(open('mutation-trust.json')); print(len([r for r in d['results'] if not r['killed']]))") -gt 0 ]; then
+              echo "### Survivors"
+              echo
+              python3 -c "import json; d=json.load(open('mutation-trust.json'));
+          for r in d['results']:
+              if not r['killed']:
+                  print(f\"- {r['file']}:{r['line']}:{r['column']} {r['from']} -> {r['to']} ({r['mutator']})\")"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-trust-report
+          path: |
+            mutation-trust.json
+            mutation-trust.log
+
+  advisory:
+    name: Mutation advisory (relate + query)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.base.ref == 'main'
+    continue-on-error: true
+    strategy:
+      matrix:
+        pkg: [relate, query]
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run mutation harness on internal/${{ matrix.pkg }}
+        run: |
+          go run ./tools/mutate \
+            -pkg ./internal/${{ matrix.pkg }} \
+            -threshold 0.0 \
+            -json mutation-${{ matrix.pkg }}.json | tee mutation-${{ matrix.pkg }}.log
+
+      - name: Append summary
+        if: always()
+        run: |
+          {
+            echo "## internal/${{ matrix.pkg }} mutation kill rate (advisory)"
+            echo
+            python3 -c "import json; d=json.load(open('mutation-${{ matrix.pkg }}.json')); print(f\"- killed: {d['killed']}/{d['total']}\"); print(f\"- kill_rate: {d['kill_rate']:.4f}\"); print(f\"- elapsed: {d['elapsed']}\")"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-${{ matrix.pkg }}-report
+          path: |
+            mutation-${{ matrix.pkg }}.json
+            mutation-${{ matrix.pkg }}.log

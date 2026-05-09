@@ -243,6 +243,26 @@ FROM claims ORDER BY created_at ASC`)
 	return collectClaimRows(rows)
 }
 
+// ListByTestRequirementRef returns test_result claims sharing the given
+// non-empty TestRequirementRef. Note: scanClaimRow does not currently
+// hydrate test_provenance fields, so trust scoring of mysql-backed test
+// claims is incomplete (tracked separately). The filter is correct.
+func (r ClaimRepository) ListByTestRequirementRef(ctx context.Context, ref string) ([]domain.Claim, error) {
+	if ref == "" {
+		return nil, nil
+	}
+	rows, err := r.db.QueryContext(ctx, `
+SELECT id, text, type, confidence, status, created_at, created_by, trust_score, valid_from, valid_to
+FROM claims
+WHERE type = 'test_result' AND test_requirement_ref = ?
+ORDER BY test_last_run_at DESC, created_at DESC`, ref)
+	if err != nil {
+		return nil, fmt.Errorf("list claims by test_requirement_ref: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return collectClaimRows(rows)
+}
+
 // CountAll returns the total number of claims stored.
 func (r ClaimRepository) CountAll(ctx context.Context) (int64, error) {
 	var n int64

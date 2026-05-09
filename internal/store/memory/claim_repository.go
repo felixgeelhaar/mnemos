@@ -238,6 +238,36 @@ func (r ClaimRepository) ListAll(_ context.Context) ([]domain.Claim, error) {
 	return out, nil
 }
 
+// ListByTestRequirementRef returns test_result claims sharing the given
+// non-empty TestRequirementRef. Sorted TestLastRunAt DESC then CreatedAt
+// DESC to mirror the SQL backends.
+func (r ClaimRepository) ListByTestRequirementRef(_ context.Context, ref string) ([]domain.Claim, error) {
+	if ref == "" {
+		return nil, nil
+	}
+	r.state.mu.RLock()
+	defer r.state.mu.RUnlock()
+	out := make([]domain.Claim, 0)
+	for _, id := range r.state.claimOrder {
+		c, ok := r.state.claims[id]
+		if !ok {
+			continue
+		}
+		dc := c.toDomain()
+		if dc.Type != domain.ClaimTypeTestResult || dc.TestRequirementRef != ref {
+			continue
+		}
+		out = append(out, dc)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if !out[i].TestLastRunAt.Equal(out[j].TestLastRunAt) {
+			return out[i].TestLastRunAt.After(out[j].TestLastRunAt)
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
 // CountAll returns the total number of claims stored.
 func (r ClaimRepository) CountAll(_ context.Context) (int64, error) {
 	r.state.mu.RLock()

@@ -205,6 +205,80 @@ func (q *Queries) ListClaimTrustInputs(ctx context.Context) ([]ListClaimTrustInp
 	return items, nil
 }
 
+const listClaimsByTestRequirementRef = `-- name: ListClaimsByTestRequirementRef :many
+SELECT id, text, type, confidence, status, created_at, created_by, trust_score,
+       valid_from, valid_to, last_verified, verify_count, half_life_days,
+       scope_service, scope_env, scope_team,
+       source_document, source_type, source_authority, liveness,
+       last_executed, citation_count, provenance_rationale,
+       test_id, test_requirement_ref, test_author,
+       test_last_modified, test_last_run_at, test_pass_count, test_fail_count,
+       visibility
+FROM claims
+WHERE type = 'test_result'
+  AND test_requirement_ref = ?
+ORDER BY test_last_run_at DESC, created_at DESC
+`
+
+// Filter to test_result claims sharing a TestRequirementRef. Drives
+// `mnemos trust --test=<ref>` and the which_test_to_trust MCP tool: the
+// previous implementation called ListAllClaims and filtered in Go,
+// which scaled O(n) per invocation.
+func (q *Queries) ListClaimsByTestRequirementRef(ctx context.Context, testRequirementRef string) ([]Claim, error) {
+	rows, err := q.db.QueryContext(ctx, listClaimsByTestRequirementRef, testRequirementRef)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Claim
+	for rows.Next() {
+		var i Claim
+		if err := rows.Scan(
+			&i.ID,
+			&i.Text,
+			&i.Type,
+			&i.Confidence,
+			&i.Status,
+			&i.CreatedAt,
+			&i.CreatedBy,
+			&i.TrustScore,
+			&i.ValidFrom,
+			&i.ValidTo,
+			&i.LastVerified,
+			&i.VerifyCount,
+			&i.HalfLifeDays,
+			&i.ScopeService,
+			&i.ScopeEnv,
+			&i.ScopeTeam,
+			&i.SourceDocument,
+			&i.SourceType,
+			&i.SourceAuthority,
+			&i.Liveness,
+			&i.LastExecuted,
+			&i.CitationCount,
+			&i.ProvenanceRationale,
+			&i.TestID,
+			&i.TestRequirementRef,
+			&i.TestAuthor,
+			&i.TestLastModified,
+			&i.TestLastRunAt,
+			&i.TestPassCount,
+			&i.TestFailCount,
+			&i.Visibility,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markClaimVerified = `-- name: MarkClaimVerified :exec
 UPDATE claims
 SET last_verified = ?,

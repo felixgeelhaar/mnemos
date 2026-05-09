@@ -1115,17 +1115,14 @@ func mcpRunWhichTestToTrust(ctx context.Context, input mcpWhichTestToTrustInput)
 	}
 	defer closeConn(conn)
 
-	all, err := conn.Claims.ListAll(ctx)
+	matches, err := conn.Claims.ListByTestRequirementRef(ctx, input.RequirementRef)
 	if err != nil {
 		return mcpWhichTestToTrustOutput{}, err
 	}
 
 	now := time.Now().UTC()
 	cands := make([]mcpWhichTestToTrustCandidate, 0)
-	for _, c := range all {
-		if c.Type != domain.ClaimTypeTestResult || c.TestRequirementRef != input.RequirementRef {
-			continue
-		}
+	for _, c := range matches {
 		score, rationale := trust.ScoreCredibility(trust.CredibilityInputs{
 			CurrentTrust:    c.TrustScore,
 			SourceAuthority: c.SourceAuthority,

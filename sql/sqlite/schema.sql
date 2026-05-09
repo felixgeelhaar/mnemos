@@ -13,7 +13,6 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_events_source_input_id ON events(source_input_id);
 CREATE INDEX IF NOT EXISTS idx_events_run_id ON events(run_id);
-CREATE INDEX IF NOT EXISTS idx_events_run_id ON events(run_id);
 
 CREATE TABLE IF NOT EXISTS claims (
   id TEXT PRIMARY KEY,
@@ -53,6 +52,9 @@ CREATE INDEX IF NOT EXISTS idx_claims_scope_service ON claims(scope_service);
 
 CREATE INDEX IF NOT EXISTS idx_claims_trust_score ON claims(trust_score);
 CREATE INDEX IF NOT EXISTS idx_claims_valid_to ON claims(valid_to);
+CREATE INDEX IF NOT EXISTS idx_claims_test_requirement_ref
+  ON claims(test_requirement_ref)
+  WHERE test_requirement_ref != '';
 
 CREATE TABLE IF NOT EXISTS entities (
   id TEXT PRIMARY KEY,

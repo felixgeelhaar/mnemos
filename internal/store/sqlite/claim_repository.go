@@ -634,6 +634,30 @@ func (r ClaimRepository) ListAll(ctx context.Context) ([]domain.Claim, error) {
 	return claims, nil
 }
 
+// ListByTestRequirementRef returns every test_result claim sharing the
+// given non-empty TestRequirementRef, ordered TestLastRunAt DESC then
+// CreatedAt DESC so the freshest run sorts first when the trust scorer
+// breaks a tie. Empty ref short-circuits with no rows — partial index
+// already excludes them.
+func (r ClaimRepository) ListByTestRequirementRef(ctx context.Context, ref string) ([]domain.Claim, error) {
+	if ref == "" {
+		return nil, nil
+	}
+	rows, err := r.q.ListClaimsByTestRequirementRef(ctx, ref)
+	if err != nil {
+		return nil, fmt.Errorf("list claims by test_requirement_ref: %w", err)
+	}
+	claims := make([]domain.Claim, 0, len(rows))
+	for _, row := range rows {
+		claim, err := mapSQLClaim(row)
+		if err != nil {
+			return nil, err
+		}
+		claims = append(claims, claim)
+	}
+	return claims, nil
+}
+
 func mapSQLClaim(row sqlcgen.Claim) (domain.Claim, error) {
 	claim := domain.Claim{
 		ID:                  row.ID,

@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 219,
+  "version": 221,
   "task_states": {
     "task-action-outcome-recording": {
       "status": "done",
@@ -184,9 +184,15 @@
       "elapsed_minutes": 0
     },
     "task-claimrepository.listbytestrequirementref-port-+-index-for-trust-queries": {
-      "status": "pending",
+      "status": "done",
       "path": "",
-      "elapsed_minutes": 0
+      "owner": "ai-agent",
+      "evidence": [
+        "Added ListByTestRequirementRef to ports.ClaimRepository + implementations across sqlite/memory/postgres/mysql (libsql inherits sqlite). New sqlc query ListClaimsByTestRequirementRef. Partial index idx_claims_test_requirement_ref WHERE test_requirement_ref != ''. cmd/mnemos/trust.go and cmd/mnemos/mcp.go which_test_to_trust now use the port; in-memory ListAll filter eliminated. Side fixes: deleted duplicate idx_events_run_id (perf review #5); restored decisions.sql parity with refuted_beliefs_json + failed_outcome_id columns (sqlcgen had silently drifted); narrowed em-dash in SQL comment to ASCII (sqlc 1.30.0 byte-vs-rune offset bug corrupted output). Full test suite green."
+      ],
+      "started_at": "2026-05-09T08:24:23.108294+02:00",
+      "completed_at": "2026-05-09T08:35:46.459836+02:00",
+      "elapsed_minutes": 11
     },
     "task-cli-query-interface": {
       "status": "done",
@@ -1107,5 +1113,5 @@
       "elapsed_minutes": 6
     }
   },
-  "updated_at": "2026-05-09T08:24:05.405321+02:00"
+  "updated_at": "2026-05-09T08:35:46.459837+02:00"
 }

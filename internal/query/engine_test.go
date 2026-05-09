@@ -52,6 +52,18 @@ func (f fakeClaimRepo) UpsertEvidence(_ context.Context, _ []domain.ClaimEvidenc
 	return nil
 }
 func (f fakeClaimRepo) ListAll(_ context.Context) ([]domain.Claim, error) { return f.claims, nil }
+func (f fakeClaimRepo) ListByTestRequirementRef(_ context.Context, ref string) ([]domain.Claim, error) {
+	if ref == "" {
+		return nil, nil
+	}
+	out := make([]domain.Claim, 0)
+	for _, c := range f.claims {
+		if c.Type == domain.ClaimTypeTestResult && c.TestRequirementRef == ref {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
 func (f fakeClaimRepo) SetValidity(_ context.Context, _ string, _ time.Time) error {
 	return nil
 }

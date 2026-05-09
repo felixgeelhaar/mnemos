@@ -49,6 +49,14 @@ type ClaimRepository interface {
 	ListEvidenceByClaimIDs(ctx context.Context, claimIDs []string) ([]domain.ClaimEvidence, error)
 	ListByIDs(ctx context.Context, claimIDs []string) ([]domain.Claim, error)
 	ListAll(ctx context.Context) ([]domain.Claim, error)
+
+	// ListByTestRequirementRef returns every test_result claim sharing the
+	// given TestRequirementRef, ordered by TestLastRunAt DESC then
+	// CreatedAt DESC. Drives `mnemos trust --test=<ref>` and the
+	// which_test_to_trust MCP tool — replaces the previous
+	// ListAll-then-filter-in-Go path so the query stays O(matched rows)
+	// rather than O(total claims).
+	ListByTestRequirementRef(ctx context.Context, ref string) ([]domain.Claim, error)
 	ListStatusHistoryByClaimID(ctx context.Context, claimID string) ([]domain.ClaimStatusTransition, error)
 	SetValidity(ctx context.Context, claimID string, validTo time.Time) error
 

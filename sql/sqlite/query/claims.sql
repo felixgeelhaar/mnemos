@@ -66,6 +66,24 @@ SELECT id, text, type, confidence, status, created_at, created_by, trust_score,
 FROM claims
 ORDER BY created_at ASC;
 
+-- name: ListClaimsByTestRequirementRef :many
+-- Filter to test_result claims sharing a TestRequirementRef. Drives
+-- `mnemos trust --test=<ref>` and the which_test_to_trust MCP tool: the
+-- previous implementation called ListAllClaims and filtered in Go,
+-- which scaled O(n) per invocation.
+SELECT id, text, type, confidence, status, created_at, created_by, trust_score,
+       valid_from, valid_to, last_verified, verify_count, half_life_days,
+       scope_service, scope_env, scope_team,
+       source_document, source_type, source_authority, liveness,
+       last_executed, citation_count, provenance_rationale,
+       test_id, test_requirement_ref, test_author,
+       test_last_modified, test_last_run_at, test_pass_count, test_fail_count,
+       visibility
+FROM claims
+WHERE type = 'test_result'
+  AND test_requirement_ref = ?
+ORDER BY test_last_run_at DESC, created_at DESC;
+
 -- name: UpdateClaimTrust :exec
 UPDATE claims SET trust_score = ? WHERE id = ?;
 

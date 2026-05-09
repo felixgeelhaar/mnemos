@@ -45,17 +45,10 @@ func handleTrust(args []string, _ Flags) {
 	}
 	defer closeConn(conn)
 
-	all, err := conn.Claims.ListAll(ctx)
+	candidates, err := conn.Claims.ListByTestRequirementRef(ctx, testRef)
 	if err != nil {
-		exitWithMnemosError(false, NewSystemError(err, "list claims"))
+		exitWithMnemosError(false, NewSystemError(err, "list claims by test requirement"))
 		return
-	}
-
-	candidates := make([]domain.Claim, 0)
-	for _, c := range all {
-		if c.Type == domain.ClaimTypeTestResult && c.TestRequirementRef == testRef {
-			candidates = append(candidates, c)
-		}
 	}
 	if len(candidates) == 0 {
 		emitJSON(map[string]any{

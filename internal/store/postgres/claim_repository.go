@@ -244,6 +244,26 @@ FROM %s ORDER BY created_at ASC`, qualify(r.ns, "claims")))
 	return collectClaimRows(rows)
 }
 
+// ListByTestRequirementRef satisfies the corresponding ports method.
+// Note: scanClaimRow currently does not hydrate the test_provenance fields,
+// so trust scoring on postgres-backed test_result claims is incomplete
+// (tracked separately). The filter itself is backend-correct.
+func (r ClaimRepository) ListByTestRequirementRef(ctx context.Context, ref string) ([]domain.Claim, error) {
+	if ref == "" {
+		return nil, nil
+	}
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+SELECT id, text, type, confidence, status, created_at, created_by, trust_score, valid_from, valid_to
+FROM %s
+WHERE type = 'test_result' AND test_requirement_ref = $1
+ORDER BY test_last_run_at DESC, created_at DESC`, qualify(r.ns, "claims")), ref)
+	if err != nil {
+		return nil, fmt.Errorf("list claims by test_requirement_ref: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return collectClaimRows(rows)
+}
+
 // CountAll satisfies the corresponding ports method.
 func (r ClaimRepository) CountAll(ctx context.Context) (int64, error) {
 	var n int64

@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 221,
+  "version": 223,
   "task_states": {
     "task-action-outcome-recording": {
       "status": "done",
@@ -1031,9 +1031,15 @@
       "elapsed_minutes": 5
     },
     "task-test-coverage-for-mnemos-trust-cli-and-which_test_to_trust-mcp-tool": {
-      "status": "pending",
+      "status": "done",
       "path": "",
-      "elapsed_minutes": 0
+      "owner": "ai-agent",
+      "evidence": [
+        "Added cmd/mnemos/trust_test.go with 5 table-driven tests covering mcpRunWhichTestToTrust: PicksFreshHigherPassRatio (winner with clear margin), AmbiguousVerdictWhenMarginTight (gap \u003c 0.05), NoCandidates (empty result for unknown ref), RequiresRequirementRef (rejects empty input), FilterScopedToTestResultOnly (port filter ignores non-test claims). Tests use openConn against sqlite via t.Setenv MNEMOS_DB_URL temp path. All five pass."
+      ],
+      "started_at": "2026-05-09T08:36:10.818668+02:00",
+      "completed_at": "2026-05-09T08:38:19.092279+02:00",
+      "elapsed_minutes": 2
     },
     "task-test-provenance-model": {
       "status": "done",
@@ -1113,5 +1119,5 @@
       "elapsed_minutes": 6
     }
   },
-  "updated_at": "2026-05-09T08:35:46.459837+02:00"
+  "updated_at": "2026-05-09T08:38:19.092282+02:00"
 }

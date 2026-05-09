@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Mnemos – Data Sovereignty & Compliance Platform</title>
-  <meta name="description" content="Mnemos – a local‑first evidence layer for data sovereignty, AI‑driven claim extraction and contradiction detection.">
+  <title>Mnemos — Evidence layer for AI agents you actually own</title>
+  <meta name="description" content="Self-hosted memory + evidence layer for AI agents. Extracts claims, detects contradictions, answers queries with citations. SQLite/Postgres/MySQL/libSQL — your agents' memory never leaves your infrastructure.">
   <style>
     :root {
       --fg: #1a1a1a;
@@ -13,6 +13,10 @@
       --border: #e5e5e0;
       --accent: #0b5fff;
       --warn: #b04a00;
+      --code-bg: #0f1216;
+      --code-fg: #e6e6e6;
+      --code-muted: #8a8f99;
+      --code-accent: #7ec699;
     }
     * { box-sizing: border-box; }
     body {
@@ -22,8 +26,7 @@
       background: var(--bg);
     }
     .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
-    
-    /* Header */
+
     header {
       display: flex; justify-content: space-between; align-items: center;
       padding: 20px 0;
@@ -32,157 +35,207 @@
     header h1 { margin: 0; font-size: 24px; font-weight: 700; }
     nav a { color: var(--fg); text-decoration: none; margin-left: 24px; font-size: 14px; }
     nav a:hover { color: var(--accent); }
-    
-    /* Hero */
-    .hero {
-      padding: 80px 0 60px;
-      text-align: center;
-    }
+
+    .hero { padding: 80px 0 40px; text-align: center; }
     .hero h2 {
-      font-size: 42px;
+      font-size: 44px;
       font-weight: 800;
-      line-height: 1.2;
+      line-height: 1.15;
       margin: 0 0 20px;
       letter-spacing: -0.02em;
     }
-    .hero p {
+    .hero p.tagline {
       font-size: 20px;
       color: var(--muted);
-      max-width: 600px;
+      max-width: 720px;
       margin: 0 auto 32px;
     }
-    .cta-primary {
+    .hero .pill {
       display: inline-block;
-      padding: 14px 32px;
-      background: var(--accent);
-      color: white;
+      background: #eef2ff;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 4px 12px;
+      border-radius: 999px;
+      margin-bottom: 20px;
+      letter-spacing: 0.02em;
+    }
+    .cta-primary, .cta-secondary {
+      display: inline-block;
+      padding: 14px 28px;
       text-decoration: none;
       border-radius: 8px;
       font-weight: 600;
       font-size: 16px;
-      margin: 0 8px 16px 8px;
-      transition: opacity 0.2s;
+      margin: 0 6px 12px 6px;
+      transition: opacity 0.2s, border-color 0.2s;
     }
+    .cta-primary { background: var(--accent); color: white; }
     .cta-primary:hover { opacity: 0.9; }
-    .cta-secondary {
-      display: inline-block;
-      padding: 14px 32px;
-      background: white;
-      color: var(--fg);
-      text-decoration: none;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: 16px;
-      margin: 0 8px 16px 8px;
-      transition: border-color 0.2s;
-    }
+    .cta-secondary { background: white; color: var(--fg); border: 1px solid var(--border); }
     .cta-secondary:hover { border-color: var(--accent); }
-    
-    /* Features */
-    .features {
-      padding: 80px 0;
-      background: white;
+
+    /* Terminal demo */
+    .demo { padding: 20px 0 80px; }
+    .terminal {
+      background: var(--code-bg);
+      color: var(--code-fg);
+      border-radius: 10px;
+      padding: 0;
+      overflow: hidden;
+      box-shadow: 0 16px 40px -16px rgba(15, 18, 22, 0.4);
+      max-width: 920px;
+      margin: 0 auto;
     }
+    .terminal-bar {
+      display: flex;
+      align-items: center;
+      padding: 12px 16px;
+      background: #181c22;
+      border-bottom: 1px solid #23272e;
+    }
+    .terminal-bar span {
+      width: 12px; height: 12px; border-radius: 50%;
+      background: #3a3f47; margin-right: 8px;
+    }
+    .terminal-bar span:nth-child(1) { background: #ff5f56; }
+    .terminal-bar span:nth-child(2) { background: #ffbd2e; }
+    .terminal-bar span:nth-child(3) { background: #27c93f; }
+    .terminal-bar .label { margin-left: 12px; color: var(--code-muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; }
+    .terminal pre {
+      margin: 0;
+      padding: 20px 24px 24px;
+      font-family: ui-monospace, "SF Mono", Menlo, "Cascadia Code", monospace;
+      font-size: 14px;
+      line-height: 1.55;
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .terminal .prompt { color: var(--code-accent); }
+    .terminal .cmd { color: var(--code-fg); }
+    .terminal .out { color: var(--code-muted); }
+    .terminal .key { color: #b8c0ff; }
+    .terminal .str { color: #f7c977; }
+    .terminal .warn { color: #ff9b6e; font-weight: 600; }
+
+    /* Comparison */
+    .compare { padding: 80px 0; background: white; }
     .section-title {
       text-align: center;
       font-size: 32px;
       font-weight: 700;
-      margin: 0 0 48px;
-    }
-    .feature-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 40px;
-    }
-    .feature-card {
-      padding: 24px;
-    }
-    .feature-icon {
-      width: 48px;
-      height: 48px;
-      background: var(--accent);
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin-bottom: 16px;
-      color: white;
-      font-size: 24px;
-    }
-    .feature-card h3 {
       margin: 0 0 12px;
-      font-size: 20px;
-      font-weight: 600;
     }
-    .feature-card p {
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.6;
+    .section-sub { text-align: center; color: var(--muted); max-width: 680px; margin: 0 auto 40px; }
+    table.compare-table {
+      width: 100%;
+      max-width: 920px;
+      margin: 0 auto;
+      border-collapse: collapse;
+      font-size: 15px;
     }
-    
-    /* Social proof */
-    .social-proof {
-      padding: 60px 0;
+    table.compare-table th, table.compare-table td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
       text-align: center;
     }
-    .social-proof p {
-      color: var(--muted);
+    table.compare-table th:first-child, table.compare-table td:first-child {
+      text-align: left;
+      font-weight: 600;
+    }
+    table.compare-table thead th {
+      font-weight: 700;
+      color: var(--fg);
+      border-bottom: 2px solid var(--border);
+    }
+    table.compare-table .yes { color: #1c8a3c; font-weight: 600; }
+    table.compare-table .no { color: #b04a00; }
+    table.compare-table .partial { color: #6b6b6b; }
+    table.compare-table .footnote { font-size: 13px; color: var(--muted); margin: 16px auto 0; max-width: 920px; }
+
+    /* Proof points */
+    .proof { padding: 60px 0; }
+    .proof .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+      max-width: 920px;
+      margin: 0 auto;
+    }
+    .proof .card {
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: white;
+    }
+    .proof .metric {
+      font-size: 32px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+    .proof .desc { color: var(--muted); font-size: 14px; margin-bottom: 12px; }
+    .proof .card a { color: var(--accent); font-size: 13px; text-decoration: none; font-weight: 600; }
+    .proof .card a:hover { text-decoration: underline; }
+
+    /* Pricing */
+    .pricing { padding: 80px 0; background: white; }
+    .price-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+      max-width: 920px;
+      margin: 0 auto;
+    }
+    .price-card {
+      padding: 32px 24px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      text-align: left;
+    }
+    .price-card.highlight { border: 2px solid var(--accent); }
+    .price-tier {
       font-size: 14px;
       text-transform: uppercase;
-      letter-spacing: 0.1em;
-      margin-bottom: 24px;
-    }
-    .logos {
-      display: flex;
-      justify-content: center;
-      gap: 48px;
-      flex-wrap: wrap;
-      color: var(--muted);
-      font-size: 18px;
-      font-weight: 600;
-    }
-    
-    /* Lead capture */
-    .lead-section {
-      padding: 80px 0;
-      background: white;
-      text-align: center;
-    }
-    .lead-section h2 {
-      font-size: 32px;
+      letter-spacing: 0.08em;
+      color: var(--accent);
       font-weight: 700;
-      margin: 0 0 16px;
+      margin-bottom: 8px;
     }
-    .lead-section p {
-      color: var(--muted);
-      margin: 0 0 32px;
-    }
-    .lead-form {
-      display: flex;
-      justify-content: center;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-    .lead-form input {
-      padding: 12px 16px;
+    .price-amount { font-size: 28px; font-weight: 800; margin-bottom: 12px; }
+    .price-amount .small { font-size: 14px; font-weight: 500; color: var(--muted); }
+    .price-card ul { margin: 16px 0 24px; padding-left: 18px; color: var(--muted); }
+    .price-card ul li { margin-bottom: 6px; font-size: 14px; }
+    .price-card .price-cta {
+      display: block;
+      padding: 10px 16px;
+      background: var(--bg);
+      color: var(--fg);
       border: 1px solid var(--border);
       border-radius: 8px;
-      font-size: 16px;
-      width: 300px;
+      text-decoration: none;
+      text-align: center;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    .price-card.highlight .price-cta { background: var(--accent); color: white; border-color: var(--accent); }
+
+    /* Lead capture */
+    .lead-section { padding: 80px 0; text-align: center; }
+    .lead-section h2 { font-size: 28px; font-weight: 700; margin: 0 0 16px; }
+    .lead-section p { color: var(--muted); margin: 0 0 32px; }
+    .lead-form { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+    .lead-form input {
+      padding: 12px 16px; border: 1px solid var(--border); border-radius: 8px;
+      font-size: 16px; width: 320px;
     }
     .lead-form button {
-      padding: 12px 24px;
-      background: var(--accent);
-      color: white;
-      border: none;
-      border-radius: 8px;
-      font-weight: 600;
-      font-size: 16px;
-      cursor: pointer;
+      padding: 12px 24px; background: var(--accent); color: white; border: none;
+      border-radius: 8px; font-weight: 600; font-size: 16px; cursor: pointer;
     }
-    
-    /* Footer */
+
     footer {
       padding: 40px 0;
       border-top: 1px solid var(--border);
@@ -192,29 +245,30 @@
     }
     footer a { color: var(--muted); text-decoration: none; margin: 0 12px; }
     footer a:hover { color: var(--accent); }
-    
-    /* Responsive */
+
     @media (max-width: 768px) {
       .hero h2 { font-size: 32px; }
-      .hero p { font-size: 18px; }
+      .hero p.tagline { font-size: 17px; }
+      .terminal pre { font-size: 12px; padding: 16px; }
       nav a { margin-left: 12px; font-size: 13px; }
     }
-    
-    /* Focus styles for accessibility */
+
     :focus { outline: 2px solid var(--accent); outline-offset: 2px; }
   </style>
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
-    "@type": "WebSite",
-    "name": "Mnemos – Data Sovereignty & Compliance Platform",
-    "description": "Mnemos – a local‑first evidence layer for data sovereignty, AI‑driven claim extraction and contradiction detection.",
-    "url": "http://localhost:7777/",
-    "potentialAction": {
-      "@type": "TryAction",
-      "target": "http://localhost:7777/",
-      "name": "Start free trial"
-    }
+    "@type": "SoftwareApplication",
+    "name": "Mnemos",
+    "applicationCategory": "DeveloperApplication",
+    "description": "Self-hosted memory and evidence layer for AI agents. Extracts claims, detects contradictions, answers queries with citations.",
+    "operatingSystem": "Linux, macOS, Windows",
+    "url": "https://mnemos.dev/",
+    "offers": [
+      {"@type": "Offer", "name": "OSS", "price": "0", "priceCurrency": "USD"},
+      {"@type": "Offer", "name": "Team", "price": "0", "priceCurrency": "USD", "description": "Waitlist"},
+      {"@type": "Offer", "name": "Enterprise", "description": "Contact for pricing"}
+    ]
   }
   </script>
 </head>
@@ -223,92 +277,249 @@
     <header>
       <h1>Mnemos</h1>
       <nav>
+        <a href="#compare">Compare</a>
+        <a href="#pricing">Pricing</a>
         <a href="/app">Registry</a>
         <a href="https://github.com/felixgeelhaar/mnemos">GitHub</a>
         <a href="https://github.com/felixgeelhaar/mnemos#readme">Docs</a>
-        <a href="mailto:hello@mnemos.ai">Contact</a>
       </nav>
     </header>
   </div>
-  
+
   <section class="hero">
     <div class="container">
-      <h2>Local-first memory and evidence layer for compliant teams</h2>
-      <p>Capture decisions, claims, and outcomes in one place, then surface conflicts with provenance you can audit.</p>
-      <a href="/app" class="cta-primary">Open App</a>
-      <a href="https://github.com/felixgeelhaar/mnemos#readme" class="cta-secondary">Read Docs</a>
+      <span class="pill">Self-hosted · Local-first · Open source</span>
+      <h2>Evidence layer for AI agents you actually own</h2>
+      <p class="tagline">
+        Mnemos extracts claims, detects contradictions, and answers queries with citations.
+        Runs on your SQLite, Postgres, MySQL, or libSQL — your agents' memory never leaves your infrastructure.
+      </p>
+      <a href="https://github.com/felixgeelhaar/mnemos#install" class="cta-primary">Install</a>
+      <a href="#demo" class="cta-secondary">See it work</a>
     </div>
   </section>
-  
-  <section class="features">
+
+  <section id="demo" class="demo">
     <div class="container">
-      <h2 class="section-title">Why Mnemos?</h2>
-      <div class="feature-grid">
-        <div class="feature-card">
-          <div class="feature-icon">📥</div>
-          <h3>Evidence Capture</h3>
-          <p>Auto‑extract claims from documents, emails, and code commits. Support for multiple input formats with AI‑assisted extraction.</p>
+      <div class="terminal">
+        <div class="terminal-bar">
+          <span></span><span></span><span></span>
+          <span class="label">~ mnemos contradiction demo</span>
         </div>
-        <div class="feature-card">
-          <div class="feature-icon">🔍</div>
-          <h3>Contradiction Detection</h3>
-          <p>AI‑driven graph analysis highlights conflicting claims instantly. Resolve disputes with full context and audit trails.</p>
+<pre><span class="prompt">$</span> <span class="cmd">mnemos process --text "We chose Postgres for the new service. \
+                          Final pick is MySQL because of the existing fleet."</span>
+
+<span class="out">ingested</span>  2 events into run <span class="key">run_2026-05-09_a1b2</span>
+<span class="out">extracted</span> 2 claims (rule-based, no LLM required)
+<span class="out">related</span>   1 relationship: <span class="warn">contradicts</span>
+
+<span class="prompt">$</span> <span class="cmd">mnemos query "what database did we pick?"</span>
+{
+  <span class="key">"answer"</span>: <span class="str">"Tech stack decisions show contradiction: Postgres vs MySQL"</span>,
+  <span class="key">"contradictions"</span>: [
+    {
+      <span class="key">"a"</span>: <span class="str">"We chose Postgres for the new service"</span>,
+      <span class="key">"b"</span>: <span class="str">"Final pick is MySQL because of the existing fleet"</span>,
+      <span class="key">"evidence"</span>: [<span class="str">"event_47a3"</span>, <span class="str">"event_91c2"</span>],
+      <span class="key">"trust"</span>:    { <span class="key">"a"</span>: 0.71, <span class="key">"b"</span>: 0.83 }
+    }
+  ]
+}</pre>
+      </div>
+      <p style="text-align:center;color:var(--muted);font-size:13px;margin-top:16px;">
+        Real output. Two seconds end-to-end. No LLM keys required.
+      </p>
+    </div>
+  </section>
+
+  <section id="compare" class="compare">
+    <div class="container">
+      <h2 class="section-title">vs hosted memory services</h2>
+      <p class="section-sub">
+        Mem0, Zep, and Letta sit on a hosted control plane by default.
+        Mnemos runs entirely on your infrastructure and ships
+        contradictions + per-claim evidence as first-class outputs.
+      </p>
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Mnemos</th>
+            <th>mem0</th>
+            <th>Zep</th>
+            <th>Letta</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Runs entirely self-hosted (no SaaS dependency)</td>
+            <td class="yes">✅</td>
+            <td class="partial">OSS edition</td>
+            <td class="partial">OSS edition</td>
+            <td class="yes">✅</td>
+          </tr>
+          <tr>
+            <td>Contradiction detection as a first-class output</td>
+            <td class="yes">✅</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+          </tr>
+          <tr>
+            <td>Per-claim evidence (≥1 source event)</td>
+            <td class="yes">✅</td>
+            <td class="no">—</td>
+            <td class="partial">facts only</td>
+            <td class="no">—</td>
+          </tr>
+          <tr>
+            <td>Trust score blending confidence + corroboration + freshness</td>
+            <td class="yes">✅</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+          </tr>
+          <tr>
+            <td>Append-only event log (audit-grade)</td>
+            <td class="yes">✅</td>
+            <td class="no">—</td>
+            <td class="partial">partial</td>
+            <td class="partial">partial</td>
+          </tr>
+          <tr>
+            <td>Pluggable storage (SQLite / Postgres / MySQL / libSQL)</td>
+            <td class="yes">✅</td>
+            <td class="partial">vendor</td>
+            <td class="partial">vendor</td>
+            <td class="partial">vendor</td>
+          </tr>
+          <tr>
+            <td>Default-off telemetry</td>
+            <td class="yes">✅</td>
+            <td class="no">—</td>
+            <td class="no">—</td>
+            <td class="partial">configurable</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="footnote">
+        Comparison reflects published documentation as of 2026-05.
+        Head-to-head LongMemEval and LoCoMo benchmarks are scaffolded in
+        <a href="https://github.com/felixgeelhaar/mnemos/tree/main/benchmarks">benchmarks/</a>;
+        adapter implementations land before public results are claimed.
+      </p>
+    </div>
+  </section>
+
+  <section class="proof">
+    <div class="container">
+      <h2 class="section-title">Engineered like infrastructure</h2>
+      <p class="section-sub">Numbers from the codebase, not adjectives.</p>
+      <div class="grid">
+        <div class="card">
+          <div class="metric">100%</div>
+          <div class="desc">Mutation kill rate on the trust-scoring core (45 / 45 mutants caught).</div>
+          <a href="https://github.com/felixgeelhaar/mnemos/blob/main/docs/testing/mutation.md">mutation testing →</a>
         </div>
-        <div class="feature-card">
-          <div class="feature-icon">🔒</div>
-          <h3>Immutable Audit Log</h3>
-          <p>All changes stored on local‑first SQLite / libsql with cryptographic proof. Data‑sovereign, GDPR‑friendly.</p>
+        <div class="card">
+          <div class="metric">5 backends</div>
+          <div class="desc">SQLite, Postgres, MySQL, libSQL, in-memory — same schema, same tests.</div>
+          <a href="https://github.com/felixgeelhaar/mnemos/blob/main/CLAUDE.md#pluggable-backends-adr-0001">backend matrix →</a>
+        </div>
+        <div class="card">
+          <div class="metric">99.9%</div>
+          <div class="desc">SLO target with documented error budget and burn-rate alerting.</div>
+          <a href="https://github.com/felixgeelhaar/mnemos/blob/main/SLO.md">SLO doc →</a>
+        </div>
+        <div class="card">
+          <div class="metric">0 bytes</div>
+          <div class="desc">Telemetry sent by default. Two independent gates required to opt in.</div>
+          <a href="https://github.com/felixgeelhaar/mnemos/blob/main/docs/telemetry.md">privacy posture →</a>
         </div>
       </div>
     </div>
   </section>
-  
-  <section class="social-proof">
+
+  <section id="pricing" class="pricing">
     <div class="container">
-      <p>Built on practical principles</p>
-      <div class="logos">
-        <span>Local First</span>
-        <span>Open Source</span>
-        <span>Auditable by Design</span>
+      <h2 class="section-title">Pricing</h2>
+      <p class="section-sub">
+        OSS is the whole product. Team and Enterprise add managed sync,
+        SSO, and the operational surface enterprise teams expect.
+      </p>
+      <div class="price-grid">
+        <div class="price-card">
+          <div class="price-tier">OSS</div>
+          <div class="price-amount">Free <span class="small">forever</span></div>
+          <ul>
+            <li>Full feature set, self-hosted</li>
+            <li>SQLite / Postgres / MySQL / libSQL</li>
+            <li>CLI, MCP, REST, gRPC surfaces</li>
+            <li>Apache-2.0 licensed</li>
+          </ul>
+          <a href="https://github.com/felixgeelhaar/mnemos#install" class="price-cta">Install</a>
+        </div>
+        <div class="price-card highlight">
+          <div class="price-tier">Team · Waitlist</div>
+          <div class="price-amount">TBA</div>
+          <ul>
+            <li>Managed registry sync across hosts</li>
+            <li>SSO (OIDC / SAML)</li>
+            <li>Hosted MCP gateway</li>
+            <li>Email support, 1-business-day SLA</li>
+          </ul>
+          <a href="#contact" class="price-cta">Join waitlist</a>
+        </div>
+        <div class="price-card">
+          <div class="price-tier">Enterprise</div>
+          <div class="price-amount">Contact</div>
+          <ul>
+            <li>Audit log export, SOC2 alignment</li>
+            <li>SLA + incident response</li>
+            <li>Air-gapped deploy support</li>
+            <li>Custom retention &amp; key-management</li>
+          </ul>
+          <a href="mailto:hello@mnemos.dev?subject=Enterprise%20enquiry" class="price-cta">Contact sales</a>
+        </div>
       </div>
     </div>
   </section>
-  
-  <section class="lead-section">
+
+  <section id="contact" class="lead-section">
     <div class="container">
-      <h2>Ready to strengthen your compliance posture?</h2>
-      <p>Join teams using Mnemos for reliable, explainable evidence management.</p>
+      <h2>Join the Team waitlist</h2>
+      <p>One email when managed Team is ready. No marketing list.</p>
       <form class="lead-form" id="lead-form">
         <label for="lead-email" style="position:absolute;left:-9999px;">Work email</label>
-        <input id="lead-email" type="email" name="email" placeholder="Your work email" required>
-        <button type="submit">Request Demo</button>
+        <input id="lead-email" type="email" name="email" placeholder="you@company.com" required>
+        <button type="submit">Join waitlist</button>
       </form>
-      <p style="margin-top:12px;color:var(--muted);font-size:14px;">No spam. We only use your email to reply to your demo request.</p>
+      <p style="margin-top:12px;color:var(--muted);font-size:14px;">No spam. We only use your email to notify you when Team launches.</p>
     </div>
   </section>
-  
+
   <footer>
     <div class="container">
       <p>
         <a href="https://github.com/felixgeelhaar/mnemos#readme">Documentation</a>
         <a href="https://github.com/felixgeelhaar/mnemos/issues">Support</a>
+        <a href="https://github.com/felixgeelhaar/mnemos/tree/main/benchmarks">Benchmarks</a>
         <a href="/app">Open App</a>
       </p>
-      <p>&copy; 2026 Mnemos. Built with local‑first principles.</p>
+      <p>&copy; 2026 Mnemos. Self-hosted by design.</p>
     </div>
   </footer>
-  
+
   <script>
-    // Lead form handler
     document.getElementById('lead-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const email = e.target.email.value;
       if (!email) return;
-      
+
       const btn = e.target.querySelector('button');
       btn.textContent = 'Sending...';
       btn.disabled = true;
-      
+
       try {
         const resp = await fetch('/v1/leads', {
           method: 'POST',
@@ -316,22 +527,20 @@
           body: JSON.stringify({ email })
         });
         if (resp.ok) {
-          alert("Thank you! We'll be in touch soon.");
+          alert("Thanks — we'll email you when Team is ready.");
           e.target.reset();
         } else {
           alert('Something went wrong. Please try again later.');
         }
       } catch (err) {
-        // Fallback: open mailto
-        window.location.href = 'mailto:hello@mnemos.ai?subject=Demo Request&body=Email: ' + encodeURIComponent(email);
+        window.location.href = 'mailto:hello@mnemos.dev?subject=Team%20waitlist&body=Email: ' + encodeURIComponent(email);
       } finally {
-        btn.textContent = 'Request Demo';
+        btn.textContent = 'Join waitlist';
         btn.disabled = false;
       }
     });
-    
-    // CTA click tracking
-    document.querySelectorAll('.cta-primary, .cta-secondary').forEach(el => {
+
+    document.querySelectorAll('.cta-primary, .cta-secondary, .price-cta').forEach(el => {
       el.addEventListener('click', () => {
         if (window.gtag) {
           gtag('event', 'cta_click', {

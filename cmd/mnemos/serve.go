@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/mail"
 	"os"
 	"os/signal"
 	"strconv"
@@ -248,7 +251,8 @@ func newServerMux(conn *store.Conn) http.Handler {
 	mux.HandleFunc("/", handleLanding)
 	mux.HandleFunc("/app", handleWebRoot)
 	mux.HandleFunc("/health", makeHealthHandler(conn))
-	mux.HandleFunc("/v1/leads", makeLeadsHandler())
+	leadsLogger := bolt.New(bolt.NewJSONHandler(os.Stderr))
+	mux.Handle("/v1/leads", leadsRateLimitMiddleware(makeLeadsHandler(leadsLogger)))
 	mux.HandleFunc("/v1/events", makeEventsHandler(conn))
 	mux.HandleFunc("/v1/claims", makeClaimsHandler(conn))
 	mux.HandleFunc("/v1/relationships", makeRelationshipsHandler(conn))
@@ -287,7 +291,17 @@ type leadResponse struct {
 	Status string `json:"status"`
 }
 
-func makeLeadsHandler() http.HandlerFunc {
+// maxLeadEmailBytes caps email length at the RFC 5321 maximum so
+// pathologically long inputs (e.g. an attacker streaming a 1 MiB body
+// with no LF) never reach the structured logger.
+const maxLeadEmailBytes = 254
+
+// makeLeadsHandler returns the public POST /v1/leads handler. The
+// endpoint intentionally bypasses JWT auth (handled in
+// jwtAuthMiddleware) so the marketing landing form works for
+// unauthenticated visitors. That means every defence — rate limit,
+// strict email validation, structured logging — must live here.
+func makeLeadsHandler(logger *bolt.Logger) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -295,20 +309,80 @@ func makeLeadsHandler() http.HandlerFunc {
 		}
 
 		var req leadRequest
-		dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+		// MaxBytesReader closes the body once exceeded so a slowloris
+		// stream can't keep the handler alive past 1 MiB.
+		dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid json")
 			return
 		}
-		if strings.TrimSpace(req.Email) == "" || !strings.Contains(req.Email, "@") {
-			writeError(w, http.StatusBadRequest, "email is required")
+
+		email, err := validateLeadEmail(req.Email)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
-		fmt.Fprintf(os.Stderr, "lead captured email=%s\n", req.Email)
+		// Hash the email before logging so the access log does not
+		// become a plaintext PII trail. The hash is enough to detect
+		// duplicate-form abuse without retaining the address.
+		logger.Info().
+			Str("event", "lead_captured").
+			Str("email_sha256", sha256Hex(email)).
+			Str("remote_ip", clientIP(r)).
+			Msg("lead_captured")
+
 		writeJSON(w, http.StatusOK, leadResponse{Status: "ok"})
 	}
+}
+
+// validateLeadEmail enforces RFC 5321 length, RFC 5322 syntax (via
+// net/mail.ParseAddress), and rejects any control-character payload
+// that could be used for log injection. Returns the normalised
+// address (lowercased local + domain).
+func validateLeadEmail(raw string) (string, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", errors.New("email is required")
+	}
+	if len(s) > maxLeadEmailBytes {
+		return "", fmt.Errorf("email exceeds %d bytes", maxLeadEmailBytes)
+	}
+	for _, r := range s {
+		// Reject CR/LF and any other control char — these are the
+		// classic log-injection vectors. Tabs are also disallowed so
+		// the log line stays single-row in any tab-aware viewer.
+		if r < 0x20 || r == 0x7f {
+			return "", errors.New("email contains control characters")
+		}
+	}
+	addr, err := mail.ParseAddress(s)
+	if err != nil {
+		return "", fmt.Errorf("invalid email: %w", err)
+	}
+	return strings.ToLower(addr.Address), nil
+}
+
+func sha256Hex(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+func clientIP(r *http.Request) string {
+	// Honour X-Forwarded-For when present and take the leftmost entry
+	// (the original client). Defaults to RemoteAddr's host portion.
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if i := strings.IndexByte(xff, ','); i >= 0 {
+			return strings.TrimSpace(xff[:i])
+		}
+		return strings.TrimSpace(xff)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 type healthResponse struct {

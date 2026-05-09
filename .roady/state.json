@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 225,
+  "version": 227,
   "task_states": {
     "task-action-outcome-recording": {
       "status": "done",
@@ -807,9 +807,15 @@
       "elapsed_minutes": 0
     },
     "task-public-/v1/leads-hardening:-rate-limit-+-email-validation-+-structured-logging": {
-      "status": "pending",
+      "status": "done",
       "path": "",
-      "elapsed_minutes": 0
+      "owner": "ai-agent",
+      "evidence": [
+        "Added validateLeadEmail (net/mail.ParseAddress, 254-byte cap, control-char rejection, lowercased normalisation). Added serve_ratelimit.go: per-IP token-bucket via golang.org/x/time/rate (5 req/min, burst 10) with 30-min TTL sweep. clientIP honours X-Forwarded-For. makeLeadsHandler now uses bolt structured logger writing email_sha256 + remote_ip — no plaintext PII; replaced fmt.Fprintf to stderr. Switched body decode to http.MaxBytesReader. Tests TestValidateLeadEmail (13 cases incl. CRLF/LF/DEL/embedded-tab/null-byte/over-long), TestLeadsRateLimit_Throttles (11th request returns 429 with Retry-After), TestLeadsHandler_RejectsInvalidEmail, TestLeadsHandler_RejectsNonPost. All pass."
+      ],
+      "started_at": "2026-05-09T08:40:44.133903+02:00",
+      "completed_at": "2026-05-09T08:43:55.588595+02:00",
+      "elapsed_minutes": 3
     },
     "task-published-cross-product-benchmarks-(locomo-+-longmemeval)": {
       "status": "done",
@@ -1125,5 +1131,5 @@
       "elapsed_minutes": 6
     }
   },
-  "updated_at": "2026-05-09T08:40:26.420413+02:00"
+  "updated_at": "2026-05-09T08:43:55.588596+02:00"
 }

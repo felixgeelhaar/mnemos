@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mnemos — Self-hosted memory for AI apps</title>
-  <meta name="description" content="Self-hosted memory infrastructure for AI teams with strict data boundaries. Own your memory layer, replay decisions with evidence, and catch contradictions before they ship to users.">
-  <meta property="og:title" content="Mnemos — Self-hosted memory for AI apps">
-  <meta property="og:description" content="For teams building AI in regulated or private environments: self-hosted memory, evidence-linked claims, contradiction detection, and auditable replay.">
+  <title>Mnemos — Self-hosted memory + evidence layer for AI agents (MCP-native)</title>
+  <meta name="description" content="Self-hosted memory layer for AI agents. Returns every recall with citations, surfaces contradictions instead of silently overwriting them, drops into Claude Desktop, Cursor, or any MCP runtime in one config block.">
+  <meta property="og:title" content="Mnemos — Memory for AI agents that stays on your servers">
+  <meta property="og:description" content="Self-hosted memory + evidence layer for AI agents. Citations on every recall, contradictions returned in the query response, MCP-native integration with Claude Desktop / Cursor / LangGraph.">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -30,13 +30,13 @@
 <main id="main" class="wrap">
 
 <section class="hero">
-  <p class="kicker">A new category: memory infrastructure for high-trust AI systems.</p>
-  <h1>Stop outsourcing memory. <span class="accent">Own the layer your AI depends on.</span></h1>
+  <p class="kicker">Self-hosted · MCP-native · MIT-licensed</p>
+  <h1>Memory for AI agents <span class="accent">that stays on your servers — and tells you when it's lying.</span></h1>
   <p class="lede">
-    Mnemos is self-hosted memory infrastructure for AI apps. Keep data
-    in your environment, preserve evidence per claim, surface contradictions
-    before the model answers, and replay decision history months later.
-    No managed vendor dependency required.
+    Mnemos is a self-hosted memory + evidence layer for AI agents. Every recall ships with citations,
+    every contradiction surfaces explicitly in the query response, and every byte stays on your
+    infrastructure. Drops into Claude Desktop, Cursor, LangGraph, or any MCP-compatible runtime
+    in one config block.
   </p>
   <div class="cta-row">
     <a class="cta primary" href="#run">Run demo now</a>
@@ -92,10 +92,13 @@ confidence: 0.84</code></pre>
   </div>
 
   <div class="callout">
-    <strong>Design partner program.</strong>
-    If you're shipping AI in a regulated or high-risk workflow, email
-    <a href="mailto:felix@felixgeelhaar.de?subject=Mnemos%20Design%20Partner">felix@felixgeelhaar.de</a>
-    for a 30-minute architecture review and rollout plan.
+    <strong>OSS today, Team in private beta, Enterprise on request.</strong>
+    OSS is the whole product — MIT-licensed, 5 storage backends, MCP / REST / gRPC.
+    For managed registry sync + SSO, join the
+    <a href="mailto:felix@felixgeelhaar.de?subject=Mnemos%20Team%20waitlist">Team waitlist</a>.
+    For air-gapped deploy + SLA, email
+    <a href="mailto:felix@felixgeelhaar.de?subject=Mnemos%20Enterprise%20enquiry">felix@felixgeelhaar.de</a>
+    — founder-led, replies same business day.
   </div>
 </section>
 
@@ -211,9 +214,9 @@ $ mnemos query --at 2026-05-01 "What happened with the deployment?"
       <span role="columnheader">What you give up</span>
     </div>
     <div class="vs-row" role="row">
-      <span role="cell"><strong>Hosted AI memory services</strong></span>
-      <span role="cell">Fast onboarding, consumer apps, no data residency constraints.</span>
-      <span role="cell">Vendor cloud lock-in, per-call billing, customer data leaves your infra.</span>
+      <span role="cell"><strong>mem0 / Zep / Letta (hosted)</strong></span>
+      <span role="cell">Convenience, SDK polish, fast onboarding.</span>
+      <span role="cell">Vendor cloud, per-call billing, contradictions silently merged, no per-claim evidence.</span>
     </div>
     <div class="vs-row" role="row">
       <span role="cell"><strong>Vector databases</strong></span>
@@ -357,22 +360,6 @@ curl -s "http://localhost:7777/v1/events?run_id=&lt;run-id&gt;" | jq</code></pre
   </div>
 </section>
 
-<section id="stack" aria-labelledby="stack-heading">
-  <p class="kicker">Related projects</p>
-  <h2 id="stack-heading">Mnemos is standalone, and composes with the wider cognitive stack.</h2>
-  <p>
-    Mnemos is a memory layer first. The same author maintains three
-    related services and a runtime that drives all four together.
-    None of them are required to use Mnemos.
-  </p>
-  <div class="cols">
-    <div class="card"><h3><a href="https://felixgeelhaar.github.io/chronos/">Chronos · time</a></h3><p>Pattern detection over time-series data. Typed signals, not threshold alerts.</p></div>
-    <div class="card"><h3><a href="https://felixgeelhaar.github.io/nous/">Nous · decisions</a></h3><p>Commitment extraction, risk evaluation, intervention generation.</p></div>
-    <div class="card"><h3><a href="https://felixgeelhaar.github.io/praxis/">Praxis · execution</a></h3><p>Three-verb action layer with idempotency and replay-from-audit.</p></div>
-    <div class="card"><h3><a href="https://felixgeelhaar.github.io/olymp/">Olymp · runtime</a></h3><p>Drives observe → understand → decide → act → learn end-to-end.</p></div>
-  </div>
-</section>
-
 </main>
 
 <footer>
@@ -390,20 +377,12 @@ curl -s "http://localhost:7777/v1/events?run_id=&lt;run-id&gt;" | jq</code></pre
       </ul>
     </div>
     <div>
-      <h4>Stack</h4>
-      <ul>
-        <li><a href="https://felixgeelhaar.github.io/chronos/">Chronos</a></li>
-        <li><a href="https://felixgeelhaar.github.io/nous/">Nous</a></li>
-        <li><a href="https://felixgeelhaar.github.io/praxis/">Praxis</a></li>
-        <li><a href="https://felixgeelhaar.github.io/olymp/">Olymp</a></li>
-      </ul>
-    </div>
-    <div>
       <h4>Contact</h4>
       <ul>
         <li><a href="https://github.com/felixgeelhaar/mnemos/discussions">Discussions</a></li>
         <li><a href="https://github.com/felixgeelhaar/mnemos/issues">Issues</a></li>
-        <li><a href="mailto:felix@felixgeelhaar.de">Design partners →</a></li>
+        <li><a href="mailto:felix@felixgeelhaar.de?subject=Mnemos%20Team%20waitlist">Team waitlist</a></li>
+        <li><a href="mailto:felix@felixgeelhaar.de?subject=Mnemos%20Enterprise%20enquiry">Enterprise enquiry</a></li>
       </ul>
     </div>
   </div>

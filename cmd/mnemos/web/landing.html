@@ -293,12 +293,10 @@
       <span class="pill">Self-hosted · MCP-native · MIT-licensed</span>
       <h2>Memory for AI agents that stays on your servers — and tells you when it's lying.</h2>
       <p class="tagline">
-        Mnemos is a self-hosted memory + evidence layer for AI agents. Every recall comes with citations,
-        every contradiction surfaces explicitly, and every byte stays on your infrastructure.
-        Drops into Claude Desktop, Cursor, LangGraph, or any MCP-compatible runtime in one config block.
-      </p>
-      <p class="tagline" style="font-size:15px;margin-top:-12px;">
-        For teams running production agents that need persistent state without per-call SaaS billing.
+        Self-hosted memory + evidence layer for AI agents. Every recall ships with citations,
+        every contradiction surfaces explicitly in the query response, every byte stays on
+        your infrastructure. Drops into Claude Desktop, Cursor, LangGraph, or any MCP-compatible
+        runtime in one config block.
       </p>
       <a href="#demo" class="cta-primary">See a 30-second demo</a>
       <a href="https://github.com/felixgeelhaar/mnemos#install" class="cta-secondary">Install</a>
@@ -344,12 +342,12 @@
 
   <section id="mcp" class="demo" style="padding-top:0;">
     <div class="container">
-      <h2 class="section-title" style="margin-bottom:12px;">Drop-in MCP server</h2>
+      <h2 class="section-title" style="margin-bottom:12px;">Works with Claude Desktop, Cursor, and LangGraph</h2>
       <p class="section-sub">
         <code>mnemos mcp</code> exposes 14 tools over stdio: <code>query_knowledge</code>,
         <code>process_text</code>, <code>record_decision</code>, <code>query_lessons</code>,
-        <code>which_test_to_trust</code>, and more. Works with Claude Desktop, Cursor,
-        and any MCP-compatible runtime — no SDK, no proxy.
+        <code>which_test_to_trust</code>, and more. Drop the snippet below into any
+        MCP-compatible runtime — no SDK, no proxy.
       </p>
       <div class="terminal">
         <div class="terminal-bar">

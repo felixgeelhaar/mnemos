@@ -99,7 +99,7 @@ All domain types have `Validate()` methods. Contradictions are first-class conce
 - **Claim-level embeddings**: both events and claims are embedded when `--embed` is set; claims are reranked by cosine similarity at query time
 - **Incremental relationship detection**: new claims are compared against existing knowledge base via `DetectIncremental`, not just within the current batch
 - **Grounded generation**: `query --llm` uses the LLM to synthesize answers from retrieved claims with inline citations
-- **LLM cache**: extraction results cached in `data/cache/llm-extraction/<hash>.json`; prompt version `v1.2` with few-shot examples
+- **LLM cache**: extraction results cached in `data/cache/llm-extraction/<hash>.json` (default 1 GiB cap, oldest-mtime eviction; `MNEMOS_LLM_CACHE_MAX_BYTES` overrides). Prompt version tracked at `internal/extract/prompt.go:PromptVersion` (currently `v1.4`, includes entity extraction, junk filters, richer few-shots).
 - **Run isolation**: `run_id` on events enables scoped queries and extraction across ingestion runs
 - **Contested detection**: happens during rule-based extraction (high token overlap + same polarity), separate from relationship detection
 - **CGO_ENABLED=0**: builds are pure Go via modernc.org/sqlite (no C compiler needed)

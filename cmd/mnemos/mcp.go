@@ -169,15 +169,16 @@ type mcpWhichTestToTrustInput struct {
 }
 
 type mcpWhichTestToTrustCandidate struct {
-	ClaimID       string  `json:"claim_id"`
-	Text          string  `json:"text"`
-	TestID        string  `json:"test_id,omitempty"`
-	TestAuthor    string  `json:"test_author,omitempty"`
-	TestLastRunAt string  `json:"test_last_run_at,omitempty"`
-	TestPassCount int     `json:"test_pass_count"`
-	TestFailCount int     `json:"test_fail_count"`
-	Score         float64 `json:"score"`
-	Rationale     string  `json:"rationale"`
+	ClaimID        string  `json:"claim_id"`
+	Text           string  `json:"text"`
+	TestID         string  `json:"test_id,omitempty"`
+	TestAuthor     string  `json:"test_author,omitempty"`
+	TestLastRunAt  string  `json:"test_last_run_at,omitempty"`
+	TestPassCount  int     `json:"test_pass_count"`
+	TestFailCount  int     `json:"test_fail_count"`
+	Score          float64 `json:"score"`
+	Rationale      string  `json:"rationale"`       // compact metric breakdown
+	ProseRationale string  `json:"prose_rationale"` // operator-readable
 }
 
 type mcpWhichTestToTrustOutput struct {
@@ -1123,7 +1124,7 @@ func mcpRunWhichTestToTrust(ctx context.Context, input mcpWhichTestToTrustInput)
 	now := time.Now().UTC()
 	cands := make([]mcpWhichTestToTrustCandidate, 0)
 	for _, c := range matches {
-		score, rationale := trust.ScoreCredibility(trust.CredibilityInputs{
+		score, _, rationale, prose := trust.BuildReport(trust.CredibilityInputs{
 			CurrentTrust:    c.TrustScore,
 			SourceAuthority: c.SourceAuthority,
 			Liveness:        c.Liveness,
@@ -1143,15 +1144,16 @@ func mcpRunWhichTestToTrust(ctx context.Context, input mcpWhichTestToTrustInput)
 			lastRun = c.TestLastRunAt.UTC().Format(time.RFC3339)
 		}
 		cands = append(cands, mcpWhichTestToTrustCandidate{
-			ClaimID:       c.ID,
-			Text:          c.Text,
-			TestID:        c.TestID,
-			TestAuthor:    c.TestAuthor,
-			TestLastRunAt: lastRun,
-			TestPassCount: c.TestPassCount,
-			TestFailCount: c.TestFailCount,
-			Score:         score,
-			Rationale:     rationale,
+			ClaimID:        c.ID,
+			Text:           c.Text,
+			TestID:         c.TestID,
+			TestAuthor:     c.TestAuthor,
+			TestLastRunAt:  lastRun,
+			TestPassCount:  c.TestPassCount,
+			TestFailCount:  c.TestFailCount,
+			Score:          score,
+			Rationale:      rationale,
+			ProseRationale: prose,
 		})
 	}
 

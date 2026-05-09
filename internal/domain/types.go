@@ -834,8 +834,14 @@ type ProvenanceReport struct {
 	Score float64 `json:"score"`
 	// Signals is the per-component breakdown in contribution-descending order.
 	Signals []ProvenanceSignal `json:"signals"`
-	// Rationale is the same compact rationale string returned by trust.ScoreCredibility.
+	// Rationale is the compact, machine-friendly rationale string returned
+	// by trust.ScoreCredibility — engineer shorthand suitable for tooling
+	// and dashboards. Pair with ProseRationale when surfacing to humans.
 	Rationale string `json:"rationale"`
+	// ProseRationale is a plain-English explanation of the trust decision
+	// suitable for non-technical operators ("Last ran 12 days ago.
+	// Passed 8 of 10 runs. Live test."). Always populated when Score is.
+	ProseRationale string `json:"prose_rationale,omitempty"`
 	// SourceDocument is the primary source of the claim, for attribution.
 	SourceDocument string `json:"source_document,omitempty"`
 	// Liveness is the evaluated liveness status of the source at query time.

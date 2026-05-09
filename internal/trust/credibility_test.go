@@ -23,7 +23,7 @@ func TestBuildReport_ScoreCredibilityParity(t *testing.T) {
 		{CurrentTrust: 0.6, IsTest: true, TestLastRunAt: now.Add(-90 * 24 * time.Hour), TestPassCount: 5, TestFailCount: 5, Liveness: domain.LivenessStale, Now: now},
 	}
 	for i, in := range cases {
-		score, _, rationale := BuildReport(in)
+		score, _, rationale, prose := BuildReport(in)
 		wrappedScore, wrappedRationale := ScoreCredibility(in)
 		if score != wrappedScore {
 			t.Errorf("case %d: score drift BuildReport=%.6f ScoreCredibility=%.6f", i, score, wrappedScore)
@@ -31,6 +31,60 @@ func TestBuildReport_ScoreCredibilityParity(t *testing.T) {
 		if rationale != wrappedRationale {
 			t.Errorf("case %d: rationale drift\n  BuildReport=%q\n  ScoreCredibility=%q", i, rationale, wrappedRationale)
 		}
+		if prose == "" {
+			t.Errorf("case %d: empty prose rationale", i)
+		}
+	}
+}
+
+// TestBuildReport_ProseRationale_TestSignals asserts the prose rationale
+// surfaces the test-run timing, decisiveness, and liveness signals in
+// human-readable form so a non-technical operator can act on the
+// "which test to trust" output without learning the weight breakdown.
+func TestBuildReport_ProseRationale_TestSignals(t *testing.T) {
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name string
+		in   CredibilityInputs
+		want []string // substrings that must appear
+	}{
+		{
+			name: "fresh decisive live test",
+			in: CredibilityInputs{
+				CurrentTrust: 0.7, IsTest: true,
+				TestLastRunAt: now.Add(-2 * time.Hour),
+				TestPassCount: 9, TestFailCount: 1,
+				Liveness: domain.LivenessLive, Now: now,
+			},
+			want: []string{"Last ran today", "Passed 9 of 10 runs (decisive)", "Live test"},
+		},
+		{
+			name: "stale flaky dead test",
+			in: CredibilityInputs{
+				CurrentTrust: 0.4, IsTest: true,
+				TestLastRunAt: now.Add(-180 * 24 * time.Hour),
+				TestPassCount: 5, TestFailCount: 5,
+				Liveness: domain.LivenessDead, Now: now,
+			},
+			want: []string{"180 days ago (stale)", "5 of 10 runs (flaky)", "Dead source"},
+		},
+		{
+			name: "minimum: only authority neutral note",
+			in: CredibilityInputs{
+				CurrentTrust: 0.5, Now: now,
+			},
+			want: []string{"Authority not configured"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, _, _, prose := BuildReport(c.in)
+			for _, want := range c.want {
+				if !strings.Contains(prose, want) {
+					t.Errorf("prose missing %q\n  got: %q", want, prose)
+				}
+			}
+		})
 	}
 }
 
@@ -52,7 +106,7 @@ func TestBuildReport_SignalContributionsSumToScore(t *testing.T) {
 		TestPassCount:   9,
 		TestFailCount:   1,
 	}
-	score, signals, _ := BuildReport(in)
+	score, signals, _, _ := BuildReport(in)
 
 	var sum float64
 	for _, s := range signals {

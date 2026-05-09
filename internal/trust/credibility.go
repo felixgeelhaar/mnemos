@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/felixgeelhaar/mnemos/internal/domain"
@@ -51,14 +52,15 @@ const (
 	wTest      = 0.07
 )
 
-// BuildReport computes score, structured per-signal breakdown, and a
-// compact rationale string from CredibilityInputs in a single pass —
-// the canonical implementation. ScoreCredibility is a thin wrapper that
-// drops the signals slice; callers needing the breakdown (the query
-// engine's WhyTrustClaim) call BuildReport directly. Keeping one
-// implementation kills the historical drift between this package and
+// BuildReport computes score, structured per-signal breakdown, a
+// compact rationale string, and a plain-English prose rationale from
+// CredibilityInputs in a single pass — the canonical implementation.
+// ScoreCredibility is a thin wrapper that drops the signals slice and
+// prose; callers needing the breakdown (WhyTrustClaim, which-test-to-
+// trust) call BuildReport directly. Keeping one implementation kills
+// the historical drift between this package and
 // internal/query/engine.go.
-func BuildReport(in CredibilityInputs) (score float64, signals []domain.ProvenanceSignal, rationale string) {
+func BuildReport(in CredibilityInputs) (score float64, signals []domain.ProvenanceSignal, rationale, prose string) {
 	now := in.Now
 	if now.IsZero() {
 		now = time.Now().UTC()
@@ -211,15 +213,109 @@ func BuildReport(in CredibilityInputs) (score float64, signals []domain.Provenan
 		)
 	}
 
-	return score, signals, rationale
+	prose = buildProseRationale(in, ref, now, recencySignal, agentFactor, testDecisiveness)
+
+	return score, signals, rationale, prose
+}
+
+// buildProseRationale assembles a plain-English explanation of the
+// credibility decision suitable for non-technical operators. Each
+// sentence corresponds to one signal so a reader can map the prose
+// back to the structured breakdown without learning the weights.
+func buildProseRationale(in CredibilityInputs, ref, now time.Time, recencySignal, agentFactor, testDecisiveness float64) string {
+	var parts []string
+
+	if in.IsTest && !in.TestLastRunAt.IsZero() {
+		days := now.Sub(in.TestLastRunAt).Hours() / 24
+		switch {
+		case days < 1:
+			parts = append(parts, "Last ran today (fresh).")
+		case days < 7:
+			parts = append(parts, fmt.Sprintf("Last ran %d days ago (fresh).", int(days)))
+		case days < 30:
+			parts = append(parts, fmt.Sprintf("Last ran %d days ago.", int(days)))
+		default:
+			parts = append(parts, fmt.Sprintf("Last ran %d days ago (stale).", int(days)))
+		}
+	} else if !ref.IsZero() {
+		days := now.Sub(ref).Hours() / 24
+		switch {
+		case days < 7:
+			parts = append(parts, fmt.Sprintf("Most recent evidence %d days ago (fresh).", int(days)))
+		case days < 90:
+			parts = append(parts, fmt.Sprintf("Most recent evidence %d days ago.", int(days)))
+		default:
+			parts = append(parts, fmt.Sprintf("Most recent evidence %d days ago (stale).", int(days)))
+		}
+	}
+
+	if in.IsTest {
+		total := in.TestPassCount + in.TestFailCount
+		switch {
+		case total == 0:
+			parts = append(parts, "No pass/fail counts recorded.")
+		case testDecisiveness >= 0.8:
+			parts = append(parts, fmt.Sprintf("Passed %d of %d runs (decisive).", in.TestPassCount, total))
+		case testDecisiveness >= 0.4:
+			parts = append(parts, fmt.Sprintf("Passed %d of %d runs (mixed).", in.TestPassCount, total))
+		default:
+			parts = append(parts, fmt.Sprintf("Passed %d of %d runs (flaky).", in.TestPassCount, total))
+		}
+	}
+
+	switch in.Liveness {
+	case domain.LivenessLive:
+		parts = append(parts, "Live test.")
+	case domain.LivenessStale:
+		parts = append(parts, "Stale source.")
+	case domain.LivenessZombie:
+		parts = append(parts, "Old but trusted (zombie).")
+	case domain.LivenessDead:
+		parts = append(parts, "Dead source.")
+	}
+
+	switch {
+	case in.SourceAuthority == 0:
+		parts = append(parts, "Authority not configured (assumed neutral).")
+	case in.SourceAuthority >= 0.8:
+		parts = append(parts, fmt.Sprintf("High-authority source (%.2f).", in.SourceAuthority))
+	case in.SourceAuthority < 0.3:
+		parts = append(parts, fmt.Sprintf("Low-authority source (%.2f).", in.SourceAuthority))
+	}
+
+	switch {
+	case in.CitationCount >= 5:
+		parts = append(parts, fmt.Sprintf("Corroborated by %d citations.", in.CitationCount))
+	case in.CitationCount > 0:
+		parts = append(parts, fmt.Sprintf("Corroborated by %d citation(s).", in.CitationCount))
+	}
+
+	if agentFactor < 1.0 {
+		parts = append(parts, fmt.Sprintf("Submitting agent has reduced authority (%.2f).", agentFactor))
+	}
+
+	// Fall through if absolutely nothing matched — minimum viable
+	// statement so callers always have something to print.
+	if len(parts) == 0 {
+		return "No provenance signals available."
+	}
+	return strings.Join(parts, " ")
 }
 
 // ScoreCredibility combines trust + provenance signals into a score and
 // human-readable rationale. Thin wrapper over BuildReport for callers
-// that don't need the structured per-signal breakdown.
+// that don't need the structured per-signal breakdown or prose.
 func ScoreCredibility(in CredibilityInputs) (float64, string) {
-	score, _, rationale := BuildReport(in)
+	score, _, rationale, _ := BuildReport(in)
 	return score, rationale
+}
+
+// ScoreWithProse returns the score plus the prose rationale only —
+// convenience wrapper for callers (CLI / MCP) that surface trust to
+// humans but don't need the structured signal breakdown.
+func ScoreWithProse(in CredibilityInputs) (float64, string) {
+	score, _, _, prose := BuildReport(in)
+	return score, prose
 }
 
 func recencyDetail(ref, now time.Time) string {

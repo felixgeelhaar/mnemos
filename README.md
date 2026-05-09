@@ -94,7 +94,7 @@ mnemos process --llm --embed meeting-notes.md
 mnemos query --llm "What decisions were made?"
 ```
 
-Without a provider, extraction and contradiction detection still work via rule-based heuristics. Queries use BM25 keyword matching, which works well for simple questions but may miss nuance on longer documents.
+Without a provider, extraction and contradiction detection still work via rule-based heuristics. Queries use BM25 keyword matching, which works well for simple questions but may miss nuance on longer documents. With `--embed` (or any embedding provider configured), queries upgrade to a **hybrid BM25 + cosine** ranking — see "Query ranking" below for the full signal breakdown.
 
 ### Optional: MCP server for AI agents
 

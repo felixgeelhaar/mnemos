@@ -65,10 +65,11 @@ func handleTrust(args []string, _ Flags) {
 		Claim     domain.Claim
 		Score     float64
 		Rationale string
+		Prose     string
 	}
 	out := make([]ranked, 0, len(candidates))
 	for _, c := range candidates {
-		score, rationale := trust.ScoreCredibility(trust.CredibilityInputs{
+		score, _, rationale, prose := trust.BuildReport(trust.CredibilityInputs{
 			CurrentTrust:    c.TrustScore,
 			SourceAuthority: c.SourceAuthority,
 			Liveness:        c.Liveness,
@@ -83,7 +84,7 @@ func handleTrust(args []string, _ Flags) {
 			TestPassCount:   c.TestPassCount,
 			TestFailCount:   c.TestFailCount,
 		})
-		out = append(out, ranked{Claim: c, Score: score, Rationale: rationale})
+		out = append(out, ranked{Claim: c, Score: score, Rationale: rationale, Prose: prose})
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Score > out[j].Score })
@@ -99,7 +100,8 @@ func handleTrust(args []string, _ Flags) {
 			"test_pass_count":  r.Claim.TestPassCount,
 			"test_fail_count":  r.Claim.TestFailCount,
 			"score":            r.Score,
-			"rationale":        r.Rationale,
+			"rationale":        r.Rationale, // compact, machine-friendly
+			"prose_rationale":  r.Prose,     // operator-readable
 		})
 	}
 
@@ -116,10 +118,11 @@ func handleTrust(args []string, _ Flags) {
 		"requirement_ref": testRef,
 		"verdict":         verdict,
 		"winner": map[string]any{
-			"claim_id":  winner.Claim.ID,
-			"text":      winner.Claim.Text,
-			"score":     winner.Score,
-			"rationale": winner.Rationale,
+			"claim_id":        winner.Claim.ID,
+			"text":            winner.Claim.Text,
+			"score":           winner.Score,
+			"rationale":       winner.Rationale,
+			"prose_rationale": winner.Prose,
 		},
 		"candidates": candidatesJSON,
 	})

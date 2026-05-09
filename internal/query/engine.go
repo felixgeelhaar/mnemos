@@ -1730,7 +1730,7 @@ func (e Engine) WhyTrustClaim(ctx context.Context, claimID string) (domain.Prove
 		TestPassCount:   c.TestPassCount,
 		TestFailCount:   c.TestFailCount,
 	}
-	score, signals, rationale := trust.BuildReport(in)
+	score, signals, rationale, prose := trust.BuildReport(in)
 
 	return domain.ProvenanceReport{
 		ClaimID:        c.ID,
@@ -1738,6 +1738,7 @@ func (e Engine) WhyTrustClaim(ctx context.Context, claimID string) (domain.Prove
 		Score:          score,
 		Signals:        signals,
 		Rationale:      rationale,
+		ProseRationale: prose,
 		SourceDocument: c.SourceDocument,
 		Liveness:       c.Liveness,
 	}, nil

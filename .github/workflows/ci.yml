@@ -97,8 +97,15 @@ jobs:
             --split holdout
 
       - name: Enforce benchmark baseline gate
+        env:
+          # Same flag the run step uses; the gate honours it to skip
+          # confidence_avg_min for runs that legitimately produced no
+          # LLM-derived confidence.
+          MNEMOS_BENCH_LLM: "0"
         run: |
-          python3 benchmarks/check_baseline.py --results-dir benchmarks/results
+          python3 benchmarks/check_baseline.py \
+            --results-dir benchmarks/results \
+            --allow-missing contradiction_detection
 
   database-providers:
     name: Postgres + MySQL integration

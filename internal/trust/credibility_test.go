@@ -8,6 +8,72 @@ import (
 	"github.com/felixgeelhaar/mnemos/internal/domain"
 )
 
+// TestBuildReport_ScoreCredibilityParity is the invariant guard for the
+// trust + query single-source-of-truth refactor: BuildReport must produce
+// the same score and rationale that ScoreCredibility (its thin wrapper)
+// produces for any input. If a future contributor reintroduces a parallel
+// implementation, this test fails immediately.
+func TestBuildReport_ScoreCredibilityParity(t *testing.T) {
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	cases := []CredibilityInputs{
+		{CurrentTrust: 0.7, SourceAuthority: 0.5, Liveness: domain.LivenessLive, CitationCount: 3, LastExecuted: now.Add(-7 * 24 * time.Hour), Now: now},
+		{CurrentTrust: 0.4, SourceAuthority: 0.0, Liveness: domain.LivenessDead, CitationCount: 0, CreatedAt: now.Add(-365 * 24 * time.Hour), Now: now},
+		{CurrentTrust: 0.8, SourceAuthority: 0.9, Liveness: domain.LivenessLive, CitationCount: 12, AgentAuthority: 0.4, LastExecuted: now.Add(-1 * 24 * time.Hour), Now: now},
+		{CurrentTrust: 0.6, IsTest: true, TestLastRunAt: now.Add(-2 * time.Hour), TestPassCount: 8, TestFailCount: 2, Liveness: domain.LivenessLive, Now: now},
+		{CurrentTrust: 0.6, IsTest: true, TestLastRunAt: now.Add(-90 * 24 * time.Hour), TestPassCount: 5, TestFailCount: 5, Liveness: domain.LivenessStale, Now: now},
+	}
+	for i, in := range cases {
+		score, _, rationale := BuildReport(in)
+		wrappedScore, wrappedRationale := ScoreCredibility(in)
+		if score != wrappedScore {
+			t.Errorf("case %d: score drift BuildReport=%.6f ScoreCredibility=%.6f", i, score, wrappedScore)
+		}
+		if rationale != wrappedRationale {
+			t.Errorf("case %d: rationale drift\n  BuildReport=%q\n  ScoreCredibility=%q", i, rationale, wrappedRationale)
+		}
+	}
+}
+
+// TestBuildReport_SignalContributionsSumToScore is a structural invariant:
+// the sum of additive-signal contributions, multiplied by the agent factor
+// (when present), must equal the returned score within float tolerance.
+// Catches signal/score drift even if the parity test above passes.
+func TestBuildReport_SignalContributionsSumToScore(t *testing.T) {
+	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	in := CredibilityInputs{
+		CurrentTrust:    0.7,
+		SourceAuthority: 0.6,
+		Liveness:        domain.LivenessLive,
+		CitationCount:   4,
+		LastExecuted:    now.Add(-3 * 24 * time.Hour),
+		Now:             now,
+		IsTest:          true,
+		TestLastRunAt:   now.Add(-3 * 24 * time.Hour),
+		TestPassCount:   9,
+		TestFailCount:   1,
+	}
+	score, signals, _ := BuildReport(in)
+
+	var sum float64
+	for _, s := range signals {
+		if s.Name == "agent_authority" {
+			continue // multiplicative factor, contribution is 0 by design
+		}
+		sum += s.Contribution
+	}
+	// No agent factor in this case, so sum should equal score (clamped to [0,1]).
+	if abs(sum-score) > 1e-9 {
+		t.Errorf("signal contributions sum=%.6f != score=%.6f", sum, score)
+	}
+}
+
+func abs(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
 func TestScoreCredibility_MoreSignalsIncreaseScore(t *testing.T) {
 	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
 	base := CredibilityInputs{

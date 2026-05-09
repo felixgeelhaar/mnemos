@@ -633,15 +633,139 @@
       "feature_id": "recall-hardening:-rollout-guardrails-and-slos"
     },
     {
-      "id": "task-incident-entity",
-      "title": "Incident Entity (Optional, for 'Why Were We Wrong?')",
-      "description": "Optional new Incident entity type with Severity, Timeline []EventID, RootCause claim ID, DecisionIDs []string, OutcomeIDs []string, PlaybookID. Or repurpose Decision with Type: 'postmortem'. Provides structured incident analysis.",
+      "id": "task-public-/v1/leads-hardening:-rate-limit-+-email-validation-+-structured-logging",
+      "title": "Implement Public /v1/leads hardening: rate limit + email validation + structured logging",
+      "description": "Implement the feature: Public /v1/leads hardening: rate limit + email validation + structured logging. The public POST /v1/leads endpoint (cmd/mnemos/serve_auth.go:104-108 bypass + cmd/mnemos/serve.go:288-310 handler) has zero rate limiting, only a trivial `@` check, and writes the email verbatim to stderr via fmt.Fprintf — a DoS vector, log-injection vector, and GDPR-relevant PII exposure. Required: per-IP token-bucket limiter (golang.org/x/time/rate) with strict caps for /v1/leads; net/mail.ParseAddress + 254-char cap; reject CR/LF or non-printable bytes; hash-or-elide email in logs; route through bolt structured logger; explicit Origin/Referer allow-list for browser POSTs. Acceptance: chaos test sustaining 1k req/s for 60s does not exhaust process; emailed CRLF cannot forge log lines; logs contain no plaintext email.",
       "priority": "medium",
       "estimate": "",
-      "depends_on": [
-        "task-decision-audit-trail"
-      ],
-      "feature_id": "epistemic-provenance-claim-trust-framework"
+      "depends_on": [],
+      "feature_id": "public-/v1/leads-hardening:-rate-limit-+-email-validation-+-structured-logging"
+    },
+    {
+      "id": "task-security-headers-middleware-(csp,-hsts,-x-frame-options,-x-content-type-options,-referrer-policy)",
+      "title": "Implement Security headers middleware (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy)",
+      "description": "Implement the feature: Security headers middleware (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy). No security headers on any HTTP response (cmd/mnemos/serve.go:267 middleware chain — only panicRecover, access log, JWT auth). Landing page (cmd/mnemos/web/landing.html) executes inline JS and posts to /v1/leads with no CSP, no clickjacking protection, no XSS containment. Add a securityHeaders middleware setting: Content-Security-Policy (script-src 'self', form-action 'self', frame-ancestors 'none'), X-Content-Type-Options: nosniff, X-Frame-Options: DENY, Referrer-Policy: no-referrer, Strict-Transport-Security when TLS is enabled. Wire ahead of the auth middleware so it covers landing, registry SPA, and API. Acceptance: securityheaders.com scan ≥ A; integration test asserts CSP header present on /, /app, /v1/health.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "security-headers-middleware-(csp,-hsts,-x-frame-options,-x-content-type-options,-referrer-policy)"
+    },
+    {
+      "id": "task-deduplicate-trust-signal-calculation-across-trust-+-query-packages",
+      "title": "Implement Deduplicate trust signal calculation across trust + query packages",
+      "description": "Implement the feature: Deduplicate trust signal calculation across trust + query packages. Weight constants (0.50/0.15/0.13/0.10/0.05/0.07) and per-signal calculations are duplicated across internal/trust/credibility.go:98-105 and internal/query/engine.go:1800-1807 with a `must stay in sync` comment as the only governance — a fitness-function smell. Refactor: `trust.ScoreCredibility` returns (score float64, signals []domain.ProvenanceSignal, rationale string) directly. Delete provenanceSignals in engine.go. WhyTrustClaim consumes the structured breakdown. Add one test asserting WhyTrustClaim signals == ScoreCredibility breakdown bit-for-bit so future drift fails CI. Effort: small (~2h).",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "deduplicate-trust-signal-calculation-across-trust-+-query-packages"
+    },
+    {
+      "id": "task-claimrepository.listbytestrequirementref-port-+-index-for-trust-queries",
+      "title": "Implement ClaimRepository.ListByTestRequirementRef port + index for trust queries",
+      "description": "Implement the feature: ClaimRepository.ListByTestRequirementRef port + index for trust queries. cmd/mnemos/trust.go:48-59 and cmd/mnemos/mcp.go:1118 (which_test_to_trust) call Claims.ListAll(ctx) and filter by TestRequirementRef in Go — O(n) scan over the full claim corpus per invocation, with all 30+ columns marshaled over the wire on Postgres/MySQL. Add `ListByTestRequirementRef(ctx, ref string) ([]Claim, error)` to ports.ClaimRepository. Implement across sqlite, postgres, mysql, memory, libsql. Add `CREATE INDEX idx_claims_test_requirement_ref ON claims(type, test_requirement_ref) WHERE test_requirement_ref != ''` (and dialect equivalents). Update both call sites. Acceptance: bench with 100k claims shows \u003c50ms p95 vs current ListAll baseline.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "claimrepository.listbytestrequirementref-port-+-index-for-trust-queries"
+    },
+    {
+      "id": "task-test-coverage-for-mnemos-trust-cli-and-which_test_to_trust-mcp-tool",
+      "title": "Implement Test coverage for mnemos trust CLI and which_test_to_trust MCP tool",
+      "description": "Implement the feature: Test coverage for mnemos trust CLI and which_test_to_trust MCP tool. Newly-shipped surface in cmd/mnemos/trust.go:19-130 and cmd/mnemos/mcp.go:1108-1182 (mcpRunWhichTestToTrust) has zero tests — verdict thresholds (0.05 ambiguous), requirement_ref validation, empty-candidate path, sort stability, JSON shape all unverified. The resolver path (pickTestWinner) is covered, but the surface above it isn't. Add table-driven tests for mcpRunWhichTestToTrust covering: winner clear-margin / ambiguous (\u003c0.05 gap) / no_candidates / missing requirement_ref. Use openConn against memory backend. Mirror as a cmd/mnemos handler test patterned on existing audit_test.go. Effort: small.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "test-coverage-for-mnemos-trust-cli-and-which_test_to_trust-mcp-tool"
+    },
+    {
+      "id": "task-eval-ci-regression-gate-across-extraction,-causal,-relationship,-longmem,-locomo-suites",
+      "title": "Implement Eval CI regression gate across extraction, causal, relationship, longmem, locomo suites",
+      "description": "Implement the feature: Eval CI regression gate across extraction, causal, relationship, longmem, locomo suites. .github/workflows/benchmarks.yml:67-83 runs only --suite contradiction_detection. data/eval/*.yaml has 102 cases across extraction (90), causal_detection, relationship_detection running through go test with no F1/precision/recall floor — an LLM prompt change that drops extraction F1 from 0.92 to 0.55 still passes CI. Add `eval-gate` job that runs `go test ./data/eval/... -json` and a small Go check (or Python equivalent) comparing per-suite F1/precision/recall against data/eval/baseline.json floors, failing on \u003e5% drop. Extend to LongMemEval/LoCoMo when adapters are wired. This is the single biggest oracle gap in the repo.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "eval-ci-regression-gate-across-extraction,-causal,-relationship,-longmem,-locomo-suites"
+    },
+    {
+      "id": "task-mutation-testing-on-internal/trust,-internal/relate,-internal/query",
+      "title": "Implement Mutation testing on internal/trust, internal/relate, internal/query",
+      "description": "Implement the feature: Mutation testing on internal/trust, internal/relate, internal/query. Coverage is ~90%+ but mutation kill-rate is unknown — `\u003e` flipped to `\u003c` in trust scoring may pass current tests, giving coverage illusion. Add go-mutesting (or ooze) over internal/trust, internal/relate, internal/query. Wire as a separate non-blocking CI job that posts the kill-rate as a PR comment. Block merges when internal/trust/ kill-rate falls below 70%. Document the threshold + rationale in a docs/testing/mutation.md. Effort: medium.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "mutation-testing-on-internal/trust,-internal/relate,-internal/query"
+    },
+    {
+      "id": "task-api-surface-parity-fitness-function-(http-/-grpc-/-mcp)",
+      "title": "Implement API surface parity fitness function (HTTP / gRPC / MCP)",
+      "description": "Implement the feature: API surface parity fitness function (HTTP / gRPC / MCP). cmd/mnemos/mcp.go:448 registers which_test_to_trust; no equivalent route in cmd/mnemos/serve.go:248-261 or method in internal/server/grpc/server.go. Conway's Law signal — three transports own three definitions, each hand-maintained against a different mental model. Likely repeats with other recently-added tools. Step 1 (small): add a CI parity test enumerating (mcp_tool_name | http_route | grpc_method) triples and asserting set equality with an explicit allowlist for intentional gaps. Step 2 (medium, separate task): introduce internal/app/ use-case interfaces so HTTP/gRPC/MCP become 20-line transcoders.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "api-surface-parity-fitness-function-(http-/-grpc-/-mcp)"
+    },
+    {
+      "id": "task-north-star-metric-+-opt-in-activation-telemetry",
+      "title": "Implement North Star metric + opt-in activation telemetry",
+      "description": "Implement the feature: North Star metric + opt-in activation telemetry. Recall pass-rate (internal/query/engine.go:2006 MinRecallPassRate=0.95) is a quality floor, not an adoption metric. The product cannot answer \"is anyone getting value?\" — no time-to-first-value, no week-2 query retention, no regenerate-rate aggregation. Pick North Star: \"weekly active projects with ≥1 evidence-backed query.\" Instrument via existing MemoryQualityMetrics (engine.go:1921) plus daily rollup. Ship `mnemos metrics --workspace` view. Add opt-in anonymized telemetry POST to /v1/telemetry (random install_id, weekly_active_runs, queries, recall_pass_rate, regenerate_rate). Default off. Public dashboard at mnemos.dev/health once 10 workspaces opt in.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "north-star-metric-+-opt-in-activation-telemetry"
+    },
+    {
+      "id": "task-honest-competitor-benchmarks-vs-mem0-/-zep-/-letta-on-longmemeval-+-locomo",
+      "title": "Implement Honest competitor benchmarks vs mem0 / zep / letta on LongMemEval + LoCoMo",
+      "description": "Implement the feature: Honest competitor benchmarks vs mem0 / zep / letta on LongMemEval + LoCoMo. benchmarks/suites/{longmemeval,locomo}.py scaffolds exist; benchmarks/RESULTS.md and baseline.json are present. Mem0 cites LongMemEval 93.4 / LoCoMo 91.6; Mnemos has no head-to-head numbers public. Wire mem0/zep adapters in benchmarks/, run all three providers on the published datasets, publish honest comparison in benchmarks/RESULTS.md. Link from README hero. If Mnemos loses on a suite, file the gap as a roadmap item — losing honestly beats not measuring. This is the strongest commercial wedge against leader-cited numbers.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "honest-competitor-benchmarks-vs-mem0-/-zep-/-letta-on-longmemeval-+-locomo"
+    },
+    {
+      "id": "task-landing-positioning-+-demo-on-page-+-pricing-tiers-(gtm-unification)",
+      "title": "Implement Landing positioning + demo-on-page + pricing tiers (GTM unification)",
+      "description": "Implement the feature: Landing positioning + demo-on-page + pricing tiers (GTM unification). Landing (cmd/mnemos/web/landing.html:6) sells \"Data Sovereignty \u0026 Compliance Platform\"; README.md:3 sells \"Self-hosted memory for AI apps.\" A GitHub visitor and a landing visitor get different products — category schizophrenia kills positioning. (1) Pick one lane: \"evidence layer for AI agents you actually own\" (where mem0/zep/letta compete); compliance becomes a wedge attribute, not the headline. Rewrite hero. (2) Add runnable code block / animated terminal showing `mnemos process --text \"...\"` → contradiction-detected JSON above the lead form. (3) Move README competitor comparison table onto landing as \"vs hosted memory services\" with one row per competitor. (4) Add 3-tier pricing strip: OSS (free, self-hosted) / Team (managed registry + SSO, waitlist) / Enterprise (audit, SLA, SOC2 — contact). (5) Replace adjective-soup social-proof section with real benchmark metrics linking to benchmarks/RESULTS.md. Effort: medium.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "landing-positioning-+-demo-on-page-+-pricing-tiers-(gtm-unification)"
+    },
+    {
+      "id": "task-operator-readable-trust-rationale-alongside-compact-metric-string",
+      "title": "Implement Operator-readable trust rationale alongside compact metric string",
+      "description": "Implement the feature: Operator-readable trust rationale alongside compact metric string. internal/trust/credibility.go:116-133 emits engineer-shorthand: \"base=0.62 authority=0.50 citations=3(0.42) recency=0.78 liveness=live agent_authority=1.00 test_decisiveness=8/10(0.60)\". CLAUDE.md positions this as the surface for non-technical operators via which_test_to_trust, but the string assumes the reader knows what citations=3(0.42) means. Ship a second prose rationale alongside the metric string: \"Last ran 12 days ago (fresh). Passed 8 of 10 runs (decisive). Live test. Authority not configured (assumed neutral).\" Keep compact form for tooling under score_breakdown; surface prose form as `rationale` in cmd/mnemos/trust.go and the WhichTestToTrust MCP output. Also: bump CLAUDE.md prompt v1.2 → v1.4 (matches internal/extract/prompt.go), add hybrid BM25+cosine note to README.md:97.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "operator-readable-trust-rationale-alongside-compact-metric-string"
+    },
+    {
+      "id": "task-jwt-kid-header-+-rotation;-scope/run-filter-on-trust-path",
+      "title": "Implement JWT kid header + rotation; scope/run filter on trust path",
+      "description": "Implement the feature: JWT kid header + rotation; scope/run filter on trust path. internal/auth/jwt.go:219-253 accepts only HS256 with no `kid` — dual-key rotation falls back to brute-trying the previous secret, masking real attacks in logs. internal/auth/secret.go:48-59 auto-generates a secret silently on first boot at a predictable path with no rotation prompt. Separately, cmd/mnemos/mcp.go:1118 (which_test_to_trust) and cmd/mnemos/trust.go:48 call Claims.ListAll without honoring the agent token's Scopes/Runs whitelist (jwt.go:51-97) — a low-privilege agent can enumerate test claims across runs/services it shouldn't see. Fix: include `kid` in JWT header, select verification key by kid, surface clearer rotation guidance when secret auto-generates. Thread actor scope/run whitelist into the trust path; filter candidates before scoring (or use the new ListByTestRequirementRef + scope filter).",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "jwt-kid-header-+-rotation;-scope/run-filter-on-trust-path"
+    },
+    {
+      "id": "task-postgres/mysql-connection-pool-tuning-+-llm-cache-eviction",
+      "title": "Implement Postgres/MySQL connection pool tuning + LLM cache eviction",
+      "description": "Implement the feature: Postgres/MySQL connection pool tuning + LLM cache eviction. internal/store/postgres/postgres.go:116-121 and internal/store/mysql/mysql.go:156-163 call sql.Open + PingContext but never tune SetMaxOpenConns/SetMaxIdleConns/SetConnMaxLifetime. Go default is unlimited open conns — exhausts Postgres max_connections (100) under MCP burst load and silently leaks idle conns. Set MaxOpenConns=25, MaxIdleConns=5, ConnMaxLifetime=30m, configurable via MNEMOS_DB_MAX_CONNS. Separately, internal/extract/llm_engine.go:295-307 stores cache JSON files under data/cache/llm-extraction/ with no TTL, LRU, or size cap — long-running ingestion grows unbounded and fills disk silently. Add MNEMOS_LLM_CACHE_MAX_BYTES (default 1 GiB) and a sweep on cache miss that evicts oldest by mtime until under cap. Also delete duplicate `idx_events_run_id` declaration in sql/sqlite/schema.sql:15-16.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "postgres/mysql-connection-pool-tuning-+-llm-cache-eviction"
+    },
+    {
+      "id": "task-request-id-+-red-metrics-+-slo-doc-+-supply-chain-attestation",
+      "title": "Implement Request ID + RED metrics + SLO doc + supply-chain attestation",
+      "description": "Implement the feature: Request ID + RED metrics + SLO doc + supply-chain attestation. No correlation/request IDs across HTTP/MCP/pipeline (cmd/mnemos/serve_auth.go:173-188 boltAccessLog has no request_id/trace_id), making distributed tracing impossible. No /metrics Prometheus endpoint, no histogram of http_request_duration_seconds — operators cannot answer \"is mnemos healthy right now\" beyond /health. No SLO/error budget defined. Supply chain weak: .goreleaser.yaml has no SBOMs, no cosign signing, no SLSA provenance, dockers: only linux/amd64. Step 1 (small): add requestIDMiddleware (UUIDv7) injecting X-Request-ID into context; propagate to bolt log lines. Step 2 (medium): add prometheus/client_golang RED metrics on /internal/metrics; document SLO.md (p99\u003c250ms reads, 99.9% availability/30d). Step 3 (medium): add `sboms:`, `signs:` (cosign keyless), arm64+amd64 docker_manifests, slsa-framework/slsa-github-generator workflow.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "request-id-+-red-metrics-+-slo-doc-+-supply-chain-attestation"
     },
     {
       "id": "task-dual-mode-resolution",
@@ -652,17 +776,6 @@
       "depends_on": [
         "task-agent-authority-model",
         "task-visibility-field"
-      ],
-      "feature_id": "epistemic-provenance-claim-trust-framework"
-    },
-    {
-      "id": "task-anti-lesson-synthesis",
-      "title": "Anti-Lesson Synthesis (Failed Patterns)",
-      "description": "Extend internal/synthesize/engine.go to emit Anti-Lessons from failed outcomes: when outcome.Result == Failure \u0026\u0026 corroboration \u003e= 3, emit anti-lesson with trigger, warning, failed_actions, root_cause_claim. Learn from failures, not just successes.",
-      "priority": "high",
-      "estimate": "",
-      "depends_on": [
-        "task-source-credibility-scoring"
       ],
       "feature_id": "epistemic-provenance-claim-trust-framework"
     },
@@ -678,13 +791,123 @@
       "feature_id": "epistemic-provenance-claim-trust-framework"
     },
     {
-      "id": "task-test-conflict-detection",
-      "title": "Test Conflict Detection Engine",
-      "description": "Detect when two tests cover the same functionality but produce different results. Use semantic similarity + scope overlap to identify conflicting test pairs. Store conflicts as first-class relations with both test IDs.",
+      "id": "task-test-provenance-model",
+      "title": "Test Provenance Data Model",
+      "description": "Model test metadata: test ID, associated requirement/claim, creation timestamp, last-modified, author, execution history, confidence level. Support first-class 'test result' as a type of claim with provenance.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-build-test-verify",
+      "title": "Build and Test Verification for Provenance Model",
+      "description": "Run make build to verify compilation. Run make test to ensure nothing breaks. Transition task-claim-provenance-model to complete.",
       "priority": "high",
       "estimate": "",
       "depends_on": [
-        "task-test-provenance-model"
+        "task-claim-repo-upsert-update",
+        "task-claim-repo-scan-update"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-decision-audit-trail",
+      "title": "Decision Audit Trail (Refuted Beliefs)",
+      "description": "Extend Decision model with RefutedBeliefs []string and FailedOutcomeID. Create query path: 'mnemos query --why-wrong \u003cservice\u003e' that finds decisions with refuted beliefs, traces decision → action → failed outcome, surfaces contradicting claims.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [
+        "task-anti-lesson-synthesis"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-source-credibility-scoring",
+      "title": "Source Credibility Scoring Engine",
+      "description": "Combine multiple signals into a per-claim or per-source trust score: link density (citation count), liveness, recency, authority (user-defined or inferred), and conflict history. Output: trust_score 0.0-1.0 + rationale string.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [
+        "task-citation-graph-tracking",
+        "task-liveness-detection"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-sqlcgen-claims-update",
+      "title": "Update sqlcgen/claims.sql.go for Provenance Fields",
+      "description": "Update upsertClaim SQL to include new columns: source_document, source_type, source_authority, liveness, last_executed, citation_count, provenance_rationale. Update UpsertClaimParams struct with new fields. Update UpsertClaim function to pass new parameters.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [
+        "task-claim-provenance-model"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-agent-self-healing",
+      "title": "Agent Self-Healing Loop (Verdict → Action)",
+      "description": "When agent gets 'wrong' verdict with action=update_claim: agent self-heals by updating code/docs, calling mnemos update to sync new truth. Add agent workflow: Query → Verdict → Action → Update Mnemos.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [
+        "task-verdict-api"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-claim-provenance-model",
+      "title": "Claim Provenance Data Model",
+      "description": "Extend claim model with provenance metadata. DOMAIN TYPES DONE, SCHEMA DONE, SQLC REGENERATED. REMAINING: (1) Update sqlcgen/claims.sql.go - upsertClaim SQL + UpsertClaimParams + UpsertClaim function, (2) Update claim_repository.go - upsertWithReason (lines 83-95) + scanClaim (lines 671-710), (3) make build, (4) make test, (5) transition complete.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-trust-query-api",
+      "title": "Provenance Query API \u0026 CLI (Why Trust This?)",
+      "description": "First-class query: 'why should I trust claim X?' Returns: trust score, top signals (citations, liveness, recency), conflicting evidence, and resolution rationale if conflicts exist. Expose via CLI (mnemos query --explain-trust \u003cclaim-id\u003e) and HTTP/gRPC.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [
+        "task-source-credibility-scoring",
+        "task-confidence-weighted-resolution"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-incident-entity",
+      "title": "Incident Entity (Optional, for 'Why Were We Wrong?')",
+      "description": "Optional new Incident entity type with Severity, Timeline []EventID, RootCause claim ID, DecisionIDs []string, OutcomeIDs []string, PlaybookID. Or repurpose Decision with Type: 'postmortem'. Provides structured incident analysis.",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [
+        "task-decision-audit-trail"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-claim-repo-scan-update",
+      "title": "Update claim_repository.go scanClaim for Provenance",
+      "description": "Update scanClaim function (lines 671-710) to scan new provenance fields: source_document, source_type, source_authority, liveness, last_executed, citation_count, provenance_rationale. Populate Claim struct with scanned values.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [
+        "task-sqlcgen-claims-update"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-confidence-weighted-resolution",
+      "title": "Confidence-Weighted Conflict Resolution",
+      "description": "Resolve conflicting tests/claims using provenance signals: prefer newer tests, tests with higher authority, tests with more recent successful executions. Output: winning claim + rationale (which signals tipped the scale).",
+      "priority": "medium",
+      "estimate": "",
+      "depends_on": [
+        "task-test-conflict-detection",
+        "task-source-credibility-scoring"
       ],
       "feature_id": "epistemic-provenance-claim-trust-framework"
     },
@@ -722,9 +945,9 @@
       "feature_id": "epistemic-provenance-claim-trust-framework"
     },
     {
-      "id": "task-sqlcgen-claims-update",
-      "title": "Update sqlcgen/claims.sql.go for Provenance Fields",
-      "description": "Update upsertClaim SQL to include new columns: source_document, source_type, source_authority, liveness, last_executed, citation_count, provenance_rationale. Update UpsertClaimParams struct with new fields. Update UpsertClaim function to pass new parameters.",
+      "id": "task-citation-graph-tracking",
+      "title": "Citation Graph \u0026 Link Density Tracking",
+      "description": "Track which sources reference/link to other sources. Build citation graph at ingest time. Store directed edges (source A cites source B). Enable queries for convergence: how many independent sources support a claim?",
       "priority": "high",
       "estimate": "",
       "depends_on": [
@@ -733,24 +956,13 @@
       "feature_id": "epistemic-provenance-claim-trust-framework"
     },
     {
-      "id": "task-liveness-detection",
-      "title": "Liveness Detection for Documents/Processes",
-      "description": "Detect if a source is 'live': still being referenced, executed, or updated. Track last-access timestamps, execution evidence (e.g. git commits referencing a process doc), staleness indicators. Flag zombie docs (old but trusted) vs live docs.",
-      "priority": "medium",
-      "estimate": "",
-      "depends_on": [
-        "task-claim-provenance-model"
-      ],
-      "feature_id": "epistemic-provenance-claim-trust-framework"
-    },
-    {
-      "id": "task-decision-audit-trail",
-      "title": "Decision Audit Trail (Refuted Beliefs)",
-      "description": "Extend Decision model with RefutedBeliefs []string and FailedOutcomeID. Create query path: 'mnemos query --why-wrong \u003cservice\u003e' that finds decisions with refuted beliefs, traces decision → action → failed outcome, surfaces contradicting claims.",
+      "id": "task-test-conflict-detection",
+      "title": "Test Conflict Detection Engine",
+      "description": "Detect when two tests cover the same functionality but produce different results. Use semantic similarity + scope overlap to identify conflicting test pairs. Store conflicts as first-class relations with both test IDs.",
       "priority": "high",
       "estimate": "",
       "depends_on": [
-        "task-anti-lesson-synthesis"
+        "task-test-provenance-model"
       ],
       "feature_id": "epistemic-provenance-claim-trust-framework"
     },
@@ -766,69 +978,24 @@
       "feature_id": "epistemic-provenance-claim-trust-framework"
     },
     {
-      "id": "task-source-credibility-scoring",
-      "title": "Source Credibility Scoring Engine",
-      "description": "Combine multiple signals into a per-claim or per-source trust score: link density (citation count), liveness, recency, authority (user-defined or inferred), and conflict history. Output: trust_score 0.0-1.0 + rationale string.",
-      "priority": "high",
-      "estimate": "",
-      "depends_on": [
-        "task-citation-graph-tracking",
-        "task-liveness-detection"
-      ],
-      "feature_id": "epistemic-provenance-claim-trust-framework"
-    },
-    {
-      "id": "task-claim-repo-scan-update",
-      "title": "Update claim_repository.go scanClaim for Provenance",
-      "description": "Update scanClaim function (lines 671-710) to scan new provenance fields: source_document, source_type, source_authority, liveness, last_executed, citation_count, provenance_rationale. Populate Claim struct with scanned values.",
-      "priority": "high",
-      "estimate": "",
-      "depends_on": [
-        "task-sqlcgen-claims-update"
-      ],
-      "feature_id": "epistemic-provenance-claim-trust-framework"
-    },
-    {
-      "id": "task-test-provenance-model",
-      "title": "Test Provenance Data Model",
-      "description": "Model test metadata: test ID, associated requirement/claim, creation timestamp, last-modified, author, execution history, confidence level. Support first-class 'test result' as a type of claim with provenance.",
-      "priority": "high",
-      "estimate": "",
-      "depends_on": [],
-      "feature_id": "epistemic-provenance-claim-trust-framework"
-    },
-    {
-      "id": "task-confidence-weighted-resolution",
-      "title": "Confidence-Weighted Conflict Resolution",
-      "description": "Resolve conflicting tests/claims using provenance signals: prefer newer tests, tests with higher authority, tests with more recent successful executions. Output: winning claim + rationale (which signals tipped the scale).",
+      "id": "task-workspace-isolation",
+      "title": "Workspace Isolation (personal/team/org)",
+      "description": "Implement workspace isolation: agents see team+org visibility claims; personal queries only see personal visibility. Extend query engine to filter by visibility. Update HTTP API, gRPC, MCP tools to respect visibility.",
       "priority": "medium",
       "estimate": "",
       "depends_on": [
-        "task-test-conflict-detection",
+        "task-visibility-field"
+      ],
+      "feature_id": "epistemic-provenance-claim-trust-framework"
+    },
+    {
+      "id": "task-anti-lesson-synthesis",
+      "title": "Anti-Lesson Synthesis (Failed Patterns)",
+      "description": "Extend internal/synthesize/engine.go to emit Anti-Lessons from failed outcomes: when outcome.Result == Failure \u0026\u0026 corroboration \u003e= 3, emit anti-lesson with trigger, warning, failed_actions, root_cause_claim. Learn from failures, not just successes.",
+      "priority": "high",
+      "estimate": "",
+      "depends_on": [
         "task-source-credibility-scoring"
-      ],
-      "feature_id": "epistemic-provenance-claim-trust-framework"
-    },
-    {
-      "id": "task-build-test-verify",
-      "title": "Build and Test Verification for Provenance Model",
-      "description": "Run make build to verify compilation. Run make test to ensure nothing breaks. Transition task-claim-provenance-model to complete.",
-      "priority": "high",
-      "estimate": "",
-      "depends_on": [
-        "task-claim-repo-upsert-update",
-        "task-claim-repo-scan-update"
-      ],
-      "feature_id": "epistemic-provenance-claim-trust-framework"
-    },
-    {
-      "id": "task-agent-self-healing",
-      "title": "Agent Self-Healing Loop (Verdict → Action)",
-      "description": "When agent gets 'wrong' verdict with action=update_claim: agent self-heals by updating code/docs, calling mnemos update to sync new truth. Add agent workflow: Query → Verdict → Action → Update Mnemos.",
-      "priority": "medium",
-      "estimate": "",
-      "depends_on": [
-        "task-verdict-api"
       ],
       "feature_id": "epistemic-provenance-claim-trust-framework"
     },
@@ -844,42 +1011,10 @@
       "feature_id": "epistemic-provenance-claim-trust-framework"
     },
     {
-      "id": "task-trust-query-api",
-      "title": "Provenance Query API \u0026 CLI (Why Trust This?)",
-      "description": "First-class query: 'why should I trust claim X?' Returns: trust score, top signals (citations, liveness, recency), conflicting evidence, and resolution rationale if conflicts exist. Expose via CLI (mnemos query --explain-trust \u003cclaim-id\u003e) and HTTP/gRPC.",
+      "id": "task-liveness-detection",
+      "title": "Liveness Detection for Documents/Processes",
+      "description": "Detect if a source is 'live': still being referenced, executed, or updated. Track last-access timestamps, execution evidence (e.g. git commits referencing a process doc), staleness indicators. Flag zombie docs (old but trusted) vs live docs.",
       "priority": "medium",
-      "estimate": "",
-      "depends_on": [
-        "task-source-credibility-scoring",
-        "task-confidence-weighted-resolution"
-      ],
-      "feature_id": "epistemic-provenance-claim-trust-framework"
-    },
-    {
-      "id": "task-workspace-isolation",
-      "title": "Workspace Isolation (personal/team/org)",
-      "description": "Implement workspace isolation: agents see team+org visibility claims; personal queries only see personal visibility. Extend query engine to filter by visibility. Update HTTP API, gRPC, MCP tools to respect visibility.",
-      "priority": "medium",
-      "estimate": "",
-      "depends_on": [
-        "task-visibility-field"
-      ],
-      "feature_id": "epistemic-provenance-claim-trust-framework"
-    },
-    {
-      "id": "task-claim-provenance-model",
-      "title": "Claim Provenance Data Model",
-      "description": "Extend claim model with provenance metadata. DOMAIN TYPES DONE, SCHEMA DONE, SQLC REGENERATED. REMAINING: (1) Update sqlcgen/claims.sql.go - upsertClaim SQL + UpsertClaimParams + UpsertClaim function, (2) Update claim_repository.go - upsertWithReason (lines 83-95) + scanClaim (lines 671-710), (3) make build, (4) make test, (5) transition complete.",
-      "priority": "high",
-      "estimate": "",
-      "depends_on": [],
-      "feature_id": "epistemic-provenance-claim-trust-framework"
-    },
-    {
-      "id": "task-citation-graph-tracking",
-      "title": "Citation Graph \u0026 Link Density Tracking",
-      "description": "Track which sources reference/link to other sources. Build citation graph at ingest time. Store directed edges (source A cites source B). Enable queries for convergence: how many independent sources support a claim?",
-      "priority": "high",
       "estimate": "",
       "depends_on": [
         "task-claim-provenance-model"
@@ -889,5 +1024,5 @@
   ],
   "approval_status": "approved",
   "created_at": "2026-04-12T11:03:09.397775+02:00",
-  "updated_at": "2026-05-05T19:29:31.300158+02:00"
+  "updated_at": "2026-05-09T08:20:06.758776+02:00"
 }

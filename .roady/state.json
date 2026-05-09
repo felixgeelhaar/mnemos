@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 216,
+  "version": 219,
   "task_states": {
     "task-action-outcome-recording": {
       "status": "done",
@@ -45,6 +45,11 @@
       "started_at": "2026-05-04T17:16:40.691928+02:00",
       "completed_at": "2026-05-04T17:23:04.388742+02:00",
       "elapsed_minutes": 6
+    },
+    "task-api-surface-parity-fitness-function-(http-/-grpc-/-mcp)": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
     },
     "task-append-only-event-store": {
       "status": "done",
@@ -178,6 +183,11 @@
       "completed_at": "2026-05-04T14:30:29.317694+02:00",
       "elapsed_minutes": 0
     },
+    "task-claimrepository.listbytestrequirementref-port-+-index-for-trust-queries": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
     "task-cli-query-interface": {
       "status": "done",
       "path": "",
@@ -254,6 +264,17 @@
       "started_at": "2026-05-01T11:22:11.704161+02:00",
       "completed_at": "2026-05-01T11:28:13.893969+02:00",
       "elapsed_minutes": 6
+    },
+    "task-deduplicate-trust-signal-calculation-across-trust-+-query-packages": {
+      "status": "done",
+      "path": "",
+      "owner": "ai-agent",
+      "evidence": [
+        "Added trust.BuildReport as canonical implementation; ScoreCredibility now thin wrapper. Deleted ~140 lines of duplicated provenanceSignals/recencyDetail/clamp01/maxInt/livenessWeight from internal/query/engine.go. New invariant tests TestBuildReport_ScoreCredibilityParity (5 cases) + TestBuildReport_SignalContributionsSumToScore. Full test suite green."
+      ],
+      "started_at": "2026-05-09T08:20:52.461968+02:00",
+      "completed_at": "2026-05-09T08:24:05.40532+02:00",
+      "elapsed_minutes": 3
     },
     "task-documentation-ingestion-pipeline": {
       "status": "done",
@@ -332,6 +353,11 @@
       "completed_at": "2026-05-05T13:51:15.615737+02:00",
       "elapsed_minutes": 0
     },
+    "task-eval-ci-regression-gate-across-extraction,-causal,-relationship,-longmem,-locomo-suites": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
     "task-file-watch-mcp-tool": {
       "status": "done",
       "path": "",
@@ -398,6 +424,11 @@
       "completed_at": "2026-05-01T12:14:35.833868+02:00",
       "elapsed_minutes": 2
     },
+    "task-honest-competitor-benchmarks-vs-mem0-/-zep-/-letta-on-longmemeval-+-locomo": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
     "task-human-editable-markdown-layer-with-system-versioned-history": {
       "status": "done",
       "path": "",
@@ -442,6 +473,11 @@
       "completed_at": "2026-05-05T12:13:11.04108+02:00",
       "elapsed_minutes": 108
     },
+    "task-jwt-kid-header-+-rotation;-scope/run-filter-on-trust-path": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
     "task-knowledge-browsing-mcp-tools": {
       "status": "done",
       "path": "",
@@ -463,6 +499,11 @@
       "started_at": "2026-04-18T01:08:45.47228+02:00",
       "completed_at": "2026-04-18T01:33:19.282223+02:00",
       "elapsed_minutes": 24
+    },
+    "task-landing-positioning-+-demo-on-page-+-pricing-tiers-(gtm-unification)": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
     },
     "task-lessons-synthesis-engine": {
       "status": "done",
@@ -673,6 +714,16 @@
       "completed_at": "2026-04-12T11:28:55.835793+02:00",
       "elapsed_minutes": 1
     },
+    "task-mutation-testing-on-internal/trust,-internal/relate,-internal/query": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
+    "task-north-star-metric-+-opt-in-activation-telemetry": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
     "task-numeric-value-disagreement-detection": {
       "status": "done",
       "path": "",
@@ -694,6 +745,11 @@
       "started_at": "2026-04-12T15:02:05.176356+02:00",
       "completed_at": "2026-04-12T15:03:17.291276+02:00",
       "elapsed_minutes": 1
+    },
+    "task-operator-readable-trust-rationale-alongside-compact-metric-string": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
     },
     "task-parser-and-event-normalization": {
       "status": "done",
@@ -717,6 +773,11 @@
       "completed_at": "2026-05-01T11:36:20.102156+02:00",
       "elapsed_minutes": 7
     },
+    "task-postgres/mysql-connection-pool-tuning-+-llm-cache-eviction": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
     "task-project-scoped-database-with-init-subcommand": {
       "status": "done",
       "path": "",
@@ -737,6 +798,11 @@
       ],
       "started_at": "2026-05-05T13:51:10.484065+02:00",
       "completed_at": "2026-05-05T13:51:15.090036+02:00",
+      "elapsed_minutes": 0
+    },
+    "task-public-/v1/leads-hardening:-rate-limit-+-email-validation-+-structured-logging": {
+      "status": "pending",
+      "path": "",
       "elapsed_minutes": 0
     },
     "task-published-cross-product-benchmarks-(locomo-+-longmemeval)": {
@@ -860,6 +926,11 @@
       "completed_at": "2026-05-06T10:10:46.079271+02:00",
       "elapsed_minutes": 883
     },
+    "task-request-id-+-red-metrics-+-slo-doc-+-supply-chain-attestation": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
+    },
     "task-run-scoped-querying": {
       "status": "done",
       "path": "",
@@ -881,6 +952,11 @@
       "started_at": "2026-05-01T11:37:08.430736+02:00",
       "completed_at": "2026-05-01T11:47:04.602801+02:00",
       "elapsed_minutes": 9
+    },
+    "task-security-headers-middleware-(csp,-hsts,-x-frame-options,-x-content-type-options,-referrer-policy)": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
     },
     "task-source-credibility-scoring": {
       "status": "done",
@@ -947,6 +1023,11 @@
       "started_at": "2026-05-04T16:22:56.933414+02:00",
       "completed_at": "2026-05-04T16:28:24.453995+02:00",
       "elapsed_minutes": 5
+    },
+    "task-test-coverage-for-mnemos-trust-cli-and-which_test_to_trust-mcp-tool": {
+      "status": "pending",
+      "path": "",
+      "elapsed_minutes": 0
     },
     "task-test-provenance-model": {
       "status": "done",
@@ -1026,5 +1107,5 @@
       "elapsed_minutes": 6
     }
   },
-  "updated_at": "2026-05-09T07:44:54.250953+02:00"
+  "updated_at": "2026-05-09T08:24:05.405321+02:00"
 }

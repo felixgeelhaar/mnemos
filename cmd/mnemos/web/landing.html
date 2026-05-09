@@ -265,8 +265,8 @@
     "operatingSystem": "Linux, macOS, Windows",
     "url": "https://mnemos.dev/",
     "offers": [
-      {"@type": "Offer", "name": "OSS", "price": "0", "priceCurrency": "USD"},
-      {"@type": "Offer", "name": "Team", "price": "0", "priceCurrency": "USD", "description": "Waitlist"},
+      {"@type": "Offer", "name": "OSS", "price": "0", "priceCurrency": "USD", "availability": "https://schema.org/InStock"},
+      {"@type": "Offer", "name": "Team", "availability": "https://schema.org/PreOrder", "description": "Waitlist"},
       {"@type": "Offer", "name": "Enterprise", "description": "Contact for pricing"}
     ]
   }
@@ -277,9 +277,11 @@
     <header>
       <h1>Mnemos</h1>
       <nav>
+        <a href="#demo">Demo</a>
+        <a href="#mcp">MCP</a>
         <a href="#compare">Compare</a>
         <a href="#pricing">Pricing</a>
-        <a href="/app">Registry</a>
+        <a href="/app">Web UI</a>
         <a href="https://github.com/felixgeelhaar/mnemos">GitHub</a>
         <a href="https://github.com/felixgeelhaar/mnemos#readme">Docs</a>
       </nav>
@@ -288,14 +290,18 @@
 
   <section class="hero">
     <div class="container">
-      <span class="pill">Self-hosted · Local-first · Open source</span>
-      <h2>Evidence layer for AI agents you actually own</h2>
+      <span class="pill">Self-hosted · MCP-native · Apache-2.0</span>
+      <h2>Memory for AI agents that stays on your servers — and tells you when it's lying.</h2>
       <p class="tagline">
-        Mnemos extracts claims, detects contradictions, and answers queries with citations.
-        Runs on your SQLite, Postgres, MySQL, or libSQL — your agents' memory never leaves your infrastructure.
+        Mnemos is a self-hosted memory + evidence layer for AI agents. Every recall comes with citations,
+        every contradiction surfaces explicitly, and every byte stays on your infrastructure.
+        Drops into Claude Desktop, Cursor, LangGraph, or any MCP-compatible runtime in one config block.
       </p>
-      <a href="https://github.com/felixgeelhaar/mnemos#install" class="cta-primary">Install</a>
-      <a href="#demo" class="cta-secondary">See it work</a>
+      <p class="tagline" style="font-size:15px;margin-top:-12px;">
+        For teams running production agents that need persistent state without per-call SaaS billing.
+      </p>
+      <a href="#demo" class="cta-primary">See a 30-second demo</a>
+      <a href="https://github.com/felixgeelhaar/mnemos#install" class="cta-secondary">Install</a>
     </div>
   </section>
 
@@ -304,30 +310,64 @@
       <div class="terminal">
         <div class="terminal-bar">
           <span></span><span></span><span></span>
-          <span class="label">~ mnemos contradiction demo</span>
+          <span class="label">~ remember during a turn, recall months later</span>
         </div>
-<pre><span class="prompt">$</span> <span class="cmd">mnemos process --text "We chose Postgres for the new service. \
-                          Final pick is MySQL because of the existing fleet."</span>
+<pre><span class="out"># 1. Agent writes during a tool call (HTTP, no SDK).</span>
+<span class="prompt">&gt;&gt;&gt;</span> <span class="cmd">httpx.post(f"{m}/v1/events", json={"events": [{</span>
+<span class="cmd">       "id": uid(), "run_id": session, "source_input_id": "chat-1",</span>
+<span class="cmd">       "content": "user prefers vegetarian, allergic to peanuts",</span>
+<span class="cmd">       "timestamp": "2026-05-09T16:00:00Z" }]})</span>
+<span class="out">200 OK</span>
 
-<span class="out">ingested</span>  2 events into run <span class="key">run_2026-05-09_a1b2</span>
-<span class="out">extracted</span> 2 claims (rule-based, no LLM required)
-<span class="out">related</span>   1 relationship: <span class="warn">contradicts</span>
-
-<span class="prompt">$</span> <span class="cmd">mnemos query "what database did we pick?"</span>
+<span class="out"># 2. Agent recalls later — same call shape, with citations.</span>
+<span class="prompt">$</span> <span class="cmd">mnemos query "what should I order for the user?"</span>
 {
-  <span class="key">"answer"</span>: <span class="str">"Tech stack decisions show contradiction: Postgres vs MySQL"</span>,
-  <span class="key">"contradictions"</span>: [
-    {
-      <span class="key">"a"</span>: <span class="str">"We chose Postgres for the new service"</span>,
-      <span class="key">"b"</span>: <span class="str">"Final pick is MySQL because of the existing fleet"</span>,
-      <span class="key">"evidence"</span>: [<span class="str">"event_47a3"</span>, <span class="str">"event_91c2"</span>],
-      <span class="key">"trust"</span>:    { <span class="key">"a"</span>: 0.71, <span class="key">"b"</span>: 0.83 }
-    }
+  <span class="key">"answer"</span>:  <span class="str">"User prefers vegetarian. Avoid peanuts."</span>,
+  <span class="key">"claims"</span>:  [
+    { <span class="key">"text"</span>: <span class="str">"user prefers vegetarian"</span>,    <span class="key">"trust"</span>: 0.86,
+      <span class="key">"evidence"</span>: [<span class="str">"event_47a3"</span>] },
+    { <span class="key">"text"</span>: <span class="str">"user is allergic to peanuts"</span>, <span class="key">"trust"</span>: 0.86,
+      <span class="key">"evidence"</span>: [<span class="str">"event_47a3"</span>] }
   ]
+}
+
+<span class="out"># 3. Bonus: contradictions surface for free across sessions.</span>
+<span class="prompt">$</span> <span class="cmd">mnemos process --text "Final pick is MySQL. Earlier we said Postgres."</span>
+<span class="out">related</span>   1 relationship: <span class="warn">contradicts</span>  (trust 0.71 vs 0.83)</pre>
+      </div>
+      <p style="text-align:center;color:var(--muted);font-size:13px;margin-top:16px;">
+        Write over HTTP from any language. Read back with claims + citations.
+        Contradictions land as edges in the graph, not silently overwritten.
+      </p>
+    </div>
+  </section>
+
+  <section id="mcp" class="demo" style="padding-top:0;">
+    <div class="container">
+      <h2 class="section-title" style="margin-bottom:12px;">Drop-in MCP server</h2>
+      <p class="section-sub">
+        <code>mnemos mcp</code> exposes 14 tools over stdio: <code>query_knowledge</code>,
+        <code>process_text</code>, <code>record_decision</code>, <code>query_lessons</code>,
+        <code>which_test_to_trust</code>, and more. Works with Claude Desktop, Cursor,
+        and any MCP-compatible runtime — no SDK, no proxy.
+      </p>
+      <div class="terminal">
+        <div class="terminal-bar">
+          <span></span><span></span><span></span>
+          <span class="label">~/.config/claude/claude_desktop_config.json</span>
+        </div>
+<pre>{
+  <span class="key">"mcpServers"</span>: {
+    <span class="key">"mnemos"</span>: {
+      <span class="key">"command"</span>: <span class="str">"mnemos"</span>,
+      <span class="key">"args"</span>:    [<span class="str">"mcp"</span>],
+      <span class="key">"env"</span>:     { <span class="key">"MNEMOS_DB_URL"</span>: <span class="str">"sqlite:///Users/me/mnemos.db"</span> }
+    }
+  }
 }</pre>
       </div>
       <p style="text-align:center;color:var(--muted);font-size:13px;margin-top:16px;">
-        Real output. Two seconds end-to-end. No LLM keys required.
+        Same surface available over REST (<code>/v1/*</code>) and gRPC for non-MCP runtimes.
       </p>
     </div>
   </section>
@@ -359,46 +399,53 @@
             <td class="yes">✅</td>
           </tr>
           <tr>
-            <td>Contradiction detection as a first-class output</td>
+            <td>Contradictions returned in the query response (not silently resolved)</td>
+            <td class="yes">✅</td>
+            <td class="partial">overwrites</td>
+            <td class="partial">graph-only</td>
+            <td class="partial">block-merge</td>
+          </tr>
+          <tr>
+            <td>Per-claim evidence: every claim links to ≥1 source event by ID, exposed in API</td>
+            <td class="yes">✅</td>
+            <td class="no">—</td>
+            <td class="partial">episode link</td>
+            <td class="no">—</td>
+          </tr>
+          <tr>
+            <td>Trust score (confidence × corroboration × freshness) ranks retrieval</td>
             <td class="yes">✅</td>
             <td class="no">—</td>
             <td class="no">—</td>
             <td class="no">—</td>
           </tr>
           <tr>
-            <td>Per-claim evidence (≥1 source event)</td>
+            <td>Drop-in MCP server (Claude Desktop / Cursor / any MCP runtime)</td>
             <td class="yes">✅</td>
-            <td class="no">—</td>
-            <td class="partial">facts only</td>
-            <td class="no">—</td>
+            <td class="partial">via wrapper</td>
+            <td class="partial">via wrapper</td>
+            <td class="partial">via wrapper</td>
           </tr>
           <tr>
-            <td>Trust score blending confidence + corroboration + freshness</td>
+            <td>Pluggable storage you own (SQLite / Postgres / MySQL / libSQL)</td>
             <td class="yes">✅</td>
-            <td class="no">—</td>
-            <td class="no">—</td>
-            <td class="no">—</td>
+            <td class="partial">vendor SDK</td>
+            <td class="partial">vendor SDK</td>
+            <td class="partial">vendor SDK</td>
           </tr>
           <tr>
-            <td>Append-only event log (audit-grade)</td>
-            <td class="yes">✅</td>
-            <td class="no">—</td>
-            <td class="partial">partial</td>
-            <td class="partial">partial</td>
-          </tr>
-          <tr>
-            <td>Pluggable storage (SQLite / Postgres / MySQL / libSQL)</td>
-            <td class="yes">✅</td>
-            <td class="partial">vendor</td>
-            <td class="partial">vendor</td>
-            <td class="partial">vendor</td>
-          </tr>
-          <tr>
-            <td>Default-off telemetry</td>
+            <td>Default-off telemetry — two independent gates required</td>
             <td class="yes">✅</td>
             <td class="no">—</td>
             <td class="no">—</td>
             <td class="partial">configurable</td>
+          </tr>
+          <tr>
+            <td>Append-only event log (audit-grade replay)</td>
+            <td class="yes">✅</td>
+            <td class="no">—</td>
+            <td class="partial">temporal edges</td>
+            <td class="partial">message log</td>
           </tr>
         </tbody>
       </table>
@@ -413,30 +460,35 @@
 
   <section class="proof">
     <div class="container">
-      <h2 class="section-title">Engineered like infrastructure</h2>
-      <p class="section-sub">Numbers from the codebase, not adjectives.</p>
+      <h2 class="section-title">Built for production agents</h2>
+      <p class="section-sub">Capabilities the codebase ships today — not roadmap items.</p>
       <div class="grid">
         <div class="card">
-          <div class="metric">100%</div>
-          <div class="desc">Mutation kill rate on the trust-scoring core (45 / 45 mutants caught).</div>
-          <a href="https://github.com/felixgeelhaar/mnemos/blob/main/docs/testing/mutation.md">mutation testing →</a>
+          <div class="metric">133 cases</div>
+          <div class="desc">Eval suite across 13 categories with per-suite F1 floors enforced in CI — silent regressions can't ship.</div>
+          <a href="https://github.com/felixgeelhaar/mnemos/tree/main/data/eval">eval suite →</a>
+        </div>
+        <div class="card">
+          <div class="metric">BM25 + cosine</div>
+          <div class="desc">Hybrid retrieval with max-normalized fusion per query; embeddings optional, BM25 fallback when none configured.</div>
+          <a href="https://github.com/felixgeelhaar/mnemos#retrieval">retrieval docs →</a>
         </div>
         <div class="card">
           <div class="metric">5 backends</div>
-          <div class="desc">SQLite, Postgres, MySQL, libSQL, in-memory — same schema, same tests.</div>
+          <div class="desc">SQLite, Postgres, MySQL, libSQL, in-memory — same schema, same tests, swap with one env var.</div>
           <a href="https://github.com/felixgeelhaar/mnemos/blob/main/CLAUDE.md#pluggable-backends-adr-0001">backend matrix →</a>
         </div>
         <div class="card">
-          <div class="metric">99.9%</div>
-          <div class="desc">SLO target with documented error budget and burn-rate alerting.</div>
-          <a href="https://github.com/felixgeelhaar/mnemos/blob/main/SLO.md">SLO doc →</a>
-        </div>
-        <div class="card">
           <div class="metric">0 bytes</div>
-          <div class="desc">Telemetry sent by default. Two independent gates required to opt in.</div>
+          <div class="desc">Telemetry sent by default. Two independent gates (opt-in flag + endpoint URL) required to send anything.</div>
           <a href="https://github.com/felixgeelhaar/mnemos/blob/main/docs/telemetry.md">privacy posture →</a>
         </div>
       </div>
+      <p style="text-align:center;color:var(--muted);font-size:13px;margin-top:24px;">
+        Production-readiness: 100% mutation kill rate on the trust-scoring core,
+        99.9% SLO targets in <a href="https://github.com/felixgeelhaar/mnemos/blob/main/SLO.md">SLO.md</a>,
+        cross-transport parity tests, append-only audit log.
+      </p>
     </div>
   </section>
 
@@ -452,10 +504,11 @@
           <div class="price-tier">OSS</div>
           <div class="price-amount">Free <span class="small">forever</span></div>
           <ul>
-            <li>Full feature set, self-hosted</li>
-            <li>SQLite / Postgres / MySQL / libSQL</li>
-            <li>CLI, MCP, REST, gRPC surfaces</li>
-            <li>Apache-2.0 licensed</li>
+            <li>Full feature set, self-hosted (Apache-2.0)</li>
+            <li>5 storage backends · CLI · MCP · REST · gRPC</li>
+            <li>JWT auth, agent principals, scope filters</li>
+            <li>Audit log export (<code>mnemos audit</code>)</li>
+            <li>Trust scoring, contradictions, citations</li>
           </ul>
           <a href="https://github.com/felixgeelhaar/mnemos#install" class="price-cta">Install</a>
         </div>
@@ -464,9 +517,9 @@
           <div class="price-amount">TBA</div>
           <ul>
             <li>Managed registry sync across hosts</li>
-            <li>SSO (OIDC / SAML)</li>
-            <li>Hosted MCP gateway</li>
-            <li>Email support, 1-business-day SLA</li>
+            <li>Hosted MCP gateway (planned)</li>
+            <li>SSO via OIDC (planned, deferred from A.4)</li>
+            <li>Email support during business hours</li>
           </ul>
           <a href="#contact" class="price-cta">Join waitlist</a>
         </div>
@@ -474,9 +527,9 @@
           <div class="price-tier">Enterprise</div>
           <div class="price-amount">Contact</div>
           <ul>
-            <li>Audit log export, SOC2 alignment</li>
-            <li>SLA + incident response</li>
             <li>Air-gapped deploy support</li>
+            <li>SLA + incident response</li>
+            <li>SOC2 alignment roadmap</li>
             <li>Custom retention &amp; key-management</li>
           </ul>
           <a href="mailto:hello@mnemos.dev?subject=Enterprise%20enquiry" class="price-cta">Contact sales</a>
@@ -487,14 +540,25 @@
 
   <section id="contact" class="lead-section">
     <div class="container">
-      <h2>Join the Team waitlist</h2>
-      <p>One email when managed Team is ready. No marketing list.</p>
+      <h2>Stay in the loop</h2>
+      <p>
+        One email when managed Team is ready, plus the occasional release note.
+        OSS-only? Star the repo or join the discussions instead.
+      </p>
       <form class="lead-form" id="lead-form">
         <label for="lead-email" style="position:absolute;left:-9999px;">Work email</label>
         <input id="lead-email" type="email" name="email" placeholder="you@company.com" required>
         <button type="submit">Join waitlist</button>
       </form>
-      <p style="margin-top:12px;color:var(--muted);font-size:14px;">No spam. We only use your email to notify you when Team launches.</p>
+      <p style="margin-top:16px;color:var(--muted);font-size:14px;">
+        No spam. Email only used to notify you when Team launches and for major release notes.
+      </p>
+      <p style="margin-top:8px;color:var(--muted);font-size:14px;">
+        OSS-only path:
+        <a href="https://github.com/felixgeelhaar/mnemos">star on GitHub</a> ·
+        <a href="https://github.com/felixgeelhaar/mnemos/discussions">join Discussions</a> ·
+        <a href="https://github.com/felixgeelhaar/mnemos/releases">watch releases</a>
+      </p>
     </div>
   </section>
 

@@ -1221,7 +1221,9 @@ func handleMetrics(args []string, f Flags) {
 			"entities":            entityCount,
 			"llm_cache_entries":   cacheEntryCount(),
 			"prompt_version":      extract.PromptVersion,
-			"eval_cases":          78,
+			// eval_cases is the static count across data/eval/*.yaml.
+			// Update when suites are added/removed (last counted 2026-05).
+			"eval_cases":          133,
 			"llm_eval_configured": strings.TrimSpace(os.Getenv("MNEMOS_LLM_PROVIDER")) != "",
 		}
 

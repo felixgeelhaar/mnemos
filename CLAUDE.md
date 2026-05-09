@@ -14,7 +14,7 @@ Pipeline: `ingest → extract → relate → query`
 make check          # fmt + lint + test + build (CI equivalent)
 make build          # Build bin/mnemos
 make install        # Install mnemos to $GOPATH/bin
-make test           # Run all tests (includes 102 eval cases (90 extraction + 12 relationship detection))
+make test           # Run all tests (includes 133 eval cases across 13 suites under data/eval/*.yaml)
 make fmt            # go fmt ./...
 make lint           # go vet + golangci-lint
 make sqlc           # Regenerate sqlc query code from sql/sqlite/
@@ -137,6 +137,8 @@ MNEMOS_LLM_CACHE_MAX_BYTES  # LLM extraction cache cap (default 1 GiB; 0 disable
 MNEMOS_DB_MAX_CONNS         # Postgres/MySQL pool MaxOpenConns (default 25)
 MNEMOS_DB_MAX_IDLE_CONNS    # Postgres/MySQL pool MaxIdleConns (default 5)
 MNEMOS_DB_CONN_MAX_LIFETIME # Pool ConnMaxLifetime, e.g. "30m" (default 30m)
+MNEMOS_TELEMETRY_OPTIN      # Truthy ("1"/"true"/"yes") to opt in to anonymized usage payload (default off)
+MNEMOS_TELEMETRY_ENDPOINT   # POST destination for `mnemos metrics --workspace --telemetry-send` (default unset = no send)
 ```
 
 Note: Anthropic has no embedding API — use a separate provider for embeddings.

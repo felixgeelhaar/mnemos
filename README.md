@@ -202,6 +202,13 @@ node that get you a defensible audit trail. Source:
 | `mnemos query --service X --env prod --team Y "..."` | Multi-tenant scope filter on the answer claims |
 | `mnemos process --no-relate ...` | Skip the relate stage for fast ingest; relate later in batch |
 | `mnemos verify <claim-id> [--half-life-days N]` | Bump `last_verified` and `verify_count`; optional per-claim freshness override |
+| `mnemos init [--force]` | Create `.mnemos/mnemos.db` for the current project (otherwise resolves to XDG global) |
+| `mnemos doctor` | Health-check the install: store reachable, schema applied, env wired, LLM/embed configured |
+| `mnemos quality` | Memory-quality telemetry: avg trust, avg confidence, stale/contested/contradiction counts |
+| `mnemos trust --test=<requirement-ref> [--service X --env Y --team Z]` | Rank `test_result` claims under one requirement by epistemic credibility; surface winner + rationale |
+| `mnemos incident open --title "..." [--severity sev1\|sev2\|sev3\|sev4]` / `incident close <id>` | Track incident lifecycle alongside Decisions/Outcomes |
+| `mnemos user create / list / rotate-token` and `mnemos agent register / list / authority` | JWT-auth admin: create operator users + non-human agents, manage authority scores |
+| `mnemos metrics --workspace [--telemetry-opt-in\|--telemetry-opt-out\|--telemetry-send]` | North Star workspace view (active runs / evidence-backed claims) + opt-in anonymized payload |
 
 ### Action + Outcome (v0.13+)
 
@@ -410,6 +417,12 @@ internal/
 | `MNEMOS_EMBED_TIMEOUT` | Per-request embedding HTTP timeout (default `60s`) |
 | `MNEMOS_AUTH_DIR` | Directory for the JWT signing secret (default: project `.mnemos/` or `$HOME/.mnemos/`). Override when running on a read-only rootfs (Docker `read_only: true`, k8s `readOnlyRootFilesystem: true`) by pointing at a writable volume. |
 | `MNEMOS_JWT_SECRET` | Hex-encoded JWT signing secret (≥32 bytes). When set, takes precedence over the file path; useful in CI/Kubernetes where you'd rather inject the secret as an env var than mount a file. |
+| `MNEMOS_LLM_CACHE_MAX_BYTES` | LLM extraction cache cap under `data/cache/llm-extraction/` (default `1 GiB`; `0` disables eviction). Oldest-mtime files are evicted first. |
+| `MNEMOS_DB_MAX_CONNS` | Postgres/MySQL pool `MaxOpenConns` (default `25`). |
+| `MNEMOS_DB_MAX_IDLE_CONNS` | Postgres/MySQL pool `MaxIdleConns` (default `5`). |
+| `MNEMOS_DB_CONN_MAX_LIFETIME` | Postgres/MySQL pool `ConnMaxLifetime` (default `30m`). |
+| `MNEMOS_TELEMETRY_OPTIN` | Truthy (`1`/`true`/`yes`) to opt in to anonymized usage payload. Default off. See [`docs/telemetry.md`](docs/telemetry.md). |
+| `MNEMOS_TELEMETRY_ENDPOINT` | POST destination for `mnemos metrics --workspace --telemetry-send`. Unset = no destination = no requests, even with opt-in active. |
 
 ### Trust scoring (v0.7+)
 
@@ -604,6 +617,14 @@ Tagged releases are published with GoReleaser via `.github/workflows/release.yml
 ## Security
 
 Auth surfaces, threat model, container hardening, and secret management: [`SECURITY.md`](SECURITY.md).
+
+## Telemetry
+
+Default off. Two independent gates (opt-in flag + endpoint URL) must hold for any payload to leave the host. Privacy posture, payload schema, and opt-in/opt-out flows: [`docs/telemetry.md`](docs/telemetry.md).
+
+## Reliability
+
+SLO: 99.9% availability over 30 days, p99 read 250ms, p99 write 500ms. Error-budget burn alerts in [`SLO.md`](SLO.md). Mutation-testing gate at 70% kill rate on `internal/trust` (currently 100% / 45 mutants caught) — see [`docs/testing/mutation.md`](docs/testing/mutation.md).
 
 ## License
 

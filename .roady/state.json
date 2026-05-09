@@ -1,6 +1,6 @@
 {
   "project_id": "Mnemos",
-  "version": 241,
+  "version": 243,
   "task_states": {
     "task-action-outcome-recording": {
       "status": "done",
@@ -747,9 +747,12 @@
       "elapsed_minutes": 14
     },
     "task-north-star-metric-+-opt-in-activation-telemetry": {
-      "status": "pending",
+      "status": "done",
       "path": "",
-      "elapsed_minutes": 0
+      "owner": "ai-agent",
+      "started_at": "2026-05-09T11:43:47.703327+02:00",
+      "completed_at": "2026-05-09T11:49:51.66587+02:00",
+      "elapsed_minutes": 6
     },
     "task-numeric-value-disagreement-detection": {
       "status": "done",
@@ -1170,5 +1173,5 @@
       "elapsed_minutes": 6
     }
   },
-  "updated_at": "2026-05-09T11:43:05.443475+02:00"
+  "updated_at": "2026-05-09T11:49:51.66587+02:00"
 }

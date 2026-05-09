@@ -153,7 +153,7 @@ func main() {
 	case "query":
 		handleQuery(args, flags)
 	case "metrics":
-		handleMetrics(flags)
+		handleMetrics(args, flags)
 	case "mcp":
 		handleMCP()
 	case "serve":
@@ -1125,7 +1125,45 @@ func handleQuality(f Flags) {
 	exitWithMnemosError(f.Verbose, err)
 }
 
-func handleMetrics(f Flags) {
+func handleMetrics(args []string, f Flags) {
+	var workspace, optIn, optOut, send bool
+	for _, a := range args {
+		switch a {
+		case "--workspace":
+			workspace = true
+		case "--telemetry-opt-in":
+			optIn = true
+		case "--telemetry-opt-out":
+			optOut = true
+		case "--telemetry-send":
+			send = true
+		default:
+			exitWithMnemosError(false, NewUserError("unknown argument %q", a))
+			return
+		}
+	}
+	if optIn && optOut {
+		exitWithMnemosError(false, NewUserError("--telemetry-opt-in and --telemetry-opt-out are mutually exclusive"))
+		return
+	}
+	if optIn {
+		if err := setTelemetryOptIn(true); err != nil {
+			exitWithMnemosError(false, NewSystemError(err, "set telemetry opt-in"))
+			return
+		}
+		fmt.Fprintln(os.Stderr, "telemetry: opted in. nothing is sent until MNEMOS_TELEMETRY_ENDPOINT is set and `mnemos metrics --workspace --telemetry-send` is run.")
+	}
+	if optOut {
+		if err := setTelemetryOptIn(false); err != nil {
+			exitWithMnemosError(false, NewSystemError(err, "remove telemetry opt-in"))
+			return
+		}
+		fmt.Fprintln(os.Stderr, "telemetry: opted out. no payload will be sent.")
+	}
+	if workspace {
+		handleWorkspaceMetrics(send, f)
+		return
+	}
 	err := runJob("metrics", map[string]string{}, f.Verbose, func(ctx context.Context, job *workflow.Job, conn *store.Conn) error {
 		if err := job.SetStatus("loading", ""); err != nil {
 			return err

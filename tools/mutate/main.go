@@ -141,7 +141,7 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 
 	var results []result
 	killed, total := 0, 0
@@ -156,13 +156,13 @@ func main() {
 				continue
 			}
 			tmpFile := filepath.Join(tmp, fmt.Sprintf("mut_%04d_%s.go", i, m.Name))
-			if err := os.WriteFile(tmpFile, modified, 0o644); err != nil {
+			if err := os.WriteFile(tmpFile, modified, 0o600); err != nil {
 				fatal(err)
 			}
 			ovPath := filepath.Join(tmp, fmt.Sprintf("overlay_%04d.json", i))
 			ov := map[string]any{"Replace": map[string]string{c.File: tmpFile}}
 			ob, _ := json.Marshal(ov)
-			if err := os.WriteFile(ovPath, ob, 0o644); err != nil {
+			if err := os.WriteFile(ovPath, ob, 0o600); err != nil {
 				fatal(err)
 			}
 			t0 := time.Now()
@@ -191,8 +191,8 @@ func main() {
 				fmt.Fprintf(os.Stderr, "[%3d/%3d] %s %s:%d:%d %s->%s (%s)\n",
 					total, len(cands), status, r.File, r.Line, r.Column, r.From, r.To, r.Duration)
 			}
-			os.Remove(tmpFile)
-			os.Remove(ovPath)
+			_ = os.Remove(tmpFile)
+			_ = os.Remove(ovPath)
 		}
 	}
 	elapsed := time.Since(start)
@@ -245,7 +245,7 @@ func main() {
 			"results":   results,
 		}
 		b, _ := json.MarshalIndent(out, "", "  ")
-		if err := os.WriteFile(jsonOut, b, 0o644); err != nil {
+		if err := os.WriteFile(jsonOut, b, 0o600); err != nil {
 			fatal(err)
 		}
 	}

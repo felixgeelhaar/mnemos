@@ -90,7 +90,7 @@ func dataDir() string {
 	if dataHome == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
-			return filepath.Join("data")
+			return "data"
 		}
 		dataHome = filepath.Join(home, ".local", "share")
 	}
@@ -111,7 +111,7 @@ func installID() (string, error) {
 			return s, nil
 		}
 	}
-	if err := os.MkdirAll(d, 0o755); err != nil {
+	if err := os.MkdirAll(d, 0o750); err != nil {
 		return "", fmt.Errorf("install_id: mkdir %s: %w", d, err)
 	}
 	buf := make([]byte, 16)
@@ -119,7 +119,7 @@ func installID() (string, error) {
 		return "", fmt.Errorf("install_id: rand: %w", err)
 	}
 	id := hex.EncodeToString(buf)
-	if err := os.WriteFile(p, []byte(id+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(p, []byte(id+"\n"), 0o600); err != nil {
 		return "", fmt.Errorf("install_id: write %s: %w", p, err)
 	}
 	return id, nil
@@ -150,10 +150,10 @@ func setTelemetryOptIn(enable bool) error {
 		}
 		return nil
 	}
-	if err := os.MkdirAll(d, 0o755); err != nil {
+	if err := os.MkdirAll(d, 0o750); err != nil {
 		return err
 	}
-	return os.WriteFile(p, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o644)
+	return os.WriteFile(p, []byte(time.Now().UTC().Format(time.RFC3339)+"\n"), 0o600)
 }
 
 // workspaceFingerprint returns a stable but anonymous identifier for
@@ -265,18 +265,20 @@ func sendTelemetry(ctx context.Context, m WorkspaceMetrics) (sent bool, err erro
 	if err != nil {
 		return false, fmt.Errorf("marshal: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	// Endpoint is operator-supplied via MNEMOS_TELEMETRY_ENDPOINT and gated
+	// by an explicit opt-in marker; gosec G107/G104 are accepted here.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body)) //nolint:gosec
 	if err != nil {
 		return false, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "mnemos-cli/"+mnemosVersion())
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //nolint:gosec
 	if err != nil {
 		return false, fmt.Errorf("post: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		return false, fmt.Errorf("telemetry endpoint returned %d", resp.StatusCode)
 	}

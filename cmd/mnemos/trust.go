@@ -19,29 +19,30 @@ import (
 func handleTrust(args []string, _ Flags) {
 	var testRef, svc, env, team string
 	for i := 0; i < len(args); i++ {
-		switch a := args[i]; {
-		case a == "--test" || a == "--requirement":
+		a := args[i]
+		switch a {
+		case "--test", "--requirement":
 			if i+1 >= len(args) {
 				exitWithMnemosError(false, NewUserError("%s requires a value", a))
 				return
 			}
 			testRef = args[i+1]
 			i++
-		case a == "--service":
+		case "--service":
 			if i+1 >= len(args) {
 				exitWithMnemosError(false, NewUserError("%s requires a value", a))
 				return
 			}
 			svc = args[i+1]
 			i++
-		case a == "--env":
+		case "--env":
 			if i+1 >= len(args) {
 				exitWithMnemosError(false, NewUserError("%s requires a value", a))
 				return
 			}
 			env = args[i+1]
 			i++
-		case a == "--team":
+		case "--team":
 			if i+1 >= len(args) {
 				exitWithMnemosError(false, NewUserError("%s requires a value", a))
 				return

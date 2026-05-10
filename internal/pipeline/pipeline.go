@@ -344,7 +344,7 @@ func GenerateEmbeddings(ctx context.Context, conn *store.Conn, events []domain.E
 		Logger:        slog.New(slog.NewJSONHandler(os.Stderr, nil)),
 	})
 
-	vectors, err := retrier.Do(ctx, func(ctx context.Context) ([][]float32, error) {
+	vectors, err := retrier.Execute(ctx, func(ctx context.Context) ([][]float32, error) {
 		return client.Embed(ctx, texts)
 	})
 	if err != nil {
@@ -399,7 +399,7 @@ func GenerateClaimEmbeddings(ctx context.Context, conn *store.Conn, claims []dom
 		Logger:        slog.New(slog.NewJSONHandler(os.Stderr, nil)),
 	})
 
-	vectors, err := retrier.Do(ctx, func(ctx context.Context) ([][]float32, error) {
+	vectors, err := retrier.Execute(ctx, func(ctx context.Context) ([][]float32, error) {
 		return client.Embed(ctx, texts)
 	})
 	if err != nil {

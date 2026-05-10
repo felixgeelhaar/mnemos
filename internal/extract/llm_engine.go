@@ -132,7 +132,7 @@ func (e LLMEngine) ExtractWithEntities(events []domain.Event) ([]domain.Claim, [
 		Logger:        slog.New(slog.NewJSONHandler(os.Stderr, nil)),
 	})
 
-	resp, err := retrier.Do(ctx, func(ctx context.Context) (llm.Response, error) {
+	resp, err := retrier.Execute(ctx, func(ctx context.Context) (llm.Response, error) {
 		return e.client.Complete(ctx, messages)
 	})
 	if err != nil {

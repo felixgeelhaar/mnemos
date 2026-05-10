@@ -277,7 +277,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, dst any) err
 	var resp *http.Response
 	var err error
 	if c.retrier != nil {
-		resp, err = c.retrier.Do(ctx, send)
+		resp, err = c.retrier.Execute(ctx, send)
 	} else {
 		resp, err = send(ctx)
 	}

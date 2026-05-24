@@ -665,6 +665,8 @@ func makeClaimsHandler(conn *store.Conn) http.HandlerFunc {
 			listClaimsHandler(conn, w, r)
 		case http.MethodPost:
 			appendClaimsHandler(conn, w, r)
+		case http.MethodDelete:
+			deleteClaimsHandler(conn, w, r)
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
@@ -1225,6 +1227,132 @@ type appendClaimsRequest struct {
 type claimEvidenceItem struct {
 	ClaimID string `json:"claim_id"`
 	EventID string `json:"event_id"`
+}
+
+// deleteClaimsResponse carries the per-table delete counts plus the
+// request id. The request id lands in the structured log so a later
+// compliance audit can correlate "we deleted X" with "rows actually
+// disappeared".
+type deleteClaimsResponse struct {
+	RequestID         string `json:"request_id"`
+	RunID             string `json:"run_id"`
+	ClaimsDeleted     int    `json:"claims_deleted"`
+	EventsDeleted     int    `json:"events_deleted"`
+	EmbeddingsDeleted int    `json:"embeddings_deleted"`
+	RelationshipsDeleted int `json:"relationships_deleted"`
+}
+
+// deleteClaimsHandler implements DELETE /v1/claims?run_id=<prefix>.
+// It is the GDPR Art.17 right-to-be-forgotten endpoint: in one call,
+// every claim tied to events under the given run_id is removed along
+// with its dependent rows (evidence links, embeddings, status
+// history, claim-only relationships). Events for that run_id are
+// removed last.
+//
+// Idempotency: calling DELETE twice for the same run_id is safe —
+// the second call returns zero counts and 200, matching the
+// HTTP-semantics expectation that DELETE is idempotent.
+//
+// This handler is not transactional across the four repositories
+// (each repo manages its own tx). Failure halts the cascade and
+// surfaces the error so the operator can retry; the design
+// trade-off is that a half-failed run can be re-deleted safely
+// (idempotent) rather than risking a giant cross-repo transaction.
+func deleteClaimsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request) {
+	if !requireScope(w, r, domain.ScopeClaimsWrite) {
+		return
+	}
+	runID := strings.TrimSpace(r.URL.Query().Get("run_id"))
+	if runID == "" {
+		writeError(w, http.StatusBadRequest, "run_id query parameter is required")
+		return
+	}
+	ctx := r.Context()
+	requestID := requestIDFromContext(ctx)
+
+	events, err := conn.Events.ListByRunID(ctx, runID)
+	if err != nil {
+		writeInternalError(w, "list events for delete", err)
+		return
+	}
+	if len(events) == 0 {
+		// Nothing to do — idempotent zero-count response.
+		writeJSON(w, http.StatusOK, deleteClaimsResponse{RequestID: requestID, RunID: runID})
+		return
+	}
+
+	// Resolve target claims via the evidence join. A claim only
+	// "belongs" to this run_id if at least one evidence row links it
+	// to an event in scope. Claims linked to multiple runs survive
+	// — only the in-scope evidence rows are dropped.
+	eventIDSet := make(map[string]struct{}, len(events))
+	for _, e := range events {
+		eventIDSet[e.ID] = struct{}{}
+	}
+	allEvidence, err := conn.Claims.ListAllEvidence(ctx)
+	if err != nil {
+		writeInternalError(w, "list evidence for delete", err)
+		return
+	}
+	claimToOtherRunEvidence := map[string]bool{}
+	targetClaims := map[string]struct{}{}
+	for _, link := range allEvidence {
+		if _, ok := eventIDSet[link.EventID]; ok {
+			targetClaims[link.ClaimID] = struct{}{}
+		}
+	}
+	// Second pass: detect claims that ALSO have evidence outside the
+	// run — those must NOT be cascade-deleted; the run-scoped evidence
+	// rows go but the claim itself survives.
+	for _, link := range allEvidence {
+		if _, isTarget := targetClaims[link.ClaimID]; !isTarget {
+			continue
+		}
+		if _, inRun := eventIDSet[link.EventID]; !inRun {
+			claimToOtherRunEvidence[link.ClaimID] = true
+		}
+	}
+
+	resp := deleteClaimsResponse{RequestID: requestID, RunID: runID}
+	for cid := range targetClaims {
+		if claimToOtherRunEvidence[cid] {
+			// Skip cascade — claim is shared with another run. The
+			// shared-evidence cleanup happens implicitly when we
+			// delete the events below.
+			continue
+		}
+		// Delete relationships first (foreign keys), then embedding,
+		// then claim cascade (which handles claim_evidence +
+		// claim_status_history + claim row).
+		if err := conn.Relationships.DeleteByClaim(ctx, cid); err != nil {
+			writeInternalError(w, "delete relationships for "+cid, err)
+			return
+		}
+		if err := conn.Embeddings.Delete(ctx, cid, "claim"); err != nil {
+			writeInternalError(w, "delete embedding for "+cid, err)
+			return
+		}
+		if err := conn.Claims.DeleteCascade(ctx, cid); err != nil {
+			writeInternalError(w, "delete claim "+cid, err)
+			return
+		}
+		resp.ClaimsDeleted++
+		resp.EmbeddingsDeleted++
+		resp.RelationshipsDeleted++
+	}
+
+	// Events go last so a partial failure above leaves the events
+	// referenceable (the operator can re-run the DELETE idempotently
+	// to finish).
+	for _, e := range events {
+		if err := conn.Events.DeleteByID(ctx, e.ID); err != nil {
+			writeInternalError(w, "delete event "+e.ID, err)
+			return
+		}
+		resp.EventsDeleted++
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func appendClaimsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request) {

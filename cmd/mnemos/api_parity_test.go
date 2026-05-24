@@ -107,7 +107,7 @@ var parityMatrix = []parityEntry{
 	// Core knowledge surfaces.
 	{Capability: "list/append events", MCPTool: parityNA, HTTPRoute: "/v1/events", GRPCMethod: "ListEvents"},
 	{Capability: "append events (gRPC verb)", MCPTool: parityNA, HTTPRoute: parityNA, GRPCMethod: "AppendEvents"},
-	{Capability: "list/append claims", MCPTool: "list_claims", HTTPRoute: "/v1/claims", GRPCMethod: "ListClaims"},
+	{Capability: "list/append/delete claims", MCPTool: "list_claims", HTTPRoute: "/v1/claims", GRPCMethod: "ListClaims"},
 	{Capability: "append claims (gRPC verb)", MCPTool: parityNA, HTTPRoute: parityNA, GRPCMethod: "AppendClaims"},
 	{Capability: "claim subresources (provenance/export)", MCPTool: parityNA, HTTPRoute: "/v1/claims/", GRPCMethod: parityNA},
 	{Capability: "list/append relationships", MCPTool: parityNA, HTTPRoute: "/v1/relationships", GRPCMethod: "ListRelationships"},

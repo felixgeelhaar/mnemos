@@ -1,0 +1,126 @@
+[
+  {
+    "name": "remember",
+    "description": "Persist a claim into Mnemos for the given run_id. Use this whenever the agent decides to commit a fact to long-term memory; the claim plus its source event and evidence link are all written atomically so the audit trail stays complete.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "confidence": {
+          "type": "number",
+          "description": "Confidence in [0, 1]. Defaults to 0.9 when omitted.",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "kind": {
+          "type": "string",
+          "description": "Claim kind. Defaults to \"fact\" when omitted.",
+          "enum": [
+            "fact",
+            "hypothesis",
+            "decision"
+          ]
+        },
+        "run_id": {
+          "type": "string",
+          "description": "Tenant scope. Events are stamped with this so run_id-filtered recall (and search_memory) can find the claim."
+        },
+        "text": {
+          "type": "string",
+          "description": "The fact to remember."
+        },
+        "valid_until": {
+          "type": "string",
+          "description": "Optional RFC3339 timestamp at which the claim should automatically be considered no longer in force."
+        }
+      },
+      "required": [
+        "text",
+        "run_id"
+      ]
+    }
+  },
+  {
+    "name": "forget",
+    "description": "Soft-delete a claim by flipping its status to \"deprecated\". The text and evidence remain queryable for audit; future recall paths exclude the claim from active context.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "claim_id": {
+          "type": "string",
+          "description": "ID of the claim to forget. Status flips to \"deprecated\"; the claim and its evidence stay queryable for audit."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Optional rationale recorded on the status transition."
+        }
+      },
+      "required": [
+        "claim_id"
+      ]
+    }
+  },
+  {
+    "name": "update",
+    "description": "Rewrite a claim's text (and optionally its confidence) when the agent's understanding refines. Use when the underlying fact didn't change identity, only wording or precision.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "claim_id": {
+          "type": "string",
+          "description": "ID of the claim to rewrite."
+        },
+        "confidence": {
+          "type": "number",
+          "description": "Optional new confidence in [0, 1]; omit to keep the current value.",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "new_text": {
+          "type": "string",
+          "description": "Replacement text for the claim."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Optional rationale recorded on the status transition."
+        }
+      },
+      "required": [
+        "claim_id",
+        "new_text"
+      ]
+    }
+  },
+  {
+    "name": "search_memory",
+    "description": "Semantic search over the agent's memory: embed the query, then rank claims by cosine similarity against the query embedding, restricted to claims under the given run_id (tenant boundary).",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "min_similarity": {
+          "type": "number",
+          "description": "Drop hits below this cosine similarity threshold (default 0.0).",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "query": {
+          "type": "string",
+          "description": "Free-text query. Embedded by the configured provider and matched against stored claim embeddings by cosine similarity."
+        },
+        "run_id": {
+          "type": "string",
+          "description": "Tenant scope. Required to prevent cross-tenant semantic leakage; only claims linked to events under this run_id are searched."
+        },
+        "top_k": {
+          "type": "integer",
+          "description": "Maximum hits to return (default 10, max 100).",
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "required": [
+        "query",
+        "run_id"
+      ]
+    }
+  }
+]

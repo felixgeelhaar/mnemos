@@ -208,12 +208,8 @@ func OpenAITools() []OpenAITool {
 	out := make([]OpenAITool, 0, len(defs))
 	for _, d := range defs {
 		out = append(out, OpenAITool{
-			Type: "function",
-			Function: OpenAIToolFunction{
-				Name:        d.Name,
-				Description: d.Description,
-				Parameters:  d.Parameters,
-			},
+			Type:     "function",
+			Function: OpenAIToolFunction(d),
 		})
 	}
 	return out

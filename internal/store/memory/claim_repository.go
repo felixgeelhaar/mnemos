@@ -70,6 +70,21 @@ func (r ClaimRepository) upsertWithReason(_ context.Context, claims []domain.Cla
 		}
 		r.state.claims[claim.ID] = stored
 
+		// Append a claim_versions snapshot for every write (Refs #38).
+		// Done inline rather than via the ClaimVersionRepository to
+		// avoid a recursive lock acquisition — this loop already holds
+		// state.mu.
+		versions := r.state.claimVersions[claim.ID]
+		r.state.claimVersions[claim.ID] = append(versions, domain.ClaimVersion{
+			ClaimID:    claim.ID,
+			Version:    len(versions) + 1,
+			Text:       claim.Text,
+			Confidence: claim.Confidence,
+			Status:     claim.Status,
+			WrittenAt:  now,
+			WrittenBy:  actorOr(changedBy),
+		})
+
 		if priorStatus == claim.Status {
 			continue
 		}

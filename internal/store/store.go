@@ -50,6 +50,9 @@ type Conn struct {
 	// nil on providers that have not implemented it yet; callers
 	// type-check before use.
 	Feedback ports.FeedbackRepository
+	// ClaimVersions is the append-only version chain for claims
+	// (Refs #38). nil on providers without an implementation.
+	ClaimVersions ports.ClaimVersionRepository
 
 	// Raw is the provider's underlying handle (e.g. *sql.DB for
 	// SQLite/Postgres, an in-memory state struct for memory). It is

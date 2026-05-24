@@ -275,6 +275,30 @@ type Claim struct {
 	ConfidenceComponents map[string]float64
 }
 
+// ClaimVersion is one row of a claim's full text/confidence/status
+// audit trail (Refs #38). Versions accumulate on every Upsert path
+// so a future read can answer "what did this claim say at version
+// N?" or build a diff timeline. Lives in a side table so the claim
+// row itself stays slim.
+type ClaimVersion struct {
+	// ClaimID is the claim this version snapshots.
+	ClaimID string
+	// Version is a monotonic 1-based generation counter for this
+	// claim. The first insert is always v1; every subsequent Upsert
+	// (text edit, confidence change, status change) bumps it.
+	Version int
+	// Text, Confidence, Status capture the claim's value at this
+	// version.
+	Text       string
+	Confidence float64
+	Status     ClaimStatus
+	// WrittenAt is when the version row was created. Distinct from
+	// the claim's CreatedAt (which marks the original insert).
+	WrittenAt time.Time
+	// WrittenBy stamps the actor that performed the write.
+	WrittenBy string
+}
+
 // ClaimFeedback is the per-claim feedback state read off the
 // claim_feedback side table. Lives separately from Claim so the
 // list-claims hot paths don't pay an extra column on every read; the

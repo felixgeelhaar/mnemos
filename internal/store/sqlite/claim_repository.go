@@ -125,9 +125,23 @@ func (r ClaimRepository) upsertWithReason(ctx context.Context, claims []domain.C
 			return fmt.Errorf("upsert claim %s: %w", claim.ID, err)
 		}
 
+		// Append a claim_versions snapshot for every write (Refs #38).
+		// Each Upsert — fresh insert OR field edit — produces a new
+		// row, so the audit trail captures text/confidence changes
+		// not just status transitions.
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO claim_versions (claim_id, version, text, confidence, status, written_at, written_by)
+VALUES (
+	?,
+	COALESCE((SELECT MAX(version) FROM claim_versions WHERE claim_id = ?), 0) + 1,
+	?, ?, ?, ?, ?
+)`, claim.ID, claim.ID, claim.Text, claim.Confidence, string(claim.Status), now, actorOr(changedBy)); err != nil {
+			return fmt.Errorf("append claim_version for %s: %w", claim.ID, err)
+		}
+
 		newStatus := string(claim.Status)
 		if priorStatus == newStatus {
-			continue // no transition
+			continue // no status transition row, but version row above still recorded the snapshot
 		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO claim_status_history (claim_id, from_status, to_status, changed_at, reason, changed_by) VALUES (?, ?, ?, ?, ?, ?)`,
@@ -486,6 +500,12 @@ func (r ClaimRepository) DeleteCascade(ctx context.Context, claimID string) erro
 	if _, err := tx.ExecContext(ctx, `DELETE FROM claim_status_history WHERE claim_id = ?`, claimID); err != nil {
 		return fmt.Errorf("delete claim_status_history: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM claim_versions WHERE claim_id = ?`, claimID); err != nil {
+		return fmt.Errorf("delete claim_versions: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM claim_feedback WHERE claim_id = ?`, claimID); err != nil {
+		return fmt.Errorf("delete claim_feedback: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM claims WHERE id = ?`, claimID); err != nil {
 		return fmt.Errorf("delete claim: %w", err)
 	}
@@ -542,6 +562,12 @@ func (r ClaimRepository) DeleteAll(ctx context.Context) error {
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM claim_status_history`); err != nil {
 		return fmt.Errorf("delete claim_status_history: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM claim_versions`); err != nil {
+		return fmt.Errorf("delete claim_versions: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM claim_feedback`); err != nil {
+		return fmt.Errorf("delete claim_feedback: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM claims`); err != nil {
 		return fmt.Errorf("delete claims: %w", err)

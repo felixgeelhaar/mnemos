@@ -165,6 +165,24 @@ CREATE TABLE IF NOT EXISTS claim_status_history (
 CREATE INDEX IF NOT EXISTS idx_claim_status_history_claim_id ON claim_status_history(claim_id);
 CREATE INDEX IF NOT EXISTS idx_claim_status_history_changed_at ON claim_status_history(changed_at);
 
+-- claim_versions (Refs #38) — append-only audit trail of every text /
+-- confidence / status snapshot a claim has held. Side table so the
+-- claim row itself stays slim; consumers asking for the timeline JOIN
+-- on claim_id.
+CREATE TABLE IF NOT EXISTS claim_versions (
+	claim_id TEXT NOT NULL,
+	version INTEGER NOT NULL,
+	text TEXT NOT NULL,
+	confidence REAL NOT NULL,
+	status TEXT NOT NULL,
+	written_at TEXT NOT NULL,
+	written_by TEXT NOT NULL DEFAULT '<system>',
+	PRIMARY KEY (claim_id, version),
+	FOREIGN KEY (claim_id) REFERENCES claims(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_claim_versions_claim_id ON claim_versions(claim_id);
+
 -- claim_feedback (Refs #40) — per-claim feedback state. Side table so
 -- the claim list/read hot paths don't pay a wider row for a relatively
 -- cold field. Schema is small and idempotent; feedback handler
@@ -462,7 +480,7 @@ CREATE INDEX IF NOT EXISTS idx_incidents_root_cause_claim_id ON incidents(root_c
 // currentSchemaVersion is the schema generation this binary expects.
 // Bump whenever a column or table is added; pair the bump with a step
 // in addMissingColumns so existing DBs upgrade in place.
-const currentSchemaVersion = 15
+const currentSchemaVersion = 16
 
 // addMissingColumn declares one defensive column-add. Each entry is
 // idempotent: if the column already exists in the table we skip it,

@@ -2184,9 +2184,61 @@ func makeClaimSubresourceHandler(conn *store.Conn) http.HandlerFunc {
 			makeClaimMarkdownExportHandler(conn, claimID)(w, r)
 		case "feedback":
 			makeFeedbackHandler(conn, claimID)(w, r)
+		case "history":
+			makeClaimHistoryHandler(conn, claimID)(w, r)
 		default:
 			writeError(w, http.StatusNotFound, fmt.Sprintf("unknown subresource %q", subresource))
 		}
+	}
+}
+
+// claimVersionDTO is the wire shape for one row of the version chain.
+type claimVersionDTO struct {
+	ClaimID    string  `json:"claim_id"`
+	Version    int     `json:"version"`
+	Text       string  `json:"text"`
+	Confidence float64 `json:"confidence"`
+	Status     string  `json:"status"`
+	WrittenAt  string  `json:"written_at"`
+	WrittenBy  string  `json:"written_by"`
+}
+
+type claimHistoryResponse struct {
+	ClaimID  string            `json:"claim_id"`
+	Versions []claimVersionDTO `json:"versions"`
+}
+
+// makeClaimHistoryHandler handles GET /v1/claims/<id>/history. Returns
+// the full version chain newest-first, so a caller diffing can read
+// versions[0].text vs versions[1].text without re-sorting client-side.
+func makeClaimHistoryHandler(conn *store.Conn, claimID string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if conn.ClaimVersions == nil {
+			writeError(w, http.StatusNotImplemented, "version history not available on this backend")
+			return
+		}
+		versions, err := conn.ClaimVersions.ListByClaim(r.Context(), claimID)
+		if err != nil {
+			writeInternalError(w, "list claim versions", err)
+			return
+		}
+		out := claimHistoryResponse{ClaimID: claimID, Versions: make([]claimVersionDTO, 0, len(versions))}
+		for _, v := range versions {
+			out.Versions = append(out.Versions, claimVersionDTO{
+				ClaimID:    v.ClaimID,
+				Version:    v.Version,
+				Text:       v.Text,
+				Confidence: v.Confidence,
+				Status:     string(v.Status),
+				WrittenAt:  v.WrittenAt.UTC().Format(time.RFC3339Nano),
+				WrittenBy:  v.WrittenBy,
+			})
+		}
+		writeJSON(w, http.StatusOK, out)
 	}
 }
 

@@ -191,6 +191,21 @@ type EmbeddingRepository interface {
 	DeleteAll(ctx context.Context) error
 }
 
+// ClaimVersionRepository persists the append-only version chain for
+// a claim (Refs #38). Every Upsert path appends one row so a later
+// read can answer "what did this claim say at version N?" without
+// reconstructing the timeline from status_history + the current row.
+type ClaimVersionRepository interface {
+	// Append writes one new row. Version numbers are 1-based and
+	// monotonic per claim id; the implementation chooses the next
+	// number (typically max(existing)+1 or 1 if none).
+	Append(ctx context.Context, v domain.ClaimVersion) error
+	// ListByClaim returns every recorded version for a claim,
+	// ordered version DESC (newest first) so consumers can build a
+	// diff timeline without extra sorting.
+	ListByClaim(ctx context.Context, claimID string) ([]domain.ClaimVersion, error)
+}
+
 // FeedbackRepository persists per-claim feedback state (helpful /
 // not-helpful streaks + last note). Lives separately from the claim
 // row itself so the claim hot paths don't pay extra columns for what

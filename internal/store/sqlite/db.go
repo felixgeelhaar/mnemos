@@ -165,6 +165,19 @@ CREATE TABLE IF NOT EXISTS claim_status_history (
 CREATE INDEX IF NOT EXISTS idx_claim_status_history_claim_id ON claim_status_history(claim_id);
 CREATE INDEX IF NOT EXISTS idx_claim_status_history_changed_at ON claim_status_history(changed_at);
 
+-- claim_feedback (Refs #40) — per-claim feedback state. Side table so
+-- the claim list/read hot paths don't pay a wider row for a relatively
+-- cold field. Schema is small and idempotent; feedback handler
+-- upserts on (claim_id) primary key.
+CREATE TABLE IF NOT EXISTS claim_feedback (
+	claim_id TEXT PRIMARY KEY,
+	negative_feedback_streak INTEGER NOT NULL DEFAULT 0,
+	helpful_count INTEGER NOT NULL DEFAULT 0,
+	last_feedback_at TEXT NOT NULL DEFAULT '',
+	last_feedback_note TEXT NOT NULL DEFAULT '',
+	FOREIGN KEY (claim_id) REFERENCES claims(id)
+);
+
 CREATE TABLE IF NOT EXISTS embeddings (
 	entity_id TEXT NOT NULL,
 	entity_type TEXT NOT NULL,
@@ -449,7 +462,7 @@ CREATE INDEX IF NOT EXISTS idx_incidents_root_cause_claim_id ON incidents(root_c
 // currentSchemaVersion is the schema generation this binary expects.
 // Bump whenever a column or table is added; pair the bump with a step
 // in addMissingColumns so existing DBs upgrade in place.
-const currentSchemaVersion = 14
+const currentSchemaVersion = 15
 
 // addMissingColumn declares one defensive column-add. Each entry is
 // idempotent: if the column already exists in the table we skip it,
@@ -526,6 +539,10 @@ var expectedColumns = []addMissingColumn{
 	// downstream consumers can weight contributors. Empty object
 	// means "no decomposition surfaced".
 	{"claims", "confidence_components", "TEXT NOT NULL DEFAULT '{}'"},
+	// v14: claim_feedback (Refs #40) — side table; no claim-column
+	// adds. The CREATE TABLE for it lives next to the other CREATE
+	// statements above (auto-applies via CREATE TABLE IF NOT EXISTS),
+	// so this list intentionally has no v14 row.
 	// v11 — lesson polarity (positive / negative anti-lesson).
 	{"lessons", "polarity", "TEXT NOT NULL DEFAULT ''"},
 	// v12 — decision audit trail: refuted beliefs + failed outcome link.

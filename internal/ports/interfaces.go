@@ -191,6 +191,24 @@ type EmbeddingRepository interface {
 	DeleteAll(ctx context.Context) error
 }
 
+// FeedbackRepository persists per-claim feedback state (helpful /
+// not-helpful streaks + last note). Lives separately from the claim
+// row itself so the claim hot paths don't pay extra columns for what
+// is a relatively cold signal. Implementations are upsert-by-claim_id;
+// a fresh claim with no recorded feedback yet returns the zero value
+// (and ok=false) from Get.
+type FeedbackRepository interface {
+	// Get returns the feedback state for claimID, or ok=false if no
+	// row exists yet. Implementations must not return an error for
+	// the "not found" case — feedback is sparse by design.
+	Get(ctx context.Context, claimID string) (domain.ClaimFeedback, bool, error)
+	// Upsert writes the supplied state atomically. The handler is
+	// responsible for read-modify-write; the repository is dumb on
+	// purpose so a future caller (background reaction worker) can
+	// share the same write path.
+	Upsert(ctx context.Context, state domain.ClaimFeedback) error
+}
+
 // ClaimSimilarityHit is one row of a vector-similarity search over
 // claim embeddings: the claim id, the cosine similarity (1.0 =
 // identical, 0.0 = orthogonal), and the model the stored vector was

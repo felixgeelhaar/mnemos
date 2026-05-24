@@ -88,6 +88,7 @@ func openProvider(_ context.Context, dsn string) (*store.Conn, error) {
 		Playbooks:     PlaybookRepository{state: st},
 		EntityRels:    EntityRelationshipRepository{state: st},
 		Incidents:     IncidentRepository{state: st},
+		Feedback:      FeedbackRepository{state: st},
 		Raw:           st,
 		Closer:        func() error { st.clear(); return nil },
 	}, nil
@@ -142,6 +143,7 @@ type state struct {
 	entityRelKey     map[entityRelKey]string // (kind,from_type,from_id,to_type,to_id) → id
 	incidents        map[string]domain.Incident
 	incidentOrder    []string
+	feedback         map[string]domain.ClaimFeedback
 }
 
 // storedEntityVersion is the in-memory analogue of a row in
@@ -182,6 +184,7 @@ func newState() *state {
 		entityRels:       map[string]domain.EntityRelationship{},
 		entityRelKey:     map[entityRelKey]string{},
 		incidents:        map[string]domain.Incident{},
+		feedback:         map[string]domain.ClaimFeedback{},
 	}
 }
 
@@ -229,6 +232,7 @@ func (s *state) clear() {
 	s.entityRelOrder = nil
 	s.entityRelKey = map[entityRelKey]string{}
 	s.incidents = map[string]domain.Incident{}
+	s.feedback = map[string]domain.ClaimFeedback{}
 	s.incidentOrder = nil
 }
 

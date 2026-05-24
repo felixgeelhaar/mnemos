@@ -275,6 +275,32 @@ type Claim struct {
 	ConfidenceComponents map[string]float64
 }
 
+// ClaimFeedback is the per-claim feedback state read off the
+// claim_feedback side table. Lives separately from Claim so the
+// list-claims hot paths don't pay an extra column on every read; the
+// feedback endpoint and any caller that wants the streak/note loads
+// it explicitly.
+type ClaimFeedback struct {
+	// ClaimID is the claim this feedback state attaches to.
+	ClaimID string
+	// NegativeFeedbackStreak counts consecutive "not helpful" votes
+	// since the last "helpful" vote (which resets it to zero). When
+	// the streak crosses the configured threshold the feedback
+	// handler auto-transitions the claim to "contested".
+	NegativeFeedbackStreak int
+	// HelpfulCount is the lifetime count of "helpful" votes. Unlike
+	// NegativeFeedbackStreak it never resets — it is a corroboration
+	// signal the trust scorer can weight.
+	HelpfulCount int
+	// LastFeedbackAt stamps when the most recent feedback landed.
+	// Zero means "no feedback yet".
+	LastFeedbackAt time.Time
+	// LastFeedbackNote is the most recent reviewer note kept verbatim
+	// for the audit trail. Empty means "no note supplied" (positive
+	// feedback typically omits it).
+	LastFeedbackNote string
+}
+
 // IsValidAt reports whether the claim was in force at instant t.
 // A claim is in force while ValidFrom ≤ t and (ValidTo is zero OR t < ValidTo).
 // Zero ValidFrom counts as "valid from the beginning of time" so legacy

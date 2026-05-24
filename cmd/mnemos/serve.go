@@ -2182,10 +2182,171 @@ func makeClaimSubresourceHandler(conn *store.Conn) http.HandlerFunc {
 			makeProvenanceHandler(conn, claimID)(w, r)
 		case "export.md":
 			makeClaimMarkdownExportHandler(conn, claimID)(w, r)
+		case "feedback":
+			makeFeedbackHandler(conn, claimID)(w, r)
 		default:
 			writeError(w, http.StatusNotFound, fmt.Sprintf("unknown subresource %q", subresource))
 		}
 	}
+}
+
+// feedbackRequest is the inbound wire shape for
+// POST /v1/claims/<id>/feedback.
+type feedbackRequest struct {
+	// Helpful is the binary signal: true = the claim was useful,
+	// false = the consumer pushed back.
+	Helpful bool `json:"helpful"`
+	// Note is an optional reviewer note kept verbatim on the claim's
+	// feedback row. Useful for the human-review path; omit for
+	// programmatic signals.
+	Note string `json:"note,omitempty"`
+}
+
+// feedbackResponse echoes the post-application state of the claim
+// plus the feedback counters, so a caller can react to the streak
+// transition without a second GET.
+type feedbackResponse struct {
+	ClaimID                string  `json:"claim_id"`
+	Helpful                bool    `json:"helpful"`
+	NewStatus              string  `json:"new_status"`
+	NewConfidence          float64 `json:"new_confidence"`
+	NegativeFeedbackStreak int     `json:"negative_feedback_streak"`
+	HelpfulCount           int     `json:"helpful_count"`
+	AutoContested          bool    `json:"auto_contested"`
+}
+
+// feedbackDecayFactor is the per-negative-vote multiplier applied to
+// the scalar Confidence. 0.9 ≈ "each push-back trims 10% of
+// confidence" — keeps the decay shallow enough that a single bad
+// vote can't tank a well-corroborated claim while still being
+// observable. Env-tunable in case operators want a sharper or
+// softer slope.
+func feedbackDecayFactor() float64 {
+	return envFloat("MNEMOS_FEEDBACK_DECAY", 0.9)
+}
+
+// feedbackAutoContestThreshold is the consecutive-negative count
+// above which the claim's status auto-transitions to "contested".
+// 3 by default — enough to suppress noise from a single reviewer
+// having a bad day, low enough to surface real drift.
+func feedbackAutoContestThreshold() int {
+	return envInt("MNEMOS_FEEDBACK_CONTEST_THRESHOLD", 3)
+}
+
+// makeFeedbackHandler returns the POST /v1/claims/<id>/feedback
+// handler. Reads the current claim + feedback row, applies the
+// helpful/not-helpful signal (confidence decay on negative, streak
+// reset on positive), auto-transitions to "contested" when the
+// negative streak crosses the threshold, persists both rows.
+func makeFeedbackHandler(conn *store.Conn, claimID string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		if !requireScope(w, r, domain.ScopeClaimsWrite) {
+			return
+		}
+		if conn.Feedback == nil {
+			writeError(w, http.StatusNotImplemented, "feedback storage not available on this backend")
+			return
+		}
+		var req feedbackRequest
+		if err := decodeJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("decode body: %v", err))
+			return
+		}
+		ctx := r.Context()
+		claims, err := conn.Claims.ListByIDs(ctx, []string{claimID})
+		if err != nil || len(claims) == 0 {
+			writeError(w, http.StatusNotFound, fmt.Sprintf("claim %q not found", claimID))
+			return
+		}
+		claim := claims[0]
+
+		state, _, err := conn.Feedback.Get(ctx, claimID)
+		if err != nil {
+			writeInternalError(w, "load feedback state", err)
+			return
+		}
+		state.ClaimID = claimID
+		now := time.Now().UTC()
+		state.LastFeedbackAt = now
+		state.LastFeedbackNote = req.Note
+
+		autoContested := false
+		if req.Helpful {
+			state.NegativeFeedbackStreak = 0
+			state.HelpfulCount++
+		} else {
+			state.NegativeFeedbackStreak++
+			// Decay the scalar confidence. The "corroboration"
+			// component (if surfaced) shrinks in lockstep so the
+			// decomposition stays internally consistent.
+			claim.Confidence *= feedbackDecayFactor()
+			if claim.Confidence < 0 {
+				claim.Confidence = 0
+			}
+			if claim.ConfidenceComponents != nil {
+				if v, ok := claim.ConfidenceComponents["corroboration"]; ok {
+					claim.ConfidenceComponents["corroboration"] = v * feedbackDecayFactor()
+				}
+			}
+			if state.NegativeFeedbackStreak >= feedbackAutoContestThreshold() && claim.Status == domain.ClaimStatusActive {
+				claim.Status = domain.ClaimStatusContested
+				autoContested = true
+			}
+		}
+
+		actor := actorFromContext(ctx)
+		reason := "agent-feedback"
+		if !req.Helpful {
+			reason = "agent-feedback-negative"
+		}
+		if err := conn.Claims.UpsertWithReasonAs(ctx, []domain.Claim{claim}, reason, actor); err != nil {
+			writeInternalError(w, "update claim", err)
+			return
+		}
+		if err := conn.Feedback.Upsert(ctx, state); err != nil {
+			writeInternalError(w, "store feedback", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, feedbackResponse{
+			ClaimID:                claimID,
+			Helpful:                req.Helpful,
+			NewStatus:              string(claim.Status),
+			NewConfidence:          claim.Confidence,
+			NegativeFeedbackStreak: state.NegativeFeedbackStreak,
+			HelpfulCount:           state.HelpfulCount,
+			AutoContested:          autoContested,
+		})
+	}
+}
+
+// envFloat reads a float64 env var with a default.
+func envFloat(key string, fallback float64) float64 {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return fallback
+	}
+	return f
+}
+
+// envInt reads an int env var with a default.
+func envInt(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fallback
+	}
+	return n
 }
 
 // makeProvenanceHandler handles GET /v1/claims/<id>/provenance.

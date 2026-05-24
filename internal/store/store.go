@@ -46,6 +46,10 @@ type Conn struct {
 	Playbooks     ports.PlaybookRepository
 	EntityRels    ports.EntityRelationshipRepository
 	Incidents     ports.IncidentRepository
+	// Feedback is the per-claim feedback state side table (Refs #40).
+	// nil on providers that have not implemented it yet; callers
+	// type-check before use.
+	Feedback ports.FeedbackRepository
 
 	// Raw is the provider's underlying handle (e.g. *sql.DB for
 	// SQLite/Postgres, an in-memory state struct for memory). It is

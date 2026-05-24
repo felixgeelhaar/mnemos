@@ -54,6 +54,7 @@ func openProvider(_ context.Context, dsn string) (*store.Conn, error) {
 		Playbooks:     NewPlaybookRepository(db),
 		EntityRels:    NewEntityRelationshipRepository(db),
 		Incidents:     NewIncidentRepository(db),
+		Feedback:      NewFeedbackRepository(db),
 		Raw:           db,
 		Closer:        db.Close,
 	}, nil

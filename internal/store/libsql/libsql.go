@@ -87,6 +87,7 @@ func openProvider(ctx context.Context, dsn string) (*store.Conn, error) {
 		Decisions:     sqlite.NewDecisionRepository(db),
 		Playbooks:     sqlite.NewPlaybookRepository(db),
 		EntityRels:    sqlite.NewEntityRelationshipRepository(db),
+		Feedback:      sqlite.NewFeedbackRepository(db),
 		Raw:           db,
 		Closer:        db.Close,
 	}, nil

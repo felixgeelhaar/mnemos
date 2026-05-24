@@ -306,17 +306,39 @@ func (s *Server) AppendEvents(ctx context.Context, req *mnemosv1.AppendEventsReq
 // Claims
 // ---------------------------------------------------------------------------
 
-// ListClaims returns claims with optional type/status filters and cursor-based pagination.
+// ListClaims returns claims with optional type/status/run_id filters and
+// cursor-based pagination. The run_id filter is the load-bearing tenant
+// boundary for integrators: claims whose evidence cannot be traced to an
+// event with the matching RunID are dropped (fail-closed).
 func (s *Server) ListClaims(ctx context.Context, req *mnemosv1.ListClaimsRequest) (*mnemosv1.ListClaimsResponse, error) {
 	limit, offset := normalizePagination(req.Pagination)
 	typeFilter := req.TypeFilter
 	statusFilter := req.StatusFilter
+	runIDFilter := req.RunId
 
 	if typeFilter != "" && !validClaimType(typeFilter) {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid type %q", typeFilter)
 	}
 	if statusFilter != "" && !validClaimStatus(statusFilter) {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid status %q", statusFilter)
+	}
+
+	// Build the allowed-event set when run_id is requested. Empty set →
+	// no claims belong to this run; return early to avoid leaking
+	// unfiltered claims (ADR-002 / Thor's safety audit).
+	var allowedEventIDs map[string]struct{}
+	if runIDFilter != "" {
+		events, err := s.conn.Events.ListByRunID(ctx, runIDFilter)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "list events by run id: %v", err)
+		}
+		allowedEventIDs = make(map[string]struct{}, len(events))
+		for _, e := range events {
+			allowedEventIDs[e.ID] = struct{}{}
+		}
+		if len(allowedEventIDs) == 0 {
+			return &mnemosv1.ListClaimsResponse{Limit: int32(limit), Offset: int32(offset)}, nil
+		}
 	}
 
 	all, err := s.conn.Claims.ListAll(ctx)
@@ -332,6 +354,38 @@ func (s *Server) ListClaims(ctx context.Context, req *mnemosv1.ListClaimsRequest
 			continue
 		}
 		filtered = append(filtered, c)
+	}
+
+	// run_id post-filter: drop claims whose evidence does not link to
+	// an allowed event. Done after the cheaper type/status filters so
+	// evidence is loaded only for surviving candidates.
+	if allowedEventIDs != nil && len(filtered) > 0 {
+		candidateIDs := make([]string, 0, len(filtered))
+		for _, c := range filtered {
+			candidateIDs = append(candidateIDs, c.ID)
+		}
+		evLinks, err := s.conn.Claims.ListEvidenceByClaimIDs(ctx, candidateIDs)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "load evidence for run_id filter: %v", err)
+		}
+		eventsByClaim := make(map[string][]string, len(evLinks))
+		for _, link := range evLinks {
+			eventsByClaim[link.ClaimID] = append(eventsByClaim[link.ClaimID], link.EventID)
+		}
+		kept := filtered[:0]
+		for _, c := range filtered {
+			matched := false
+			for _, eid := range eventsByClaim[c.ID] {
+				if _, ok := allowedEventIDs[eid]; ok {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				kept = append(kept, c)
+			}
+		}
+		filtered = kept
 	}
 	reversed := make([]domain.Claim, len(filtered))
 	for i, c := range filtered {

@@ -658,6 +658,7 @@ func listClaimsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request)
 	statusFilter := r.URL.Query().Get("status")
 	asOfRaw := r.URL.Query().Get("as_of")                  // validity time
 	recordedAsOfRaw := r.URL.Query().Get("recorded_as_of") // ingestion time
+	runIDFilter := r.URL.Query().Get("run_id")             // tenant boundary
 
 	if typeFilter != "" && !validClaimType(typeFilter) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid type %q", typeFilter))
@@ -689,6 +690,30 @@ func listClaimsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request)
 
 	ctx := r.Context()
 
+	// Build the allowed-event set for run_id tenant scoping. Empty set
+	// when run_id is specified means there are no claims for that
+	// tenant — return early to avoid leaking unfiltered claims.
+	var allowedEventIDs map[string]struct{}
+	if runIDFilter != "" {
+		events, err := conn.Events.ListByRunID(ctx, runIDFilter)
+		if err != nil {
+			writeInternalError(w, "list events by run id", err)
+			return
+		}
+		allowedEventIDs = make(map[string]struct{}, len(events))
+		for _, e := range events {
+			allowedEventIDs[e.ID] = struct{}{}
+		}
+		if len(allowedEventIDs) == 0 {
+			writeJSON(w, http.StatusOK, claimsResponse{
+				Claims: []claimDTO{},
+				Limit:  limit,
+				Offset: offset,
+			})
+			return
+		}
+	}
+
 	all, err := conn.Claims.ListAll(ctx)
 	if err != nil {
 		writeInternalError(w, "list claims", err)
@@ -714,6 +739,39 @@ func listClaimsHandler(conn *store.Conn, w http.ResponseWriter, r *http.Request)
 			continue
 		}
 		filtered = append(filtered, c)
+	}
+
+	// run_id post-filter: drop claims whose evidence does not link to
+	// an event with the matching RunID. Performed after cheaper filters
+	// so the evidence load runs only for surviving candidates.
+	if allowedEventIDs != nil && len(filtered) > 0 {
+		candidateIDs := make([]string, 0, len(filtered))
+		for _, c := range filtered {
+			candidateIDs = append(candidateIDs, c.ID)
+		}
+		evLinks, err := conn.Claims.ListEvidenceByClaimIDs(ctx, candidateIDs)
+		if err != nil {
+			writeInternalError(w, "list evidence for run_id filter", err)
+			return
+		}
+		eventsByClaim := make(map[string][]string, len(evLinks))
+		for _, link := range evLinks {
+			eventsByClaim[link.ClaimID] = append(eventsByClaim[link.ClaimID], link.EventID)
+		}
+		kept := filtered[:0]
+		for _, c := range filtered {
+			matched := false
+			for _, eid := range eventsByClaim[c.ID] {
+				if _, ok := allowedEventIDs[eid]; ok {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				kept = append(kept, c)
+			}
+		}
+		filtered = kept
 	}
 	// Reverse for created_at DESC.
 	reversed := make([]domain.Claim, len(filtered))

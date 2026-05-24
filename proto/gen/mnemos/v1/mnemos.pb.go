@@ -586,8 +586,13 @@ type ListClaimsRequest struct {
 	TypeFilter      string                 `protobuf:"bytes,2,opt,name=type_filter,json=typeFilter,proto3" json:"type_filter,omitempty"`
 	StatusFilter    string                 `protobuf:"bytes,3,opt,name=status_filter,json=statusFilter,proto3" json:"status_filter,omitempty"`
 	IncludeEvidence bool                   `protobuf:"varint,4,opt,name=include_evidence,json=includeEvidence,proto3" json:"include_evidence,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// run_id: when set, only returns claims with ≥1 evidence link to an
+	// event whose RunID equals this value. Foundational tenant filter for
+	// integrators that scope memory by run_id prefix (e.g. animal:<uuid>).
+	// Claims with no evidence are excluded — fail closed.
+	RunId         string `protobuf:"bytes,5,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ListClaimsRequest) Reset() {
@@ -646,6 +651,13 @@ func (x *ListClaimsRequest) GetIncludeEvidence() bool {
 		return x.IncludeEvidence
 	}
 	return false
+}
+
+func (x *ListClaimsRequest) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
 }
 
 type ListClaimsResponse struct {
@@ -3338,7 +3350,7 @@ const file_mnemos_v1_mnemos_proto_rawDesc = "" +
 	"visibility\"E\n" +
 	"\rClaimEvidence\x12\x19\n" +
 	"\bclaim_id\x18\x01 \x01(\tR\aclaimId\x12\x19\n" +
-	"\bevent_id\x18\x02 \x01(\tR\aeventId\"\xbb\x01\n" +
+	"\bevent_id\x18\x02 \x01(\tR\aeventId\"\xd2\x01\n" +
 	"\x11ListClaimsRequest\x125\n" +
 	"\n" +
 	"pagination\x18\x01 \x01(\v2\x15.mnemos.v1.PaginationR\n" +
@@ -3346,7 +3358,8 @@ const file_mnemos_v1_mnemos_proto_rawDesc = "" +
 	"\vtype_filter\x18\x02 \x01(\tR\n" +
 	"typeFilter\x12#\n" +
 	"\rstatus_filter\x18\x03 \x01(\tR\fstatusFilter\x12)\n" +
-	"\x10include_evidence\x18\x04 \x01(\bR\x0fincludeEvidence\"\xb8\x01\n" +
+	"\x10include_evidence\x18\x04 \x01(\bR\x0fincludeEvidence\x12\x15\n" +
+	"\x06run_id\x18\x05 \x01(\tR\x05runId\"\xb8\x01\n" +
 	"\x12ListClaimsResponse\x12(\n" +
 	"\x06claims\x18\x01 \x03(\v2\x10.mnemos.v1.ClaimR\x06claims\x124\n" +
 	"\bevidence\x18\x02 \x03(\v2\x18.mnemos.v1.ClaimEvidenceR\bevidence\x12\x14\n" +

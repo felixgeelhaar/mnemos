@@ -20,24 +20,24 @@ import (
 // safety property. Without it the endpoint refuses to serve so a
 // forgotten env flag can never leak a sister org's playbook corpus.
 type federationExportResponse struct {
-	GeneratedAt time.Time           `json:"generated_at"`
-	Source      string              `json:"source"`  // "mnemos"
-	Version     string              `json:"version"` // schema version
+	GeneratedAt time.Time            `json:"generated_at"`
+	Source      string               `json:"source"`  // "mnemos"
+	Version     string               `json:"version"` // schema version
 	Playbooks   []federationPlaybook `json:"playbooks"`
-	TotalCount  int                 `json:"total_count"`
+	TotalCount  int                  `json:"total_count"`
 }
 
 // federationPlaybook is the anonymized projection. Steps and the
 // statement are preserved (they ARE the value); identity and
 // provenance back to a specific tenant's lessons are not.
 type federationPlaybook struct {
-	Trigger      string                  `json:"trigger"`
-	Statement    string                  `json:"statement"`
+	Trigger      string                   `json:"trigger"`
+	Statement    string                   `json:"statement"`
 	Steps        []federationPlaybookStep `json:"steps"`
-	Confidence   float64                 `json:"confidence"`
-	LessonCount  int                     `json:"lesson_count"` // how many lessons backed this playbook; the count travels, the ids don't
-	DerivedAt    time.Time               `json:"derived_at"`
-	LastVerified time.Time               `json:"last_verified,omitempty"`
+	Confidence   float64                  `json:"confidence"`
+	LessonCount  int                      `json:"lesson_count"` // how many lessons backed this playbook; the count travels, the ids don't
+	DerivedAt    time.Time                `json:"derived_at"`
+	LastVerified time.Time                `json:"last_verified,omitempty"`
 }
 
 type federationPlaybookStep struct {

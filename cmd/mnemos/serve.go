@@ -1245,12 +1245,12 @@ type claimEvidenceItem struct {
 // compliance audit can correlate "we deleted X" with "rows actually
 // disappeared".
 type deleteClaimsResponse struct {
-	RequestID         string `json:"request_id"`
-	RunID             string `json:"run_id"`
-	ClaimsDeleted     int    `json:"claims_deleted"`
-	EventsDeleted     int    `json:"events_deleted"`
-	EmbeddingsDeleted int    `json:"embeddings_deleted"`
-	RelationshipsDeleted int `json:"relationships_deleted"`
+	RequestID            string `json:"request_id"`
+	RunID                string `json:"run_id"`
+	ClaimsDeleted        int    `json:"claims_deleted"`
+	EventsDeleted        int    `json:"events_deleted"`
+	EmbeddingsDeleted    int    `json:"embeddings_deleted"`
+	RelationshipsDeleted int    `json:"relationships_deleted"`
 }
 
 // deleteClaimsHandler implements DELETE /v1/claims?run_id=<prefix>.

@@ -177,10 +177,10 @@ func TestSemanticSearch_MinSimilarityAndTopK(t *testing.T) {
 		id  string
 		vec []float32
 	}{
-		{"cl_perfect", []float32{1, 0, 0}},     // sim 1.0
-		{"cl_near", []float32{0.95, 0.31, 0}},  // sim ≈ 0.95
-		{"cl_mid", []float32{1, 1, 0}},         // sim ≈ 0.71
-		{"cl_orthogonal", []float32{0, 1, 0}},  // sim 0
+		{"cl_perfect", []float32{1, 0, 0}},    // sim 1.0
+		{"cl_near", []float32{0.95, 0.31, 0}}, // sim ≈ 0.95
+		{"cl_mid", []float32{1, 1, 0}},        // sim ≈ 0.71
+		{"cl_orthogonal", []float32{0, 1, 0}}, // sim 0
 	}
 	for _, s := range seeds {
 		seedClaimConn(t, conn, s.id, s.id, "fact", "active", 0.9, now)

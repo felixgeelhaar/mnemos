@@ -93,29 +93,29 @@ func (r ClaimRepository) upsertWithReason(ctx context.Context, claims []domain.C
 			testLastRunAt = claim.TestLastRunAt.UTC().Format(time.RFC3339Nano)
 		}
 		err = qtx.UpsertClaim(ctx, sqlcgen.UpsertClaimParams{
-			ID:                  claim.ID,
-			Text:                claim.Text,
-			Type:                string(claim.Type),
-			Confidence:          claim.Confidence,
-			Status:              string(claim.Status),
-			CreatedAt:           claim.CreatedAt.UTC().Format(time.RFC3339Nano),
-			CreatedBy:           actorOr(claim.CreatedBy),
-			ValidFrom:           validFrom.UTC().Format(time.RFC3339Nano),
-			ScopeService:        claim.Scope.Service,
-			ScopeEnv:            claim.Scope.Env,
-			ScopeTeam:           claim.Scope.Team,
-			SourceDocument:      claim.SourceDocument,
-			SourceType:          string(claim.SourceType),
-			SourceAuthority:     claim.SourceAuthority,
-			Liveness:            string(claim.Liveness),
-			LastExecuted:        lastExecuted,
-			CitationCount:       int64(claim.CitationCount),
-			ProvenanceRationale: claim.ProvenanceRationale,
-			TestID:              claim.TestID,
-			TestRequirementRef:  claim.TestRequirementRef,
-			TestAuthor:          claim.TestAuthor,
-			TestLastModified:    testLastModified,
-			TestLastRunAt:       testLastRunAt,
+			ID:                   claim.ID,
+			Text:                 claim.Text,
+			Type:                 string(claim.Type),
+			Confidence:           claim.Confidence,
+			Status:               string(claim.Status),
+			CreatedAt:            claim.CreatedAt.UTC().Format(time.RFC3339Nano),
+			CreatedBy:            actorOr(claim.CreatedBy),
+			ValidFrom:            validFrom.UTC().Format(time.RFC3339Nano),
+			ScopeService:         claim.Scope.Service,
+			ScopeEnv:             claim.Scope.Env,
+			ScopeTeam:            claim.Scope.Team,
+			SourceDocument:       claim.SourceDocument,
+			SourceType:           string(claim.SourceType),
+			SourceAuthority:      claim.SourceAuthority,
+			Liveness:             string(claim.Liveness),
+			LastExecuted:         lastExecuted,
+			CitationCount:        int64(claim.CitationCount),
+			ProvenanceRationale:  claim.ProvenanceRationale,
+			TestID:               claim.TestID,
+			TestRequirementRef:   claim.TestRequirementRef,
+			TestAuthor:           claim.TestAuthor,
+			TestLastModified:     testLastModified,
+			TestLastRunAt:        testLastRunAt,
 			TestPassCount:        int64(claim.TestPassCount),
 			TestFailCount:        int64(claim.TestFailCount),
 			Visibility:           visibilityOrDefault(claim.Visibility),
@@ -687,25 +687,25 @@ func (r ClaimRepository) ListByTestRequirementRef(ctx context.Context, ref strin
 
 func mapSQLClaim(row sqlcgen.Claim) (domain.Claim, error) {
 	claim := domain.Claim{
-		ID:                  row.ID,
-		Text:                row.Text,
-		Type:                domain.ClaimType(row.Type),
-		Confidence:          row.Confidence,
-		Status:              domain.ClaimStatus(row.Status),
-		CreatedBy:           row.CreatedBy,
-		TrustScore:          row.TrustScore,
-		VerifyCount:         int(row.VerifyCount),
-		HalfLifeDays:        row.HalfLifeDays,
-		Scope:               domain.Scope{Service: row.ScopeService, Env: row.ScopeEnv, Team: row.ScopeTeam},
-		SourceDocument:      row.SourceDocument,
-		SourceType:          domain.SourceType(row.SourceType),
-		SourceAuthority:     row.SourceAuthority,
-		Liveness:            domain.LivenessStatus(row.Liveness),
-		CitationCount:       int(row.CitationCount),
-		ProvenanceRationale: row.ProvenanceRationale,
-		TestID:              row.TestID,
-		TestRequirementRef:  row.TestRequirementRef,
-		TestAuthor:          row.TestAuthor,
+		ID:                   row.ID,
+		Text:                 row.Text,
+		Type:                 domain.ClaimType(row.Type),
+		Confidence:           row.Confidence,
+		Status:               domain.ClaimStatus(row.Status),
+		CreatedBy:            row.CreatedBy,
+		TrustScore:           row.TrustScore,
+		VerifyCount:          int(row.VerifyCount),
+		HalfLifeDays:         row.HalfLifeDays,
+		Scope:                domain.Scope{Service: row.ScopeService, Env: row.ScopeEnv, Team: row.ScopeTeam},
+		SourceDocument:       row.SourceDocument,
+		SourceType:           domain.SourceType(row.SourceType),
+		SourceAuthority:      row.SourceAuthority,
+		Liveness:             domain.LivenessStatus(row.Liveness),
+		CitationCount:        int(row.CitationCount),
+		ProvenanceRationale:  row.ProvenanceRationale,
+		TestID:               row.TestID,
+		TestRequirementRef:   row.TestRequirementRef,
+		TestAuthor:           row.TestAuthor,
 		TestPassCount:        int(row.TestPassCount),
 		TestFailCount:        int(row.TestFailCount),
 		Visibility:           domain.Visibility(visibilityOrDefault(domain.Visibility(row.Visibility))),
@@ -776,31 +776,31 @@ type claimRowScanner interface {
 
 func scanClaim(scanner claimRowScanner) (domain.Claim, error) {
 	var (
-		claim               domain.Claim
-		claimType           string
-		status              string
-		createdAt           string
-		validFrom           string
-		validTo             sql.NullString
-		lastVerified        string
-		verifyCount         int64
-		halfLifeDays        float64
-		scopeService        string
-		scopeEnv            string
-		scopeTeam           string
-		sourceDocument      string
-		sourceType          string
-		sourceAuthority     float64
-		liveness            string
-		lastExecuted        string
-		citationCount       int64
-		provenanceRationale string
-		testID              string
-		testRequirementRef  string
-		testAuthor          string
-		testLastModified    string
-		testLastRunAt       string
-		testPassCount       int64
+		claim                domain.Claim
+		claimType            string
+		status               string
+		createdAt            string
+		validFrom            string
+		validTo              sql.NullString
+		lastVerified         string
+		verifyCount          int64
+		halfLifeDays         float64
+		scopeService         string
+		scopeEnv             string
+		scopeTeam            string
+		sourceDocument       string
+		sourceType           string
+		sourceAuthority      float64
+		liveness             string
+		lastExecuted         string
+		citationCount        int64
+		provenanceRationale  string
+		testID               string
+		testRequirementRef   string
+		testAuthor           string
+		testLastModified     string
+		testLastRunAt        string
+		testPassCount        int64
 		testFailCount        int64
 		visibility           string
 		confidenceComponents string

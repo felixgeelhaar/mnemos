@@ -1492,10 +1492,10 @@ func mcpRunMemoryContext(ctx context.Context, input mcpMemoryContextInput) (mcpM
 // MCP tools to register a single fact.
 
 type mcpRememberInput struct {
-	Text       string `json:"text" jsonschema:"required,description=The fact to remember"`
-	Kind       string `json:"kind,omitempty" jsonschema:"description=Claim kind: fact (default), hypothesis, decision"`
-	RunID      string `json:"run_id" jsonschema:"required,description=Tenant scope; events are stamped with this for run_id-filtered recall"`
-	ValidUntil string `json:"valid_until,omitempty" jsonschema:"description=RFC3339 timestamp at which this claim should automatically be considered no longer in force"`
+	Text       string  `json:"text" jsonschema:"required,description=The fact to remember"`
+	Kind       string  `json:"kind,omitempty" jsonschema:"description=Claim kind: fact (default), hypothesis, decision"`
+	RunID      string  `json:"run_id" jsonschema:"required,description=Tenant scope; events are stamped with this for run_id-filtered recall"`
+	ValidUntil string  `json:"valid_until,omitempty" jsonschema:"description=RFC3339 timestamp at which this claim should automatically be considered no longer in force"`
 	Confidence float64 `json:"confidence,omitempty" jsonschema:"description=Confidence in [0,1]; defaults to 0.9 when omitted"`
 }
 

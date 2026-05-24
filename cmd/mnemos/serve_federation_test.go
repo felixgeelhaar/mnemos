@@ -92,7 +92,7 @@ func TestFederation_AnonymizesPlaybooks(t *testing.T) {
 // the raw ids do not.
 func TestFederation_PreservesLessonCount_NotIDs(t *testing.T) {
 	in := []domain.Playbook{{
-		Trigger:            "x", Statement: "y", Confidence: 0.6, DerivedAt: time.Now().UTC(),
+		Trigger: "x", Statement: "y", Confidence: 0.6, DerivedAt: time.Now().UTC(),
 		DerivedFromLessons: []string{"a", "b", "c"},
 	}}
 	out := anonymizePlaybooks(in)

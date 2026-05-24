@@ -1,0 +1,31 @@
+version: v2
+
+# Modules: every directory containing .proto files maps to one module.
+# Mnemos publishes a single v1 service today; pointing buf at proto/
+# scans any future module that gets added without further wiring.
+modules:
+  - path: proto
+
+# Lint policy: STANDARD minus the response-naming opinion, mirroring
+# the choice in the chronos sister repo.
+lint:
+  use:
+    - STANDARD
+  # Several Mnemos RPCs return the resource directly (Claim, Event)
+  # rather than an XxxResponse wrapper. The wrapper rule would force
+  # a breaking rename of the existing wire shape, so the design
+  # choice to return the resource stays explicit.
+  except:
+    - RPC_RESPONSE_STANDARD_NAME
+    # AppendResponse is intentionally reused across every Append* RPC
+    # (events / claims / relationships / etc.). The rule that wants
+    # one response message per RPC would force renames across the
+    # whole append surface for no behavioural gain.
+    - RPC_REQUEST_RESPONSE_UNIQUE
+
+# Breaking-change policy: WIRE_JSON catches both protobuf wire-format
+# breaks AND JSON-shape breaks. JSON-over-HTTP is a first-class
+# transport on this repo so JSON renames matter as much as wire breaks.
+breaking:
+  use:
+    - WIRE_JSON

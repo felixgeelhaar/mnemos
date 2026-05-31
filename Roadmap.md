@@ -119,7 +119,9 @@ mnemos pull = query team knowledge alongside local
 - [x] Tamper-evident SHA-256 evidence chain per session
 - [x] Duration / capability-invocation budgets (`MNEMOS_AXI_MAX_DURATION`, `MNEMOS_AXI_MAX_INVOCATIONS`)
 - [x] Domain events fanned into bolt as structured `axi_event` log lines
-- [ ] Future: LLM token reporting through capability evidence (gates `MaxTokens` budget); persist evidence chain to SQLite for cross-session audit; approval flow for any future write-external tool
+- [x] JSONL evidence sink for cross-session audit (`MNEMOS_AXI_EVIDENCE_LOG`); fan-out via `multiAxiPublisher` alongside bolt (PR #67)
+- [x] LLM token reporting through capability evidence — `extract.LLMEngine.WithUsageSink` → `pipeline.Extractor.LastUsage` → `Kind: "llm"` evidence record with `TokensUsed = input + output`; `MNEMOS_AXI_MAX_TOKENS` gates per-session spend (PR #68)
+- [x] Approval-flow exercise — `kernel.Approve` / `kernel.Reject` pinned by tests against a synthetic `EffectWriteExternal` action; any future write-external tool inherits the gate (PR #68)
 
 ---
 

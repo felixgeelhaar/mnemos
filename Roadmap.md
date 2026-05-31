@@ -133,18 +133,56 @@ mnemos pull = query team knowledge alongside local
 - [x] GraphRAG-style multi-hop queries (supports/contradicts edge expansion)
 - [x] Compliance and audit trails (Phase A + F deliver the substrate)
 - [x] Bias detection — `internal/bias` ships four indicators (source concentration, polarity skew, temporal cluster, single-source-of-truth) with operator-tunable thresholds.
-- [ ] **Epistemic Provenance & Claim Trust Framework**
-  - [ ] Claim provenance data model (source doc, authority, liveness)
-  - [ ] Citation graph & link density tracking (know what converges)
-  - [ ] Liveness detection (e.g. 12-year-old process doc still being executed = live/zombie)
-  - [ ] Source credibility scoring engine (link density + liveness + recency + authority)
-  - [ ] Test provenance model (first-class "test result" as claim with metadata)
-  - [ ] Test conflict detection (Test1 passes, Test2 fails for same thing)
-  - [ ] Confidence-weighted conflict resolution (which test/source to trust?)
-  - [ ] Provenance Query API: "Why trust this claim?" with rationale
-  - [ ] Human-readable provenance markdown export
+- [x] **Epistemic Provenance & Claim Trust Framework** (shipped)
+  - [x] Claim provenance data model (source doc, authority, liveness)
+  - [x] Citation graph & link density tracking (know what converges)
+  - [x] Liveness detection (e.g. 12-year-old process doc still being executed = live/zombie)
+  - [x] Source credibility scoring engine (link density + liveness + recency + authority)
+  - [x] Test provenance model (first-class "test result" as claim with metadata)
+  - [x] Test conflict detection (Test1 passes, Test2 fails for same thing)
+  - [x] Confidence-weighted conflict resolution (which test/source to trust?)
+  - [x] Provenance Query API: "Why trust this claim?" with rationale (`mnemos trust --test <ref>` + `which_test_to_trust` MCP tool)
+  - [x] Human-readable provenance markdown export
 - [ ] Enterprise integrations (Slack, Teams, Jira)
 - [x] Web interface — embedded SPA shipped with `mnemos serve`
+
+---
+
+## Cognitive Stack Simplification (SHIPPED, v0.17.x)
+
+**Status:** Shipped on `main` (v0.17.0 + v0.17.1)
+**Goal:** Collapse the five-primitive cognitive stack (mnemos / chronos / nous / praxis / olymp) to three (mnemos / chronos / agent runtimes), make Mnemos embeddable as a Go library, bundle Chronos by default, expose three input modes.
+
+### Milestones
+
+- [x] **Embeddable Go library** — root `mnemos` package with `Memory` interface (`Remember`, `RememberClaim`, `Recall`, `RememberEvent`, `Timeline`, `Close`)
+- [x] **Three input modes** — passive (no LLM), shared-provider (agent runtime supplies the model), enhanced (own provider). All three exposed via library, CLI (`mnemos claim record`), and MCP (`remember`)
+- [x] **Framework-neutral providers** — `mnemos/providers/` exposes `TextGenerator` + `Embedder` interfaces; agent runtimes implement as thin adapters
+- [x] **Chronos bundled by default** — `mnemos.New()` boots an in-process `chronos/embed.Engine`; `RememberEvent` forwards as a presence signal; `WithChronos(c)` overrides
+- [x] **Temporal MCP tools** — `remember_event`, `timeline_query`, `recall_at_time` join the existing 25-tool surface
+- [x] **decisionkit extracted** — risk + intervention engines lifted from archived nous into [`github.com/felixgeelhaar/decisionkit`](https://github.com/felixgeelhaar/decisionkit) v0.1.0
+- [x] **Three sibling repos archived** — [olymp](https://github.com/felixgeelhaar/olymp), [nous](https://github.com/felixgeelhaar/nous), [praxis](https://github.com/felixgeelhaar/praxis) at `*-final` tags
+- [x] **ADRs 0003-0006** — full decision record under [`docs/adr/`](./docs/adr/)
+
+---
+
+## Pending Roadmap Items
+
+Captured here for visibility; not in active development.
+
+### Security hardening
+
+- [ ] **A.4 OIDC integration** — deferred until first real OIDC need surfaces
+- [ ] **JWT `kid` header + key-id-driven verification** — let rotation ship multiple active keys at once
+
+### Release hardening
+
+- [ ] **Supply-chain attestation** — CycloneDX/SPDX SBOM at release, cosign keyless signing, SLSA provenance, arm64 docker images
+- [ ] **axi-go evidence** — LLM token reporting through capability evidence (gates `MaxTokens` budget); persist evidence chain to SQLite for cross-session audit; approval flow for any future write-external tool (already captured above under axi-go)
+
+### Ecosystem
+
+- [ ] **Enterprise integrations** — Slack, Teams, Jira (already listed above under Phase 3)
 
 ---
 

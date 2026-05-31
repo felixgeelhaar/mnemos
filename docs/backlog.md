@@ -474,3 +474,69 @@ Step 3 of the original observability bundle, scoped to its own task because it's
 Split from the original observability+rotation bundle. internal/auth/jwt.go currently signs HS256 without a `kid` (key id) header. The dual-key Verifier (NewVerifierWithPrevious) brute-tries the previous secret on every signature error — when an attacker forges a wrong-but-plausible token the verifier silently consults both secrets, masking real attacks in logs. Add: include `kid` (an opaque short id, e.g. first 8 hex chars of SHA-256(secret)) in the JWT header on issue; select verification key by `kid` in NewVerifierWithPrevious; record the chosen key in audit logs so anomalous combinations surface; rotate kid on each LoadOrCreateSecret cycle. Tests cover (a) issue→verify happy path with kid, (b) rotation across two kids, (c) fabricated unknown-kid is rejected. Out of scope here: full asymmetric signing — HS256 stays.
 
 ---
+
+## Archive olymp repo
+
+Tag olymp v0.1.5-final, replace README with redirect to mnemos + decisionkit, add DEPRECATED.md, set GitHub repo to archived. Zero Go consumers verified across siblings. Write ADR-001 in mnemos/docs/adr/001-archive-olymp.md citing the audit. Olymp's FSM loop, federation Peer, MCP tools, intent registry, and adapters all die with the repo (no extraction). Pre-archive grep across all business-felix-geelhaar/* go.mod files to confirm zero imports. Recoverable via tag.
+
+---
+
+## Extract decisionkit library from nous
+
+Create new repo github.com/felixgeelhaar/decisionkit by copying nous/internal/risk/ + nous/internal/intervention/ verbatim with tests. Strip storage adapters, gRPC, LLM glue. Add decisionkit/mnemos adapter converting mnemos.Event into factor inputs. Maintain Nous's 90%+ test coverage as release gate. Cut v0.1.0. Write ADR-002 in mnemos/docs/adr/002-extract-decisionkit.md. Justification: Obvia needs deterministic risk + intervention scoring for compliance/cost/latency reasons; cannot be cleanly replaced by LLM calls.
+
+---
+
+## Archive nous repo
+
+After decisionkit ships, tag nous final, replace README with redirect to decisionkit, add DEPRECATED.md, set GitHub repo to archived. Nous's gRPC/HTTP transports, LLM extractor, multi-backend storage, and commitment service die with the repo. Only Olymp depended on Nous, and Olymp is already archived. Write ADR-003 in mnemos/docs/adr/003-archive-nous.md.
+
+---
+
+## Mnemos root library package and mnemos.New entry point
+
+Add a root-level public library API so external consumers (Hermes, Nomi, OpenClaw, NanoClaw, Claude Code via MCP, agent runtimes) can do `import "github.com/felixgeelhaar/mnemos"` and call `mnemos.New(opts...)`. Today mnemos is CLI/MCP/HTTP service only — no in-process library face exists. Create mnemos/memory.go with Memory interface (Remember, Recall, RememberEvent, Timeline), mnemos/new.go wiring internal/store + internal/pipeline + internal/query through the public surface, and mnemos/memory_impl.go binding methods. Touch nothing under internal/. Mark v0.x until 90 days of consumer feedback.
+
+---
+
+## Framework-neutral provider interfaces (TextGenerator and Embedder)
+
+Create new public mnemos/providers/ subpackage exporting TextGenerator and Embedder interfaces as thin wrappers around existing internal/llm.Client + internal/embedding.Client. Goal: agent runtimes (Hermes, Nomi, OpenClaw, NanoClaw, Claude Code, Codex, future frameworks) implement these as adapters around their own model clients. No Hermes-specific types in mnemos core. Verify no leaky provider details. Files: mnemos/providers/text.go, mnemos/providers/embedder.go.
+
+---
+
+## Three-mode option builders (Passive, SharedProvider, Enhanced)
+
+Implement mnemos/options.go with WithPassiveMode(), WithSharedProvider(tg, emb), WithEnhancedMode(cfg), WithChronos(c), WithStorage(dsn). Passive mode: no LLM, rule-based extraction + token-overlap query (zero env vars works). Shared provider: consumes external TextGenerator/Embedder from agent runtime. Enhanced: own LLM/embedding config. Passive must work out of the box — `mnemos.New()` with no args returns a working Memory. Sealed Option type prevents external impls.
+
+---
+
+## Chronos bundling — embedded by default inside mnemos.New
+
+Import github.com/felixgeelhaar/chronos as Go dependency. mnemos.New() boots in-process Chronos by default (no separate server). WithChronos(c) lets advanced users supply their own instance. Storage stays separate: chronos.db adjacent to mnemos.db at XDG path (~/.local/share/mnemos/chronos.db) due to different mutation semantics (Chronos signals transient, Mnemos events immutable). Adapter at internal/temporal/chronos_adapter.go implements chronos.Source, maps mnemos.Event ↔ chronos.EntityState and chronos.Signal → mnemos.Claim. Chronos standalone (chronos.New()) remains unchanged for advanced users (incident timelines, audit trails, replay).
+
+---
+
+## Temporal MCP tools (remember_event, timeline_query, recall_at_time)
+
+Register three new MCP tools in cmd/mnemos/mcp.go: remember_event (ingest single event into Chronos), timeline_query (range queries by run_id/scope/window), recall_at_time (claims valid at an instant + evidence chain). Add CLI subcommand mnemos timeline at cmd/mnemos/timeline.go. Auto-synthesize claims from Chronos signals — when a Signal fires, adapter creates a corresponding Claim with signal.Confidence linked back via evidence. Conservative detector thresholds + aggregation windows; off by default, opt-in via WithChronosDetectors.
+
+---
+
+## Refactor cmd/mnemos to route through new library
+
+Refactor cmd/mnemos/mcp.go to use mnemos.New() instead of raw repository wiring. All 25 existing MCP tools must continue to pass (no behavior change, routing only). Also refactor cmd/mnemos/process.go, query.go, ingest.go to use library where reasonable while keeping CLI flag parsing in cmd. Public docs at mnemos/docs/library.md with 3-mode examples + Go playground-ready snippets. Godoc examples in mnemos/example_test.go (Example_passive, Example_sharedProvider, Example_enhanced, Example_withChronos). Integration tests in mnemos/memory_test.go covering all 3 modes end-to-end + zero-config bootstrap test.
+
+---
+
+## Obvia inline migration off Praxis
+
+Replace obvia/internal/application/remediation/praxis.go (HTTP client) with inline orchestration. Copy idempotency keeper (~25 LOC) from praxis/internal/idempotency/, outbox emitter from praxis/internal/outcome/ (adapt to talk to mnemos directly), audit trail from praxis/internal/audit/, policy engine from praxis/internal/policy/ only if Obvia uses it (verify by grep). Vendor calls use direct SDKs (slack-go, go-github). Delete obvia/deploy/docker-compose/chaos/cmd/praxis-runtime/ stub. Update Obvia integration tests to exercise inline backend. Single PR, straight cutover — no feature flag because Obvia is dogfooding only with no external users.
+
+---
+
+## Archive praxis repo
+
+Immediately after Obvia inline PR merges, tag praxis v0.3.1-final, replace README with redirect to mnemos + actionkit-not-extracted note (explain Obvia inlined the orchestration primitives, vendor handlers belong to agents via MCP), add DEPRECATED.md, set GitHub repo to archived. Praxis's HTTP/gRPC API, out-of-process plugin host + Fulcio signing, 6 vendor handlers (Slack/GitHub/Linear/HTTP/Calendar/Email), capability registry, MCP server all die with the repo. Pre-archive grep all siblings for praxis host config to verify zero forgotten consumers beyond Obvia. Write ADR-004 in mnemos/docs/adr/004-archive-praxis.md.
+
+---

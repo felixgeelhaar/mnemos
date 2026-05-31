@@ -14,6 +14,16 @@ Releases are tagged and published via GoReleaser; this file is the human-readabl
   Companions to the existing rule-based and LLM-driven text-ingestion
   paths. See [`docs/library.md`](docs/library.md) "Three input modes"
   + `ExampleMemory_rememberClaim` in `example_test.go`.
+- **`mnemos claim record`** CLI subcommand — exposes the same
+  agent-supplied claim path from the command line. Flags:
+  `--text`, `--type`, `--confidence`, `--run-id`, `--event-ids`
+  (comma-separated), `--valid-from`, `--valid-until`. Routes through
+  the library API (`library_bridge.newLibraryMemory`).
+
+### Surface coverage for the third input mode
+- Library: `Memory.RememberClaim(ClaimItem)`
+- CLI: `mnemos claim record --text ... [flags]`
+- MCP: pre-existing `remember` tool (creates event + claim + evidence atomically)
 
 ## [0.17.0] — 2026-05-31
 

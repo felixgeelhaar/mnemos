@@ -42,5 +42,5 @@ Production-shape compose files live under [`deploy/`](https://github.com/felixge
 ## What the binary does NOT do
 
 - **No managed service.** Mnemos is the binary. There's no hosted version, no SOC2 reseller, no per-call meter. If you want one of those, pick a hosted competitor.
-- **No bundled UI.** A small registry browser ships at `/` (HTML at `web/index.html`); for a richer UI bring your own (the [Olymp dashboard](https://github.com/felixgeelhaar/olymp) renders Mnemos's data when wired up).
+- **No bundled UI.** A small registry browser ships at `/` (HTML at `web/index.html`); for a richer UI bring your own.
 - **No automatic backup.** Use whatever your storage backend provides (`pg_dump`, `sqlite3 .backup`, etc).

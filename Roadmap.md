@@ -143,8 +143,8 @@ mnemos pull = query team knowledge alongside local
   - [x] Confidence-weighted conflict resolution (which test/source to trust?)
   - [x] Provenance Query API: "Why trust this claim?" with rationale (`mnemos trust --test <ref>` + `which_test_to_trust` MCP tool)
   - [x] Human-readable provenance markdown export
-- [ ] Enterprise integrations (Slack, Teams, Jira)
 - [x] Web interface — embedded SPA shipped with `mnemos serve`
+- ~~Enterprise integrations (Slack, Teams, Jira)~~ — **out of scope.** A memory layer doesn't host vendor chat integrations; agent runtimes connect to Slack / Teams / Jira via their own MCP servers and tools. Mnemos stays focused on memory + evidence.
 
 ---
 
@@ -178,11 +178,11 @@ Captured here for visibility; not in active development.
 ### Release hardening
 
 - [ ] **Supply-chain attestation** — CycloneDX/SPDX SBOM at release, cosign keyless signing, SLSA provenance, arm64 docker images
-- [ ] **axi-go evidence** — LLM token reporting through capability evidence (gates `MaxTokens` budget); persist evidence chain to SQLite for cross-session audit; approval flow for any future write-external tool (already captured above under axi-go)
+- [ ] **axi-go evidence** — LLM token reporting through capability evidence (gates `MaxTokens` budget); persist evidence chain to SQLite for cross-session audit; approval flow for any future write-external tool
 
-### Ecosystem
+## Out of scope
 
-- [ ] **Enterprise integrations** — Slack, Teams, Jira (already listed above under Phase 3)
+- **Enterprise chat integrations (Slack, Teams, Jira)** — these are agent-runtime concerns, not memory-layer concerns. Agent runtimes (Claude Code, Codex, Hermes, Nomi, OpenClaw, NanoClaw, ...) already connect to Slack / Teams / Jira via their own MCP servers and tools. Mnemos stays focused on memory + evidence.
 
 ---
 

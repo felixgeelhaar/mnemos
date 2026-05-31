@@ -9,13 +9,18 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
-  contents: write
-  packages: write
+  contents: write   # release upload
+  packages: write   # GHCR push
+  id-token: write   # cosign keyless + SLSA OIDC token
+  attestations: write  # GitHub artifact attestations API
 
 jobs:
   goreleaser:
     name: GoReleaser
     runs-on: ubuntu-latest
+    outputs:
+      # Capture archive paths for downstream SLSA provenance.
+      hashes: ${{ steps.hashes.outputs.hashes }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -26,6 +31,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # multi-arch docker manifests need buildx
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Login to GHCR
         uses: docker/login-action@v4
         with:
@@ -33,7 +44,31 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # cosign for keyless signing of archives + docker manifests
+      # (.goreleaser.yaml `signs:` + `docker_signs:` blocks).
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      # Generate CycloneDX + SPDX SBOMs via nox (already on our
+      # toolchain — same binary the security workflow uses). Goreleaser
+      # picks them up via `release.extra_files` and attaches them to
+      # the GitHub release alongside the archives.
+      - name: Install nox
+        run: |
+          if ! command -v nox >/dev/null 2>&1; then
+            curl -fsSL "https://raw.githubusercontent.com/felixgeelhaar/nox/main/install.sh" \
+              | bash -s -- -b "$HOME/.local/bin" v0.10.1 || \
+              brew install felixgeelhaar/tap/nox
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          fi
+          nox version
+      - name: Generate SBOM (nox)
+        run: |
+          mkdir -p sbom-out
+          nox scan . -format all -output ./sbom-out -baseline ./.nox/baseline.json
+
       - name: Run GoReleaser
+        id: goreleaser
         uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
@@ -42,3 +77,42 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      # Extract base64-encoded sha256 hashes from goreleaser's
+      # artifacts manifest. slsa-github-generator's generator-generic
+      # workflow ingests this list.
+      - name: Compute artifact hashes for SLSA
+        id: hashes
+        run: |
+          hashes=$(jq -r '.[] | select(.type=="Archive") | "\(.extra.Checksum | sub("sha256:"; "")) \(.name)"' dist/artifacts.json \
+            | sha256sum | awk '{print $1}' \
+            && jq -r '.[] | select(.type=="Archive") | "\(.extra.Checksum | sub("sha256:"; ""))  \(.name)"' dist/artifacts.json \
+                 | base64 -w0)
+          # Use the second value (base64 of "<hex>  <name>" lines) as
+          # the SLSA generator input.
+          slsa_hashes=$(jq -r '.[] | select(.type=="Archive") | "\(.extra.Checksum | sub("sha256:"; ""))  \(.name)"' dist/artifacts.json \
+                          | base64 -w0)
+          echo "hashes=$slsa_hashes" >> "$GITHUB_OUTPUT"
+
+      # GitHub-native artifact attestation alongside cosign signatures
+      # (gives `gh attestation verify` UX without requiring cosign on
+      # the verifier side).
+      - name: Attest release archives
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: 'dist/*.tar.gz,dist/*.zip'
+
+  # SLSA Level 3 build provenance for archives. Runs as a separate
+  # reusable workflow that re-signs the artifacts against the SLSA
+  # spec; provenance .intoto.jsonl is uploaded to the GitHub release.
+  slsa-provenance:
+    name: SLSA build provenance
+    needs: [goreleaser]
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: "${{ needs.goreleaser.outputs.hashes }}"
+      upload-assets: true

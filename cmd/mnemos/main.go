@@ -192,6 +192,8 @@ func main() {
 		handleEntities(args, flags)
 	case "extract-entities":
 		handleExtractEntities(args, flags)
+	case "claim":
+		handleClaim(args, flags)
 	case "action":
 		handleAction(args, flags)
 	case "outcome":

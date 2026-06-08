@@ -27,6 +27,7 @@ jobs:
     permissions:
       contents: read
       security-events: write
+      pull-requests: write   # shared security job posts nox annotations on PRs
     secrets: inherit
     with:
       # mnemos enforces coverctl check already; pure-Go core runs fine on ubuntu.

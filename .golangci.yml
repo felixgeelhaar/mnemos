@@ -1,15 +1,25 @@
 version: "2"
 
 run:
-  timeout: 2m
+  timeout: 5m
 
 linters:
+  # Org engineering bar (klarlabs-studio golangci.reference.yml) merged with
+  # mnemos-specific opt-ins. gocritic + gosec are part of the shared gate and
+  # must stay enabled. revive is a repo-specific opt-in (exported-symbol docs).
+  default: standard
   enable:
     - errcheck
-    - gocritic
-    - gosec
-    - revive
     - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - unconvert
+    - unparam
+    - gocritic     # org engineering bar — do not drop
+    - gosec
+    - revive       # repo-specific: enforce exported-symbol documentation
 
   settings:
     revive:
@@ -38,8 +48,13 @@ linters:
 
   exclusions:
     rules:
-      # Ignore gosec in test files (test handlers legitimately ignore encode errors)
+      # Tests legitimately ignore encode errors (test handlers) and use
+      # math/rand for deterministic fixtures. gosec does not apply to test code.
       - linters: [gosec]
+        path: _test\.go
+      # Test helpers keep constant-valued params and symmetric return
+      # values for readability and future fixtures; unparam is noise here.
+      - linters: [unparam]
         path: _test\.go
       # Ignore gosec inline nolint directives
       - linters: [gosec]
@@ -48,3 +63,12 @@ linters:
         text: "G304"
     paths:
       - data/eval
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
